@@ -104,12 +104,45 @@ pub fn kragbalken(order: Order, cells: [usize; 3]) -> Result<Vec<Check>> {
     ])
 }
 
-/// Alle Referenzfälle, die bestanden werden müssen.
+/// Zugstab mit Mittelbohrung (STEP-Geometrie, Gmsh-Netz), Kerbspannung nach Peterson:
+/// σmax = Kt · F / ((W − d) · t),  Kt = 3 − 3,14·(d/W) + 3,667·(d/W)² − 1,527·(d/W)³
+pub fn lochplatte(step: &std::path::Path) -> Result<Vec<Check>> {
+    let (l, w, t, d, f): (f64, f64, f64, f64, f64) = (200.0, 50.0, 5.0, 10.0, 2000.0);
+    let opts = crate::gmsh::MeshOptions { size: Some(2.5), curvature_points: 48, ..Default::default() };
+    let model = Model::new(crate::gmsh::mesh_step(step, &opts)?, Material::steel())
+        .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
+        .group("z0", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("ende", Selection::Plane { axis: Axis::X, value: l })
+        .support("x0", Fix { x: Some(0.0), y: Some(0.0), z: None })
+        .support("z0", Fix::only(Axis::Z))
+        .load(Load::Force { group: "ende".into(), force: [f, 0.0, 0.0] });
+    let res = solve(&model)?;
+    let r = d / w;
+    let kt = 3.0 - 3.14 * r + 3.667 * r * r - 1.527 * r.powi(3);
+    // Die Formel gilt für den ebenen Spannungszustand → Mittelwert über die Dicke am Lochrand.
+    // (Über die Dicke schwankt σx im 3D-Modell um einige Prozent – echter 3D-Effekt.)
+    let tol = 0.01 * d;
+    let edge = model.mesh.nodes.iter().zip(&res.stress).filter(|(p, _)| {
+        (p[0] - l / 2.0).abs() < tol && ((p[1] - (w - d) / 2.0).abs() < tol || (p[1] - (w + d) / 2.0).abs() < tol)
+    });
+    let sxx_edge = mean(edge.map(|(_, s)| s[0]));
+    let name = format!("Lochplatte d/W = {r} (STEP, Gmsh, {} Elemente)", model.mesh.n_elems());
+    Ok(vec![
+        check(&name, "Kerbspannung σx am Lochrand, Mittel über Dicke [MPa]", sxx_edge, kt * f / ((w - d) * t), 0.02),
+        check(&name, "Lagerkraft Fx [N]", -res.total_reaction[0], f, 1e-6),
+    ])
+}
+
+/// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
     v.extend(zugstab(Order::Quadratic)?);
     v.extend(kragbalken(Order::Quadratic, [20, 2, 2])?);
     v.extend(kragbalken(Order::Quadratic, [40, 2, 4])?);
+    let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/lochplatte.step");
+    if crate::gmsh::find_gmsh().is_some() && step.exists() {
+        v.extend(lochplatte(&step)?);
+    }
     Ok(v)
 }
 

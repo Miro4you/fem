@@ -26,8 +26,10 @@ pub enum Selection {
     Plane { axis: Axis, value: f64 },
     /// Achsparalleler Quader
     Box { min: [f64; 3], max: [f64; 3] },
-    /// Explizite Flächenindizes (aus `Mesh::boundary_faces`), z. B. per Klick in der Oberfläche
+    /// Explizite Flächenindizes (aus `Mesh::boundary_faces`)
     Faces(Vec<usize>),
+    /// CAD-Flächen (Gmsh-Flächennummern), z. B. per Klick in der Oberfläche
+    Surfaces(Vec<i32>),
 }
 
 impl Selection {
@@ -36,10 +38,16 @@ impl Selection {
         let inside = |p: &[f64; 3]| match self {
             Selection::Plane { axis, value } => (p[axis.index()] - value).abs() <= tol,
             Selection::Box { min, max } => (0..3).all(|k| p[k] >= min[k] - tol && p[k] <= max[k] + tol),
-            Selection::Faces(_) => unreachable!(),
+            Selection::Faces(_) | Selection::Surfaces(_) => unreachable!(),
         };
         match self {
             Selection::Faces(ids) => ids.iter().copied().filter(|&i| i < faces.len()).collect(),
+            Selection::Surfaces(tags) => faces
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| f.tag.is_some_and(|t| tags.contains(&t)))
+                .map(|(i, _)| i)
+                .collect(),
             _ => faces
                 .iter()
                 .enumerate()

@@ -5,6 +5,7 @@
 
 pub mod element;
 pub mod generate;
+pub mod gmsh;
 pub mod material;
 pub mod mesh;
 pub mod model;
@@ -29,6 +30,8 @@ pub enum FemError {
     EmptyGroup(String),
     #[error("Modell ist nicht ausreichend gelagert – das Bauteil kann sich als Ganzes bewegen oder drehen")]
     Underconstrained,
+    #[error("Gmsh: {0}")]
+    Gmsh(String),
     #[error("Ungültige Eingabe: {0}")]
     Input(String),
 }

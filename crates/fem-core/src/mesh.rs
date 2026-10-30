@@ -19,6 +19,8 @@ pub struct Mesh {
     pub npe: usize,
     /// Konnektivität, flach: Element e = conn[e*npe .. (e+1)*npe]
     pub conn: Vec<usize>,
+    /// CAD-Fläche je Randdreieck (sortierte Eckknoten → Flächennummer), leer bei eingebauten Netzen
+    pub surface_tags: HashMap<[usize; 3], i32>,
 }
 
 /// Randfläche eines Elements (3 oder 6 Knoten, Normale nach außen).
@@ -26,6 +28,8 @@ pub struct Mesh {
 pub struct Face {
     pub elem: usize,
     pub nodes: Vec<usize>,
+    /// Nummer der CAD-Fläche (aus Gmsh), falls bekannt
+    pub tag: Option<i32>,
 }
 
 impl Mesh {
@@ -105,7 +109,7 @@ impl Mesh {
                 conn.push(id);
             }
         }
-        Mesh { nodes, npe: 10, conn }
+        Mesh { nodes, npe: 10, conn, surface_tags: self.surface_tags.clone() }
     }
 
     /// Alle Außenflächen (Flächen, die nur zu einem Element gehören).
@@ -134,7 +138,7 @@ impl Mesh {
                         nodes.push(c[edge_index(lf[k], lf[(k + 1) % 3])]);
                     }
                 }
-                Face { elem: e, nodes }
+                Face { elem: e, nodes, tag: self.surface_tags.get(&key).copied() }
             })
             .collect();
         // deterministische Reihenfolge (HashMap ist ungeordnet)
