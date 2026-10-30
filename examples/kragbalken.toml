@@ -1,0 +1,30 @@
+# Kragbalken 200 × 10 × 10 mm aus S235, links eingespannt, rechts 100 N nach unten.
+# Einheiten: mm, N, N/mm² (MPa)
+# Handrechnung: w = F·l³/(3·E·I) ≈ 1,52 mm,  σmax (Einspannung) = F·l/W = 120 MPa
+
+[mesh]
+type = "box"
+size = [200.0, 10.0, 10.0]
+cells = [40, 2, 4]
+order = 2            # 1 = TET4 (linear), 2 = TET10 (quadratisch, empfohlen)
+
+[material]
+name = "S235"
+E = 210000.0
+nu = 0.3
+yield = 235.0
+
+[[group]]
+name = "einspannung"
+plane = { axis = "x", value = 0.0 }
+
+[[group]]
+name = "ende"
+plane = { axis = "x", value = 200.0 }
+
+[[support]]
+group = "einspannung"          # ohne fix = alle Richtungen fest
+
+[[load]]
+group = "ende"
+force = [0.0, 0.0, -100.0]     # Gesamtkraft in N, gleichmäßig auf die Fläche verteilt

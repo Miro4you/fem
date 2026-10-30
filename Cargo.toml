@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/fem-core", "crates/fem-cli"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[profile.release]
+debug = false
+
+[profile.dev.package."*"]
+opt-level = 3

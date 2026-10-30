@@ -1,0 +1,138 @@
+//! Validierung gegen Lehrbuchlösungen. Läuft als Test (`cargo test`) und
+//! über die Kommandozeile (`projekt-fem validieren`).
+
+use crate::generate::box_mesh;
+use crate::model::{Axis, Fix, Load, Model, Selection};
+use crate::{solve, Material, Order, Result};
+
+#[derive(Debug, Clone)]
+pub struct Check {
+    pub case: String,
+    pub quantity: String,
+    pub fem: f64,
+    pub theory: f64,
+    /// zulässige relative Abweichung
+    pub tolerance: f64,
+}
+
+impl Check {
+    pub fn rel_error(&self) -> f64 {
+        (self.fem - self.theory) / self.theory.abs().max(1e-300)
+    }
+
+    pub fn passed(&self) -> bool {
+        self.rel_error().abs() <= self.tolerance
+    }
+}
+
+fn mean(it: impl Iterator<Item = f64>) -> f64 {
+    let (s, n) = it.fold((0.0, 0usize), |(s, n), v| (s + v, n + 1));
+    s / n as f64
+}
+
+/// Zugstab mit Symmetrielagerung: einachsiger Spannungszustand, exakt lösbar.
+/// σ = F/A, Δl = F·l/(E·A), Querkontraktion Δb = −ν·ε·b
+pub fn zugstab(order: Order) -> Result<Vec<Check>> {
+    let (l, b, h, f) = (100.0, 10.0, 10.0, 1000.0);
+    let mat = Material::steel();
+    let model = Model::new(box_mesh([l, b, h], [10, 2, 2], order)?, mat.clone())
+        .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
+        .group("y0", Selection::Plane { axis: Axis::Y, value: 0.0 })
+        .group("z0", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("ende", Selection::Plane { axis: Axis::X, value: l })
+        .support("x0", Fix::only(Axis::X))
+        .support("y0", Fix::only(Axis::Y))
+        .support("z0", Fix::only(Axis::Z))
+        .load(Load::Force { group: "ende".into(), force: [f, 0.0, 0.0] });
+    let res = solve(&model)?;
+    let m = &model.mesh;
+    let tol = m.tolerance();
+    let a = b * h;
+    let eps = f / (a * mat.e);
+    let name = format!("Zugstab ({})", order_name(order));
+    let sxx_max = res.stress.iter().map(|s| s[0]).fold(f64::NEG_INFINITY, f64::max);
+    let sxx_min = res.stress.iter().map(|s| s[0]).fold(f64::INFINITY, f64::min);
+    Ok(vec![
+        check(&name, "σx max [MPa]", sxx_max, f / a, 1e-6),
+        check(&name, "σx min [MPa]", sxx_min, f / a, 1e-6),
+        check(
+            &name,
+            "Δl [mm]",
+            mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[0] - l).abs() < tol).map(|(_, u)| u[0])),
+            f * l / (mat.e * a),
+            1e-6,
+        ),
+        check(
+            &name,
+            "Δb Querkontraktion [mm]",
+            mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[1] - b).abs() < tol).map(|(_, u)| u[1])),
+            -mat.nu * eps * b,
+            1e-6,
+        ),
+        check(&name, "Lagerkraft Fx [N]", -res.reactions[0].1[0], f, 1e-6),
+    ])
+}
+
+/// Kragbalken mit Einzellast am Ende (Timoshenko-Balken als Referenz).
+/// w = F·l³/(3·E·I) + F·l/(κ·G·A), σ(l/2) = F·(l/2)/W
+pub fn kragbalken(order: Order, cells: [usize; 3]) -> Result<Vec<Check>> {
+    let (l, b, h, f) = (200.0, 10.0, 10.0, 100.0);
+    let mat = Material::steel();
+    let model = Model::new(box_mesh([l, b, h], cells, order)?, mat.clone())
+        .group("einspannung", Selection::Plane { axis: Axis::X, value: 0.0 })
+        .group("ende", Selection::Plane { axis: Axis::X, value: l })
+        .support("einspannung", Fix::all())
+        .load(Load::Force { group: "ende".into(), force: [0.0, 0.0, -f] });
+    let res = solve(&model)?;
+    let m = &model.mesh;
+    let tol = m.tolerance();
+    let i = b * h.powi(3) / 12.0;
+    let w_theory = f * l.powi(3) / (3.0 * mat.e * i) + f * l / (5.0 / 6.0 * mat.shear_modulus() * b * h);
+    let w_fem = -mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[0] - l).abs() < tol).map(|(_, u)| u[2]));
+    let sigma_fem = mean(
+        m.nodes
+            .iter()
+            .zip(&res.stress)
+            .filter(|(p, _)| (p[0] - l / 2.0).abs() < tol && (p[2] - h).abs() < tol)
+            .map(|(_, s)| s[0]),
+    );
+    let name = format!("Kragbalken ({}, {}×{}×{} Zellen)", order_name(order), cells[0], cells[1], cells[2]);
+    Ok(vec![
+        check(&name, "Durchbiegung Ende [mm]", w_fem, w_theory, 0.02),
+        check(&name, "Biegespannung σx bei l/2 oben [MPa]", sigma_fem, f * (l / 2.0) / (b * h * h / 6.0), 0.03),
+        check(&name, "Lagerkraft Fz [N]", res.reactions[0].1[2], f, 1e-6),
+    ])
+}
+
+/// Alle Referenzfälle, die bestanden werden müssen.
+pub fn all() -> Result<Vec<Check>> {
+    let mut v = zugstab(Order::Linear)?;
+    v.extend(zugstab(Order::Quadratic)?);
+    v.extend(kragbalken(Order::Quadratic, [20, 2, 2])?);
+    v.extend(kragbalken(Order::Quadratic, [40, 2, 4])?);
+    Ok(v)
+}
+
+fn check(case: &str, quantity: &str, fem: f64, theory: f64, tolerance: f64) -> Check {
+    Check { case: case.into(), quantity: quantity.into(), fem, theory, tolerance }
+}
+
+fn order_name(o: Order) -> &'static str {
+    match o {
+        Order::Linear => "TET4",
+        Order::Quadratic => "TET10",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn referenzfaelle() {
+        let checks = super::all().unwrap();
+        let failed: Vec<_> = checks.iter().filter(|c| !c.passed()).collect();
+        for c in &checks {
+            println!("{:45} {:38} FEM {:>12.6} Theorie {:>12.6} ({:+.3} %)", c.case, c.quantity, c.fem, c.theory, 100.0 * c.rel_error());
+        }
+        assert!(failed.is_empty(), "nicht bestanden: {failed:#?}");
+    }
+}
