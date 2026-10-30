@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3340"/>
+      <stop offset="1" stop-color="#151a21"/>
+    </linearGradient>
+    <linearGradient id="st" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff4d2e"/>
+      <stop offset="0.35" stop-color="#ffd02e"/>
+      <stop offset="0.65" stop-color="#3fd17a"/>
+      <stop offset="1" stop-color="#2e7bff"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <!-- Kragbalken, verformt, in FEM-Farben -->
+  <path d="M220 330 Q520 360 800 520 L800 640 Q520 480 220 450 Z" fill="url(#st)"/>
+  <g stroke="#0e1116" stroke-width="10" stroke-opacity="0.55" fill="none">
+    <path d="M370 342 L370 462 M520 370 L520 492 M660 425 L660 552 M220 390 Q520 420 800 580"/>
+    <path d="M220 330 L370 462 M370 342 L520 492 M520 370 L660 552 M660 425 L800 640"/>
+  </g>
+  <rect x="170" y="270" width="56" height="240" rx="10" fill="#c9d1db"/>
+  <path d="M800 690 L800 820 M760 780 L800 830 L840 780" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

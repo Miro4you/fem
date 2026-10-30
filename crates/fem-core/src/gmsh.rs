@@ -57,7 +57,8 @@ pub fn mesh_step(step: &Path, opts: &MeshOptions) -> Result<Mesh> {
 
     let size = match opts.size {
         Some(h) if h > 0.0 => format!("Mesh.MeshSizeMax = {h};"),
-        _ => "bb() = BoundingBox Volume{:};\n\
+        _ => "v() = Volume \"*\";\n\
+              bb() = BoundingBox Volume{v()};\n\
               Mesh.MeshSizeMax = Sqrt((bb(3)-bb(0))^2 + (bb(4)-bb(1))^2 + (bb(5)-bb(2))^2) / 25;"
             .into(),
     };
@@ -95,12 +96,11 @@ Save "{msh}";
     let text = std::fs::read_to_string(&msh);
     let _ = std::fs::remove_dir_all(&dir);
     let log = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    // Gmsh beendet sich auch bei Skriptfehlern erfolgreich → Fehlerzeilen selbst prüfen
+    let errors: Vec<&str> = log.lines().filter(|l| l.trim_start().starts_with("Error")).collect();
     let text = match text {
-        Ok(t) if out.status.success() => t,
-        _ => {
-            let errors: Vec<&str> = log.lines().filter(|l| l.contains("Error")).collect();
-            return Err(FemError::Gmsh(if errors.is_empty() { log } else { errors.join("\n") }));
-        }
+        Ok(t) if out.status.success() && errors.is_empty() => t,
+        _ => return Err(FemError::Gmsh(if errors.is_empty() { log } else { errors.join("\n") })),
     };
     read_msh(&text)
 }
@@ -222,6 +222,9 @@ mod tests {
             eprintln!("Gmsh fehlt – Test übersprungen");
             return;
         }
+        // automatische Elementgröße muss funktionieren
+        let auto = mesh_step(&step("winkel.step"), &MeshOptions::default()).unwrap();
+        assert!(auto.n_elems() > 100);
         let m = mesh_step(&step("winkel.step"), &MeshOptions { size: Some(6.0), ..Default::default() }).unwrap();
         assert_eq!(m.npe, 10);
         // Seitenmittenknoten liegen (nahezu) mittig auf der richtigen Kante

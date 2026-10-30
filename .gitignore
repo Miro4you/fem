@@ -3,3 +3,5 @@ node_modules/
 dist/
 *.vtu
 *.msh
+app/dist/
+app/src-tauri/gen/
