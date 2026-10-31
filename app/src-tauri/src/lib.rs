@@ -11,6 +11,8 @@ use fem_core::region::{fit_cylinder, Cylinder};
 use fem_core::{Fix, Load, Material, Mesh, Model, Order, Region, Results, Selection, SolverKind};
 use serde::{Deserialize, Serialize};
 
+pub mod server;
+
 #[derive(Default)]
 pub struct Inner {
     mesh: Option<Mesh>,
@@ -373,14 +375,84 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
     }
 }
 
-#[tauri::command]
-fn export_vtu(state: tauri::State<'_, AppState>, path: String) -> Result<(), String> {
+/// Ergebnis als `.vtu` schreiben (Datei oder Download im Heimnetz)
+pub fn write_vtu_impl(state: &AppState, w: &mut impl std::io::Write) -> Result<(), String> {
     let s = state.lock().unwrap();
     let (Some(model), Some(res)) = (&s.model, &s.results) else {
         return Err("Noch kein Ergebnis vorhanden".into());
     };
+    fem_core::vtk::write_vtu(w, &model.mesh, res).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn export_vtu(state: tauri::State<'_, AppState>, path: String) -> Result<(), String> {
     let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-    fem_core::vtk::write_vtu(&mut std::io::BufWriter::new(file), &model.mesh, res).map_err(|e| e.to_string())
+    write_vtu_impl(state.inner(), &mut std::io::BufWriter::new(file))
+}
+
+// --- Freigabe im Heimnetz ------------------------------------------------------------
+
+#[derive(Default)]
+struct ServerHandle(Mutex<Option<server::Running>>);
+
+#[derive(Serialize)]
+struct ServerStatus {
+    running: bool,
+    #[serde(flatten)]
+    info: server::ServerInfo,
+}
+
+fn server_status_impl(handle: &ServerHandle) -> ServerStatus {
+    ServerStatus { running: handle.0.lock().unwrap().is_some(), info: server::info(&server::ServerConfig::load()) }
+}
+
+#[tauri::command]
+fn server_status(handle: tauri::State<'_, ServerHandle>) -> ServerStatus {
+    server_status_impl(&handle)
+}
+
+#[tauri::command]
+async fn server_start(handle: tauri::State<'_, ServerHandle>) -> Result<ServerStatus, String> {
+    if handle.0.lock().unwrap().is_none() {
+        let cfg = server::ServerConfig::load();
+        cfg.save()?;
+        let running = server::start(&cfg).await?;
+        *handle.0.lock().unwrap() = Some(running);
+    }
+    Ok(server_status_impl(&handle))
+}
+
+#[tauri::command]
+fn server_stop(handle: tauri::State<'_, ServerHandle>) -> ServerStatus {
+    if let Some(r) = handle.0.lock().unwrap().take() {
+        r.stop();
+    }
+    server_status_impl(&handle)
+}
+
+/// Einstellungen ändern: automatisch freigeben, neuer Schlüssel (alte Links werden ungültig)
+#[tauri::command]
+async fn server_configure(
+    handle: tauri::State<'_, ServerHandle>,
+    autostart: Option<bool>,
+    new_key: Option<bool>,
+) -> Result<ServerStatus, String> {
+    let mut cfg = server::ServerConfig::load();
+    if let Some(a) = autostart {
+        cfg.autostart = a;
+    }
+    if new_key == Some(true) {
+        cfg.key = server::new_key();
+    }
+    cfg.save()?;
+    // laufenden Server mit neuem Schlüssel neu starten
+    let running = handle.0.lock().unwrap().take();
+    if let Some(r) = running {
+        r.stop();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        *handle.0.lock().unwrap() = Some(server::start(&cfg).await?);
+    }
+    Ok(server_status_impl(&handle))
 }
 
 #[tauri::command]
@@ -398,7 +470,33 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![gmsh_path, open_step, solve, export_vtu, save_text, load_text])
+        .manage(ServerHandle::default())
+        .setup(|app| {
+            use tauri::Manager;
+            if server::ServerConfig::load().autostart {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let cfg = server::ServerConfig::load();
+                    match server::start(&cfg).await {
+                        Ok(r) => *handle.state::<ServerHandle>().0.lock().unwrap() = Some(r),
+                        Err(e) => eprintln!("Heimnetz-Freigabe: {e}"),
+                    }
+                });
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            gmsh_path,
+            open_step,
+            solve,
+            export_vtu,
+            save_text,
+            load_text,
+            server_status,
+            server_start,
+            server_stop,
+            server_configure
+        ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Start von Projekt-FEM");
 }

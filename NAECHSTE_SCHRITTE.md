@@ -37,6 +37,9 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
   Hebel 0,6 mm (1,3 Mio. Unbekannte) jetzt 70 s / 3,4 GB statt Absturz. Mögliche Ergänzung: Fortschrittsanzeige
   in der App während langer Rechnungen.
 - ✅ Lagerlast (Bolzen drückt nur auf eine Bohrungshälfte, cos-verteilt) + Moment als Last
+- ✅ Heimnetz: Desktop-App gibt die Oberfläche als Webseite frei (Knopf „Heimnetz“), gerechnet wird auf dem
+  starken PC; alternativ `projekt-fem-app --server` ohne Fenster → Felix: vom Laptop/Arbeits-PC testen
+  (Arbeits-PC nur, wenn er im selben Netz ist bzw. per VPN – nicht ins Internet freigeben)
 - ✅ Wirkbereich: Last/Lager nur auf einem gezeichneten Kreis/Rechteck oder Wellen-/Bohrungsabschnitt
   → Felix: bitte in der App ausprobieren (Last anlegen → „Wirkbereich“ wählen → im Bild aufziehen)
 - Idee: Netz im Wirkbereich automatisch verfeinern (Gmsh-Größenfeld), damit kleine Bereiche scharf abgebildet werden

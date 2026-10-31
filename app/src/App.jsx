@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FolderOpen, Save, FileUp, Play, Plus, Trash2, MousePointerClick, Anchor, ArrowDownToLine,
-  TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine,
+  TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine, Wifi, Copy,
 } from 'lucide-react'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
@@ -119,22 +119,18 @@ export default function App() {
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
     if (!stepPath) return
-    const base = stepPath.replace(/\.(step|stp)$/i, '')
-    const p = await api.pickProjectSave(base + '.fem.json')
-    if (!p) return
     const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads }
     try {
-      await api.saveText(p, JSON.stringify(data, null, 2))
+      await api.saveProject(stepPath, data)
     } catch (e) {
       setError(String(e))
     }
   }
 
   async function onLoadProject() {
-    const p = await api.pickProject()
-    if (!p) return
     try {
-      const d = JSON.parse(await api.loadText(p))
+      const d = await api.loadProject()
+      if (!d) return
       if (d.format !== 'projekt-fem') throw new Error('Keine Projekt-FEM-Datei')
       const m = await loadGeometry(d.step, d.meshSize, true)
       if (!m) return
@@ -342,8 +338,7 @@ export default function App() {
   }
 
   async function onExportVtu() {
-    const p = await api.pickVtuSave((stepPath ?? 'ergebnis').replace(/\.(step|stp)$/i, '') + '.vtu')
-    if (p) api.exportVtu(p).catch((e) => setError(String(e)))
+    api.exportVtu(stepPath).catch((e) => setError(String(e)))
   }
 
   // --- Ergebnisanzeige ----------------------------------------------------------------
@@ -403,6 +398,13 @@ export default function App() {
           </button>
         </div>
         <div className="actions">
+          {api.isDesktop ? (
+            <ShareButton onError={(e) => setError(String(e))} />
+          ) : (
+            <span className="remote-badge" title="Die Rechnung läuft auf dem Rechner, auf dem Projekt-FEM die Heimnetz-Freigabe hat">
+              <Wifi size={14} /> Rechnet auf {window.location.hostname}
+            </span>
+          )}
           <button className="btn ghost" onClick={onLoadProject}>
             <FolderOpen size={15} /> Projekt öffnen
           </button>
@@ -860,6 +862,72 @@ function NumField({ label, unit, value, onChange }) {
         {unit && <em>{unit}</em>}
       </div>
     </label>
+  )
+}
+
+// Heimnetz-Freigabe: Oberfläche für andere Rechner im Browser bereitstellen
+function ShareButton({ onError }) {
+  const [open, setOpen] = useState(false)
+  const [st, setSt] = useState(null)
+  const [copied, setCopied] = useState(null)
+  useEffect(() => {
+    api.serverStatus().then(setSt).catch(() => {})
+  }, [open])
+  const run = (p) => p.then(setSt).catch(onError)
+  const copy = (u) => {
+    navigator.clipboard?.writeText(u)
+    setCopied(u)
+    setTimeout(() => setCopied(null), 1500)
+  }
+  return (
+    <div className="share">
+      <button className={'btn ghost' + (st?.running ? ' share-on' : '')} onClick={() => setOpen(!open)}>
+        <Wifi size={15} /> Heimnetz{st?.running ? ': an' : ''}
+      </button>
+      {open && st && (
+        <div className="share-panel">
+          <div className="item-head">
+            <strong>Im Heimnetz freigeben</strong>
+            <span className="spacer" />
+            <button className="icon-btn" onClick={() => setOpen(false)}>
+              <X size={14} />
+            </button>
+          </div>
+          <p className="hint">
+            Andere Rechner (Laptop, Arbeits-PC) öffnen Projekt-FEM dann im Browser. Gerechnet wird auf diesem Rechner. Der Link
+            enthält einen Zugangsschlüssel – nur an eigene Geräte geben.
+          </p>
+          <label className="check">
+            <input type="checkbox" checked={st.running} onChange={(e) => run(e.target.checked ? api.serverStart() : api.serverStop())} />
+            Freigabe aktiv (Port {st.port})
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={st.autostart} onChange={(e) => run(api.serverConfigure({ autostart: e.target.checked }))} />
+            Beim Start von Projekt-FEM automatisch freigeben
+          </label>
+          {st.running && (
+            <>
+              <div className="share-urls">
+                {st.urls.map((u) => (
+                  <div key={u} className="share-url">
+                    <code>{u}</code>
+                    <button className="icon-btn" title="Kopieren" onClick={() => copy(u)}>
+                      {copied === u ? <Check size={14} /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p className="hint">
+                Der erste Link funktioniert meist überall im Heimnetz. Falls nicht: Firewall auf diesem Rechner für Port {st.port} öffnen.
+              </p>
+            </>
+          )}
+          <button className="link" onClick={() => window.confirm('Neuer Schlüssel – bisherige Links und Lesezeichen funktionieren dann nicht mehr. Fortfahren?') && run(api.serverConfigure({ newKey: true }))}>
+            Neuen Zugangsschlüssel erzeugen
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

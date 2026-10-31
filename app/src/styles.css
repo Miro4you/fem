@@ -213,3 +213,16 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
   background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); white-space: pre-wrap;
 }
 .toast.error svg:first-child { color: var(--bad); flex-shrink: 0; margin-top: 1px; }
+
+/* Heimnetz-Freigabe */
+.share { position: relative; }
+.share-on { color: var(--good); }
+.share-panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 420px; max-width: calc(100vw - 32px);
+  display: flex; flex-direction: column; gap: 10px; padding: 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+.share-urls { display: flex; flex-direction: column; gap: 6px; }
+.share-url { display: flex; align-items: center; gap: 6px; }
+.share-url code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 7px; }
+.remote-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--good); padding: 0 8px; }

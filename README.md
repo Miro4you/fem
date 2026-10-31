@@ -33,6 +33,23 @@ exakt; wie scharf der Rand abgebildet wird, hängt vom Netz ab (Elemente deutlic
 - Export als `.vtu` (anschauen z. B. mit [ParaView](https://www.paraview.org/))
 - Eingebauter Quader-Vernetzer (beliebige Geometrie über STEP/Gmsh kommt in Phase 2)
 
+## Im Heimnetz nutzen (Laptop, Arbeits-PC)
+
+Der starke Rechner rechnet, andere Geräte bedienen Projekt-FEM im Browser – ohne Installation.
+
+- **Desktop-App:** oben rechts **„Heimnetz“** → „Freigabe aktiv“. Den angezeigten Link (z. B.
+  `http://192.168.178.42:8790/#k=…`) auf dem anderen Gerät im Browser öffnen bzw. als Lesezeichen speichern.
+  Optional „beim Start automatisch freigeben“.
+- **Ohne Fenster** (z. B. als Dienst): `projekt-fem-app --server [--port 8790]` – gibt die Links aus.
+
+Im Browser werden STEP-Dateien hochgeladen; Projekte und `.vtu` kommen als Download. Im Browser gespeicherte Projekte
+enthalten die STEP-Datei, gehen also auf jedem Gerät wieder auf. Jeder Browser-Tab hat sein eigenes Modell.
+
+Sicherheit: Zugriff nur mit dem Schlüssel im Link (bleibt gleich, bis man einen neuen erzeugt; gespeichert in
+`~/.config/projekt-fem/server.json`). Verbindung unverschlüsselt (http) – nur im eigenen Heimnetz verwenden, nicht
+ins Internet freigeben. Falls der Link nicht erreichbar ist: Firewall des Rechners für Port 8790 öffnen
+(macOS fragt beim ersten Start nach).
+
 ## Bauen und benutzen
 
 Voraussetzungen: Rust, Node.js, **Gmsh** (`uv tool install gmsh` – Linux und Mac; oder `brew install gmsh`).
@@ -47,6 +64,7 @@ Unter Linux zusätzlich `webkit2gtk-4.1`.
 cd app && npm install
 npx tauri dev                    # Entwicklung
 npx tauri build --no-bundle      # → target/release/projekt-fem-app
+                                 #   (baut vorher die Oberfläche; sie wird für den Heimnetz-Server eingebettet)
 ```
 
 **Kommandozeile:**
