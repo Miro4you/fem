@@ -37,6 +37,9 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
   Hebel 0,6 mm (1,3 Mio. Unbekannte) jetzt 70 s / 3,4 GB statt Absturz. Mögliche Ergänzung: Fortschrittsanzeige
   in der App während langer Rechnungen.
 - ✅ Lagerlast (Bolzen drückt nur auf eine Bohrungshälfte, cos-verteilt) + Moment als Last
+- ✅ Rückmeldung Felix (1. Test): CAD-Drehen ohne Anschlag um den Punkt unter der Maus, Zoom zur Maus;
+  Auswahlfelder im dunklen Modus lesbar; Last als Betrag + Richtung (Achsknöpfe, Winkel, Fläche anklicken);
+  Schieberegler für die Netzgröße mit Schätzung der Elementzahl
 - ✅ Heimnetz: Desktop-App gibt die Oberfläche als Webseite frei (Knopf „Heimnetz“), gerechnet wird auf dem
   starken PC; alternativ `projekt-fem-app --server` ohne Fenster → Felix: vom Laptop/Arbeits-PC testen
   (Arbeits-PC nur, wenn er im selben Netz ist bzw. per VPN – nicht ins Internet freigeben)

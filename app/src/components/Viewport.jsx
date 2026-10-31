@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { CadControls } from './CadControls.js'
 import { Box, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react'
 import { bandTexture, BANDS } from '../colormap.js'
 import { regionGrid } from '../region.js'
@@ -100,10 +100,33 @@ export default function Viewport({
       state.justDrew = true
     })
 
-    const controls = new OrbitControls(camera, renderer.domElement)
-    controls.enableDamping = true
-    controls.dampingFactor = 0.15
-    controls.screenSpacePanning = true
+    // Drehpunkt/Zoomziel: Punkt des Bauteils unter der Maus
+    const pickRay = new THREE.Raycaster()
+    const pickPoint = (cx, cy) => {
+      if (!state.surf) return null
+      const r = renderer.domElement.getBoundingClientRect()
+      pickRay.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), camera)
+      return pickRay.intersectObject(state.surf, false)[0]?.point ?? null
+    }
+    const controls = new CadControls(camera, renderer.domElement, pickPoint)
+    // Drehpunkt beim Drehen kurz anzeigen
+    const pivotMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0x1f6feb, depthTest: false, transparent: true, opacity: 0.85 }),
+    )
+    pivotMarker.renderOrder = 20
+    pivotMarker.visible = false
+    scene.add(pivotMarker)
+    controls.addEventListener('rotatestart', (e) => {
+      pivotMarker.position.copy(e.pivot)
+      pivotMarker.scale.setScalar(camera.position.distanceTo(e.pivot) * 0.006)
+      pivotMarker.visible = true
+      state.dirty = true
+    })
+    controls.addEventListener('rotateend', () => {
+      pivotMarker.visible = false
+      state.dirty = true
+    })
 
     const state = {
       renderer, scene, camera, controls, dirty: true, raf: 0,
@@ -129,7 +152,6 @@ export default function Viewport({
     controls.addEventListener('change', () => (state.dirty = true))
     const loop = () => {
       state.raf = requestAnimationFrame(loop)
-      controls.update()
       if (state.dirty) {
         state.dirty = false
         renderer.render(scene, camera)
@@ -380,14 +402,8 @@ export default function Viewport({
     const radius = new THREE.Vector3(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]).length() / 2
     const dist = (radius / Math.sin(THREE.MathUtils.degToRad(s.camera.fov / 2))) * 1.08
     const dir = new THREE.Vector3(...VIEWS[name].dir).normalize()
-    s.camera.position.copy(center).addScaledVector(dir, dist)
-    s.camera.up.set(0, 0, 1)
-    if (name === 'top') s.camera.up.set(0, 1, 0)
-    s.camera.near = dist / 100
-    s.camera.far = dist * 100
-    s.camera.updateProjectionMatrix()
-    s.controls.target.copy(center)
-    s.controls.update()
+    const up = name === 'top' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1)
+    s.controls.setView(center, dir, dist, up)
     s.dirty = true
   }
 
@@ -403,6 +419,7 @@ export default function Viewport({
           ))}
         </div>
       )}
+      {mesh && <div className="mouse-help">Links ziehen: drehen · Rechts/Mitte ziehen: verschieben · Rad: zoomen (zur Maus)</div>}
       {labels.filter((l) => l.visible).map((l, i) => (
         <div key={i} className="marker" style={{ left: l.x, top: l.y }}>
           <span className="marker-dot" />

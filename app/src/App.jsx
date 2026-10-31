@@ -51,6 +51,8 @@ export default function App() {
   const [active, setActive] = useState(null)
   // Bereich zeichnen: { type: 'support' | 'load', id, shape }
   const [drawing, setDrawing] = useState(null)
+  // Lastrichtung im Bild wählen: { id, key: 'force' | 'moment' }
+  const [dirPick, setDirPick] = useState(null)
   const [result, setResult] = useState(null)
   const [resultStale, setResultStale] = useState(false)
   const [view, setView] = useState('setup')
@@ -146,6 +148,25 @@ export default function App() {
   // --- Lager / Lasten ---------------------------------------------------------------
   const onPick = useCallback(
     (tag) => {
+      if (dirPick) {
+        const info = surfaceInfo.get(tag)
+        // ebene Fläche: Last drückt senkrecht auf die Fläche; Zylinder: entlang der Achse
+        const dir = info?.normal ? info.normal.map((v) => -v) : info?.cylinder?.axis
+        if (!dir) {
+          setError('Diese Fläche ist weder eben noch zylindrisch – bitte eine ebene Fläche oder eine Bohrung/Welle anklicken.')
+          return
+        }
+        setLoads((ls) =>
+          ls.map((x) => {
+            if (x.id !== dirPick.id) return x
+            const ui = dirUi(x[dirPick.key], x[dirPick.key + 'Ui'])
+            const next = { ...ui, ...anglesOf(dir), mag: currentMag(x[dirPick.key], ui) }
+            return { ...x, [dirPick.key + 'Ui']: next, [dirPick.key]: vectorOf(next) }
+          }),
+        )
+        setDirPick(null)
+        return
+      }
       if (!active) return
       const toggle = (items) =>
         items.map((it) =>
@@ -156,7 +177,7 @@ export default function App() {
       if (active.type === 'support') setSupports(toggle)
       else setLoads(toggle)
     },
-    [active],
+    [active, dirPick, surfaceInfo],
   )
 
   const surfaceTint = useCallback(
@@ -179,6 +200,7 @@ export default function App() {
 
   function startDrawing(type, item, shape) {
     setActive(null)
+    setDirPick(null)
     setDrawing({ type, id: item.id, shape })
   }
 
@@ -451,10 +473,14 @@ export default function App() {
                         <em>mm</em>
                       </div>
                     </label>
-                    <button className="btn" onClick={() => loadGeometry(stepPath, meshSize, true)}>
+                    <button
+                      className={'btn' + (Number(meshSize) !== Number(mesh.mesh_size.toPrecision(3)) ? ' primary' : '')}
+                      onClick={() => loadGeometry(stepPath, meshSize, true)}
+                    >
                       <Grid3x3 size={15} /> Neu vernetzen
                     </button>
                   </div>
+                  <MeshSlider mesh={mesh} diag={diag} value={meshSize} onChange={setMeshSize} />
                   <p className="hint">
                     {mesh.elements.toLocaleString('de-DE')} Elemente (TET10), {mesh.nodes.toLocaleString('de-DE')} Knoten. An Bohrungen und
                     Radien wird automatisch feiner vernetzt.
@@ -564,51 +590,44 @@ export default function App() {
                         </select>
                         {l.kind === 'moment' ? (
                           <>
-                            <div className="grid3">
-                              {['Mx', 'My', 'Mz'].map((lab, k) => (
-                                <NumField key={lab} label={lab} unit="N·m" value={l.moment[k]} onChange={(v) => upd({ moment: l.moment.map((f, j) => (j === k ? v : f)) })} />
-                              ))}
-                            </div>
-                            {cyl && (
-                              <button
-                                className="link"
-                                onClick={() => {
-                                  const mag = Math.hypot(...l.moment.map(Number)) || 100
-                                  upd({ moment: cyl.axis.map((v) => Number((v * mag).toPrecision(6))) })
-                                }}
-                              >
-                                Richtung: um die Wellenachse (Torsion)
-                              </button>
-                            )}
+                            <VectorInput
+                              item={l}
+                              field="moment"
+                              labels={['Mx', 'My', 'Mz']}
+                              unit="N·m"
+                              upd={upd}
+                              picking={dirPick?.id === l.id && dirPick.key === 'moment'}
+                              onPick={() => { setActive(null); setDrawing(null); setDirPick(dirPick ? null : { id: l.id, key: 'moment' }) }}
+                              presets={cyl ? [['um die Wellenachse (Torsion)', cyl.axis]] : []}
+                            />
                             <p className="hint">Wirkt um den Schwerpunkt des Bereichs, linear verteilt wie bei einem starren Anschlussteil. Drehsinn nach der rechten Hand.</p>
                           </>
                         ) : l.kind === 'bearing' ? (
                           <>
-                            <div className="grid3">
-                              {['Fx', 'Fy', 'Fz'].map((lab, k) => (
-                                <NumField key={lab} label={lab} unit="N" value={l.force[k]} onChange={(v) => upd({ force: l.force.map((f, j) => (j === k ? v : f)) })} />
-                              ))}
-                            </div>
+                            <VectorInput
+                              item={l}
+                              field="force"
+                              labels={['Fx', 'Fy', 'Fz']}
+                              unit="N"
+                              upd={upd}
+                              picking={dirPick?.id === l.id && dirPick.key === 'force'}
+                              onPick={() => { setActive(null); setDrawing(null); setDirPick(dirPick ? null : { id: l.id, key: 'force' }) }}
+                              presets={[]}
+                            />
                             <p className="hint">Kraft, mit der Bolzen bzw. Lager auf das Bauteil drücken. Sie wirkt nur auf der Hälfte, gegen die gedrückt wird (Druck ∝ cos φ).</p>
                           </>
                         ) : l.kind === 'force' ? (
                           <>
-                            <div className="grid3">
-                              {['Fx', 'Fy', 'Fz'].map((lab, k) => (
-                                <NumField key={lab} label={lab} unit="N" value={l.force[k]} onChange={(v) => upd({ force: l.force.map((f, j) => (j === k ? v : f)) })} />
-                              ))}
-                            </div>
-                            {n && (
-                              <button
-                                className="link"
-                                onClick={() => {
-                                  const mag = Math.hypot(...l.force.map(Number)) || 1000
-                                  upd({ force: n.map((v) => Number((-v * mag).toPrecision(6))) })
-                                }}
-                              >
-                                Richtung: senkrecht auf die Fläche
-                              </button>
-                            )}
+                            <VectorInput
+                              item={l}
+                              field="force"
+                              labels={['Fx', 'Fy', 'Fz']}
+                              unit="N"
+                              upd={upd}
+                              picking={dirPick?.id === l.id && dirPick.key === 'force'}
+                              onPick={() => { setActive(null); setDrawing(null); setDirPick(dirPick ? null : { id: l.id, key: 'force' }) }}
+                              presets={n ? [['senkrecht auf die gewählte Fläche', n.map((v) => -v)]] : []}
+                            />
                           </>
                         ) : (
                           <NumField label="Druck (positiv = drückt auf die Fläche)" unit="MPa" value={l.pressure} onChange={(v) => upd({ pressure: v })} />
@@ -680,7 +699,7 @@ export default function App() {
             mesh={mesh}
             mode={mode}
             surfaceTint={surfaceTint}
-            pickable={!!active && view === 'setup'}
+            pickable={(!!active || !!dirPick) && view === 'setup'}
             onPick={onPick}
             result={display}
             showMesh={showMesh}
@@ -692,6 +711,15 @@ export default function App() {
             onDraw={onDraw}
             overlays={overlays}
           />
+          {dirPick && view === 'setup' && (
+            <div className="pick-hint">
+              <MousePointerClick size={15} />
+              Fläche anklicken: Richtung senkrecht darauf (ebene Fläche) oder entlang der Achse (Bohrung/Welle)
+              <button className="btn small" onClick={() => setDirPick(null)}>
+                <X size={14} /> Abbrechen
+              </button>
+            </div>
+          )}
           {drawing && view === 'setup' && (
             <div className="pick-hint">
               <PenLine size={15} />
@@ -862,6 +890,157 @@ function NumField({ label, unit, value, onChange }) {
         {unit && <em>{unit}</em>}
       </div>
     </label>
+  )
+}
+
+// --- Netzgröße per Schieberegler (logarithmisch, links grob, rechts fein) ----------------------
+
+function niceSize(h) {
+  const d = h >= 10 ? 0 : h >= 1 ? 1 : 2
+  return Number(h.toFixed(d))
+}
+
+function MeshSlider({ mesh, diag, value, onChange }) {
+  const hMax = diag / 8
+  const hMin = diag / 300
+  const toT = (h) => Math.round((1000 * Math.log(h / hMax)) / Math.log(hMin / hMax))
+  const toH = (t) => hMax * Math.pow(hMin / hMax, t / 1000)
+  const h = Number(value) > 0 ? Number(value) : mesh.mesh_size
+  const t = Math.min(1000, Math.max(0, toT(h)))
+  // Hochrechnung aus dem aktuellen Netz (Elementzahl ~ 1/h³)
+  const ratio = Math.pow(mesh.mesh_size / h, 3)
+  const unknowns = 3 * mesh.nodes * ratio
+  const elems = mesh.elements * ratio
+  const round = (x) => (x >= 1e6 ? `${fmt(x / 1e6)} Mio.` : Number(x.toPrecision(2)).toLocaleString('de-DE'))
+  return (
+    <div className="mesh-slider">
+      <input type="range" min={0} max={1000} value={t} onChange={(e) => onChange(String(niceSize(toH(Number(e.target.value)))))} />
+      <div className="slider-labels">
+        <span>grob</span>
+        <span>fein</span>
+      </div>
+      {Number(value) > 0 && Math.abs(h - mesh.mesh_size) > 1e-9 && (
+        <p className={'hint' + (unknowns > 3e6 ? ' warn-text' : '')}>
+          Etwa {round(elems)} Elemente, {round(unknowns)} Unbekannte
+          {unknowns > 3e6 ? ' – sehr fein: Rechnung dauert mehrere Minuten und braucht viel Arbeitsspeicher (≈ 2,5 GB je Mio. Unbekannte).' : ''}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// --- Vektoreingabe: Komponenten oder Betrag + Richtung -----------------------------------------
+
+const deg = Math.PI / 180
+const r2 = (x) => Math.round(x * 100) / 100 || 0
+
+/// Winkel einer Richtung: α in der XY-Ebene ab +X, β Neigung zur XY-Ebene (+ = Richtung +Z)
+function anglesOf(v) {
+  const len = Math.hypot(...v) || 1
+  const [x, y, z] = v.map((c) => c / len)
+  const b = Math.asin(Math.max(-1, Math.min(1, z))) / deg
+  let a = Math.abs(Math.abs(b) - 90) < 1e-9 ? 0 : r2(Math.atan2(y, x) / deg)
+  if (a <= -180) a += 360 // −180° und 180° sind dieselbe Richtung
+  return { a: String(a), b: String(r2(b)) }
+}
+
+/// Zustand der Richtungseingabe (aus dem Vektor, falls noch keiner gespeichert ist)
+function dirUi(vec, ui) {
+  if (ui) return ui
+  const v = vec.map(Number)
+  const mag = Math.hypot(...v)
+  return { mode: 'xyz', mag: String(Number(mag.toPrecision(6)) || ''), ...anglesOf(mag ? v : [0, 0, -1]) }
+}
+
+/// Betrag für eine neue Richtung: aktueller Betrag (aus den Komponenten, falls so eingegeben), sonst 1000
+function currentMag(vec, ui) {
+  if (ui.mode === 'dir' && Number(ui.mag)) return ui.mag
+  return String(Number(Math.hypot(...vec.map(Number)).toPrecision(6)) || 1000)
+}
+
+function vectorOf(ui) {
+  const m = Number(ui.mag) || 0
+  const a = Number(ui.a) * deg
+  const b = Number(ui.b) * deg
+  return [Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b)].map((c) => {
+    const v = Number((m * c).toPrecision(6))
+    return Math.abs(v) < 1e-9 * Math.max(m, 1) ? 0 : v
+  })
+}
+
+const AXIS_BUTTONS = [['+X', [1, 0, 0]], ['−X', [-1, 0, 0]], ['+Y', [0, 1, 0]], ['−Y', [0, -1, 0]], ['+Z', [0, 0, 1]], ['−Z', [0, 0, -1]]]
+
+function VectorInput({ item, field, labels, unit, upd, picking, onPick, presets }) {
+  const vec = item[field]
+  const ui = dirUi(vec, item[field + 'Ui'])
+  const setUi = (patch) => {
+    const next = { ...ui, ...patch }
+    upd({ [field + 'Ui']: next, [field]: next.mode === 'dir' ? vectorOf(next) : vec })
+  }
+  const setDir = (v) => setUi(anglesOf(v))
+  const switchMode = (mode) => {
+    if (mode === 'dir') {
+      const v = vec.map(Number)
+      const mag = Math.hypot(...v)
+      setUi({ mode, mag: String(Number(mag.toPrecision(6)) || ui.mag || 1000), ...(mag ? anglesOf(v) : {}) })
+    } else upd({ [field + 'Ui']: { ...ui, mode } })
+  }
+  return (
+    <div className="vector">
+      <div className="segmented small">
+        <button className={ui.mode !== 'dir' ? 'on' : ''} onClick={() => switchMode('xyz')}>
+          Komponenten
+        </button>
+        <button className={ui.mode === 'dir' ? 'on' : ''} onClick={() => switchMode('dir')}>
+          Betrag + Richtung
+        </button>
+      </div>
+      {ui.mode !== 'dir' ? (
+        <div className="grid3">
+          {labels.map((lab, k) => (
+            <NumField key={lab} label={lab} unit={unit} value={vec[k]} onChange={(v) => upd({ [field]: vec.map((f, j) => (j === k ? v : f)) })} />
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="grid3">
+            <NumField label="Betrag" unit={unit} value={ui.mag} onChange={(v) => setUi({ mag: v })} />
+            <NumField label="Winkel in XY" unit="°" value={ui.a} onChange={(v) => setUi({ a: v })} />
+            <NumField label="Neigung zu XY" unit="°" value={ui.b} onChange={(v) => setUi({ b: v })} />
+          </div>
+          <div className="dir-buttons">
+            {AXIS_BUTTONS.map(([lab, v]) => (
+              <button key={lab} className="btn small" onClick={() => setDir(v)}>
+                {lab}
+              </button>
+            ))}
+            <button className="btn small" title="Richtung umkehren" onClick={() => setDir(vectorOf({ ...ui, mag: 1 }).map((c) => -c))}>
+              ⇄ Umkehren
+            </button>
+          </div>
+          <p className="hint">
+            = {labels.map((lab, k) => `${lab} ${fmt(vec[k])}`).join('  ·  ')} {unit}
+          </p>
+        </>
+      )}
+      <div className="dir-links">
+        <button className={'link' + (picking ? ' on' : '')} onClick={onPick}>
+          <MousePointerClick size={13} /> {picking ? 'Auswahl abbrechen' : 'Richtung im Bild wählen'}
+        </button>
+        {presets.map(([lab, v]) => (
+          <button
+            key={lab}
+            className="link"
+            onClick={() => {
+              const next = { ...ui, mode: 'dir', mag: currentMag(vec, ui), ...anglesOf(v) }
+              upd({ [field + 'Ui']: next, [field]: vectorOf(next) })
+            }}
+          >
+            Richtung: {lab}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
