@@ -21,6 +21,8 @@ Lasten: Kraft (gleichmäßig verteilt, Richtung frei oder senkrecht auf die Flä
 - Lasten: Gesamtkraft auf Fläche, Flächenlast (Vektor), Druck
 - Ergebnisse: Verschiebungen, Vergleichsspannung (von Mises), Hauptspannungen, Lagerreaktionen,
   Gleichgewichtskontrolle, Sicherheit gegen Fließen
+- Gleichungslöser: direkt (Cholesky) bei kleinen Modellen, ab 50 000 Unbekannten automatisch **iterativ**
+  (CG mit algebraischem Mehrgitter-Vorkonditionierer, Smoothed Aggregation mit Starrkörpermoden)
 - Export als `.vtu` (anschauen z. B. mit [ParaView](https://www.paraview.org/))
 - Eingebauter Quader-Vernetzer (beliebige Geometrie über STEP/Gmsh kommt in Phase 2)
 
@@ -46,6 +48,7 @@ npx tauri build --no-bundle      # → target/release/projekt-fem-app
 cargo build --release
 ./target/release/projekt-fem validieren                          # Lehrbuchfälle prüfen
 ./target/release/projekt-fem rechnen examples/kragbalken.toml    # Beispiel rechnen
+#   Option --loeser auto|direkt|iterativ  (Standard auto)
 cargo test --release                                             # alle Tests
 ```
 
@@ -98,7 +101,15 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
 - **Spannungsspitzen an starren Einspannungen/Kanten sind Singularitäten:** Sie wachsen bei Netzverfeinerung
   immer weiter (Kragbalken-Einspannkante: 128 MPa grob, 169 MPa fein; Theorie 120 MPa). Werte mit Abstand zur
   Einspannung auswerten. → Warnung in der Oberfläche geplant.
-- Direkter Löser: ~1 Mio. Unbekannte ≈ 2 min und ~25 GB RAM. Für große Modelle kommt ein iterativer Löser.
+- Rechenzeit/Speicher (4 Kerne, Hebel `Daten/Hebel.step`, TET10):
+
+  | Netz | Unbekannte | direkt | iterativ (Mehrgitter) |
+  |---|---|---|---|
+  | 1 mm | 318 000 | 37 s, 2,9 GB | 15 s, 0,8 GB |
+  | 0,6 mm | 1,3 Mio. | – (> 25 GB) | 70 s, 3,4 GB |
+  | 0,5 mm | 2,2 Mio. | – | 137 s, 5,5 GB |
+
+  Ergebnisse beider Löser stimmen überein (Abbruch bei ‖r‖/‖f‖ < 10⁻⁹).
 - Reibungsfreie Auflage nur für ebene, achsparallele Flächen (schräge Flächen brauchen lokale Koordinaten – später).
 - Lasten wirken gleichmäßig über die Fläche; eine Lagerlast (Bolzen in Bohrung, nur halbe Fläche) kommt später.
 - Lagergruppen-Summen: Knoten auf gemeinsamen Kanten zählen in jeder Gruppe; maßgeblich ist „Summe aller Lager".
@@ -115,7 +126,8 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
 ## Aufbau
 
 ```
-crates/fem-core   Rechenkern (Bibliothek): element, mesh, generate, model, solver, results, vtk, validate
+crates/fem-core   Rechenkern (Bibliothek): element, mesh, generate, model, solver, results, vtk, validate,
+                  pcg + amg + sparse (iterativer Löser)
 crates/fem-cli    Kommandozeile `projekt-fem`
 app/              Desktop-App (Tauri 2 + React + three.js), Backend in app/src-tauri
 examples/         Beispielfälle, examples/geometrie: STEP-Testteile (+ .geo-Quellen)

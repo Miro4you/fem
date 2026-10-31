@@ -1,6 +1,6 @@
 //! Kommandozeile für Projekt-FEM.
 //!
-//!   projekt-fem rechnen <fall.toml> [-o ergebnis.vtu]
+//!   projekt-fem rechnen <fall.toml> [-o ergebnis.vtu] [--loeser auto|direkt|iterativ]
 //!   projekt-fem validieren
 
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use fem_core::generate::box_mesh;
-use fem_core::{validate, Axis, Fix, Load, Material, Model, Order, Selection};
+use fem_core::{validate, Axis, Fix, Load, Material, Model, Order, Selection, SolverKind};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -128,12 +128,12 @@ fn build_model(case: Case) -> Result<Model> {
     Ok(model)
 }
 
-fn run(path: &Path, out: Option<PathBuf>) -> Result<()> {
+fn run(path: &Path, out: Option<PathBuf>, solver: SolverKind) -> Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("{} nicht lesbar", path.display()))?;
     let case: Case = toml::from_str(&text).with_context(|| format!("Fehler in {}", path.display()))?;
 
     let t0 = Instant::now();
-    let model = build_model(case)?;
+    let model = build_model(case)?.solver(solver);
     let mesh = &model.mesh;
     println!(
         "Netz:       {} Knoten, {} Elemente ({}), Volumen {:.4}",
@@ -143,7 +143,11 @@ fn run(path: &Path, out: Option<PathBuf>) -> Result<()> {
         mesh.volume()
     );
     let res = fem_core::solve(&model)?;
-    println!("Rechnung:   {} Unbekannte in {:.2} s", res.n_equations, t0.elapsed().as_secs_f64());
+    let method = match res.iterations {
+        Some(n) => format!("iterativ, {n} Iterationen"),
+        None => "direkt".into(),
+    };
+    println!("Rechnung:   {} Unbekannte in {:.2} s ({method})", res.n_equations, t0.elapsed().as_secs_f64());
 
     let (n, u) = res.max_displacement();
     let p = mesh.nodes[n];
@@ -207,14 +211,24 @@ const USAGE: &str = "Projekt-FEM – lineare Statik für 3D-Bauteile
 
 Verwendung:
   projekt-fem rechnen <fall.toml> [-o ergebnis.vtu]   Rechnung ausführen
-  projekt-fem validieren                              Lehrbuchfälle gegen Theorie prüfen";
+  projekt-fem validieren                              Lehrbuchfälle gegen Theorie prüfen
+
+Optionen für „rechnen“:
+  -o <datei.vtu>                     Ergebnisdatei (Standard: neben der Eingabedatei)
+  --loeser auto|direkt|iterativ      Gleichungslöser (Standard auto: iterativ ab 50 000 Unbekannten)";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("rechnen" | "run") if args.len() >= 2 => {
-            let out = args.iter().position(|a| a == "-o").and_then(|i| args.get(i + 1)).map(PathBuf::from);
-            run(Path::new(&args[1]), out)
+            let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1));
+            let out = opt("-o").map(PathBuf::from);
+            match opt("--loeser").map(String::as_str) {
+                None | Some("auto") => run(Path::new(&args[1]), out, SolverKind::Auto),
+                Some("direkt") => run(Path::new(&args[1]), out, SolverKind::Direct),
+                Some("iterativ") => run(Path::new(&args[1]), out, SolverKind::Iterative),
+                Some(o) => Err(anyhow::anyhow!("unbekannter Löser „{o}“ (auto, direkt oder iterativ)")),
+            }
         }
         Some("validieren" | "validate") => validate_all(),
         _ => {

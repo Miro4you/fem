@@ -1,4 +1,4 @@
-# Nächste Schritte (Stand 31.10.26)
+# Nächste Schritte (Stand 31.10.26, aktualisiert)
 
 ## 1. Ansys-Vergleich Hebel (wartet auf Felix)
 Geometrie: `Daten/Hebel.step` (Onshape, in Metern gespeichert → wird korrekt in mm gelesen).
@@ -19,8 +19,12 @@ CAD-Flächen: 1, 2, 3, 11 = Rechteckaufnahme · 13 = Bohrung Ø8 · 16, 17 = R3-
 | 4 mm | 0,1748 mm | 200,5 MPa |
 | 2 mm | 0,1750 mm | 209,3 MPa |
 | 1 mm | 0,1752 mm | 211,5 MPa |
+| 0,6 mm | 0,1753 mm | 216,5 MPa |
+| 0,5 mm | 0,1753 mm | 228,6 MPa ⚠ |
 
-Maximum im R3-Radius (nicht am Lager) → guter Vergleichsort.
+Bis 1 mm liegt das Maximum im R3-Radius (nicht am Lager) → guter Vergleichsort.
+Ab ca. 0,5 mm wandert es an die Ecke der Rechteckaufnahme (Singularität an der starren Einspannung, wächst mit
+feinerem Netz weiter) → in Ansys die Spannung **im R3-Radius** vergleichen, nicht nur das globale Maximum.
 
 **Von Ansys gebraucht:** max. Gesamtverformung, max. Vergleichsspannung + Ort, Spannung im R3-Radius, Lagerreaktion.
 Danach: als fester Prüffall in `validate.rs` einbauen.
@@ -29,7 +33,9 @@ Danach: als fester Prüffall in `validate.rs` einbauen.
 Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückmeldung zu Bedienung und Fehlern.
 
 ## 3. Bekannte Baustellen
-- Speicher: Netze ab ca. 1 Mio. Gleichungen sprengen den RAM (Sitzung ist bei 0,6 mm am Hebel abgestürzt) → iterativer Löser (PCG) nötig
+- ✅ Speicher: iterativer Löser (CG + Mehrgitter) eingebaut, schaltet ab 50 000 Unbekannten automatisch um.
+  Hebel 0,6 mm (1,3 Mio. Unbekannte) jetzt 70 s / 3,4 GB statt Absturz. Mögliche Ergänzung: Fortschrittsanzeige
+  in der App während langer Rechnungen.
 - Lagerlast (Bolzen drückt nur auf eine Bohrungshälfte)
 - Reibungsfreie Lagerung auf schrägen Flächen
 - Mac-Build testen

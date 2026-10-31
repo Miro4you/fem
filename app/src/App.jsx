@@ -668,6 +668,7 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
       </div>
       <p className="hint">
         {result.equations.toLocaleString('de-DE')} Unbekannte, gerechnet in {fmt(result.seconds)} s
+        {result.iterations != null && ` (iterativer Löser, ${result.iterations} Iterationen)`}
       </p>
       <button className="btn wide" onClick={onExport}>
         <Download size={15} /> Ergebnis für ParaView exportieren (.vtu)

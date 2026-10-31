@@ -117,6 +117,19 @@ impl Load {
     }
 }
 
+/// Wahl des Gleichungslösers
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SolverKind {
+    /// direkt bei kleinen, iterativ bei großen Modellen (ab `solver::AUTO_ITERATIVE_FROM` Unbekannten)
+    #[default]
+    Auto,
+    /// dünnbesetzte Cholesky-Zerlegung: robust, aber speicherhungrig
+    Direct,
+    /// PCG: wenig Speicher, für große Netze
+    Iterative,
+}
+
 #[derive(Debug, Clone)]
 pub struct Model {
     pub mesh: Mesh,
@@ -124,11 +137,12 @@ pub struct Model {
     pub groups: Vec<(String, Selection)>,
     pub supports: Vec<Support>,
     pub loads: Vec<Load>,
+    pub solver: SolverKind,
 }
 
 impl Model {
     pub fn new(mesh: Mesh, material: Material) -> Self {
-        Model { mesh, material, groups: vec![], supports: vec![], loads: vec![] }
+        Model { mesh, material, groups: vec![], supports: vec![], loads: vec![], solver: SolverKind::Auto }
     }
 
     pub fn group(mut self, name: &str, sel: Selection) -> Self {
@@ -143,6 +157,11 @@ impl Model {
 
     pub fn load(mut self, load: Load) -> Self {
         self.loads.push(load);
+        self
+    }
+
+    pub fn solver(mut self, kind: SolverKind) -> Self {
+        self.solver = kind;
         self
     }
 

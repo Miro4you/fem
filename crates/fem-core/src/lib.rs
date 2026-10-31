@@ -3,20 +3,23 @@
 //! Einheiten sind frei wählbar, müssen aber konsistent sein.
 //! Empfohlen (wie im Maschinenbau üblich): mm, N, N/mm² (= MPa).
 
+pub mod amg;
 pub mod element;
 pub mod generate;
 pub mod gmsh;
 pub mod material;
 pub mod mesh;
 pub mod model;
+pub mod pcg;
 pub mod results;
 pub mod solver;
+pub mod sparse;
 pub mod validate;
 pub mod vtk;
 
 pub use material::Material;
 pub use mesh::{Mesh, Order};
-pub use model::{Axis, Fix, Load, Model, Selection, Support};
+pub use model::{Axis, Fix, Load, Model, Selection, SolverKind, Support};
 pub use results::Results;
 pub use solver::solve;
 
@@ -30,6 +33,8 @@ pub enum FemError {
     EmptyGroup(String),
     #[error("Modell ist nicht ausreichend gelagert – das Bauteil kann sich als Ganzes bewegen oder drehen")]
     Underconstrained,
+    #[error("Iterativer Löser nach {0} Schritten nicht konvergiert – Lagerung prüfen oder direkten Löser wählen")]
+    NotConverged(usize),
     #[error("Gmsh: {0}")]
     Gmsh(String),
     #[error("Ungültige Eingabe: {0}")]

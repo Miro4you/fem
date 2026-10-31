@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use fem_core::gmsh::{self, MeshOptions};
 use fem_core::mesh::Face;
-use fem_core::{Fix, Load, Material, Mesh, Model, Order, Results, Selection};
+use fem_core::{Fix, Load, Material, Mesh, Model, Order, Results, Selection, SolverKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Default)]
@@ -217,6 +217,9 @@ pub struct Setup {
     material: Material,
     supports: Vec<SupportDef>,
     loads: Vec<LoadDef>,
+    /// Gleichungslöser, Standard: automatisch nach Modellgröße
+    #[serde(default)]
+    solver: SolverKind,
 }
 
 #[derive(Serialize)]
@@ -241,6 +244,8 @@ pub struct ResultView {
     total_load: [f64; 3],
     total_reaction: [f64; 3],
     equations: usize,
+    /// Iterationen des iterativen Lösers (`None` = direkt gelöst)
+    iterations: Option<usize>,
     seconds: f64,
     warnings: Vec<String>,
 }
@@ -265,7 +270,7 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         if setup.supports.is_empty() {
             return Err("Mindestens ein Lager festlegen".to_string());
         }
-        let mut model = Model::new(mesh, setup.material.clone());
+        let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver);
         for (i, s) in setup.supports.iter().enumerate() {
             let name = format!("Lager {}", i + 1);
             model = model.group(&name, Selection::Surfaces(s.surfaces.clone())).support(&name, s.fix);
@@ -340,6 +345,7 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             total_load: res.total_load,
             total_reaction: res.total_reaction,
             equations: res.n_equations,
+            iterations: res.iterations,
             seconds: t0.elapsed().as_secs_f64(),
             warnings,
         };

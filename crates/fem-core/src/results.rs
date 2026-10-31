@@ -19,6 +19,8 @@ pub struct Results {
     pub total_reaction: [f64; 3],
     /// Anzahl der Unbekannten (freie Freiheitsgrade)
     pub n_equations: usize,
+    /// Iterationen des iterativen Lösers (`None` = direkter Löser)
+    pub iterations: Option<usize>,
 }
 
 pub fn von_mises(s: &[f64; 6]) -> f64 {
