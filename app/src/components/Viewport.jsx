@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { Box, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react'
 import { bandTexture, BANDS } from '../colormap.js'
+import { regionGrid } from '../region.js'
 
 const BASE = new THREE.Color('#b9c0c8')
 
@@ -25,11 +26,15 @@ export default function Viewport({
   arrows,
   markers,
   onProbe,
+  drawing,
+  planeNormal,
+  onDraw,
+  overlays,
 }) {
   const host = useRef(null)
   const ctx = useRef(null)
   const cb = useRef({})
-  cb.current = { onPick, onProbe, pickable, mode }
+  cb.current = { onPick, onProbe, pickable, mode, drawing, planeNormal, onDraw }
   const [hoverTag, setHoverTag] = useState(null)
   const [labels, setLabels] = useState([])
 
@@ -49,6 +54,52 @@ export default function Viewport({
     key.position.set(0.6, 1, 1.2)
     camera.add(key)
 
+    // Bereich zeichnen: muss vor OrbitControls registriert sein, damit das Drehen abgeschaltet werden kann
+    const drawRay = new THREE.Raycaster()
+    let drag = null
+    const rayAt = (ev) => {
+      const r = renderer.domElement.getBoundingClientRect()
+      drawRay.setFromCamera(
+        new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1),
+        camera,
+      )
+      return drawRay
+    }
+    const dragEvent = (ev, final) => {
+      const ray = rayAt(ev)
+      let p1 = null
+      if (drag.shape === 'band') {
+        p1 = state.surf ? ray.intersectObject(state.surf, false)[0]?.point : null
+      } else {
+        p1 = ray.ray.intersectPlane(drag.plane, new THREE.Vector3())
+      }
+      if (p1) drag.p1 = p1.toArray()
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).toArray()
+      cb.current.onDraw?.({ tag: drag.tag, p0: drag.p0, p1: drag.p1, normal: drag.normal, right, final })
+    }
+    renderer.domElement.addEventListener('pointerdown', (ev) => {
+      const shape = cb.current.drawing
+      if (!shape || !state.surf || ev.button !== 0) return
+      const h = rayAt(ev).intersectObject(state.surf, false)[0]
+      if (!h) return
+      const tag = state.triSurface[h.faceIndex]
+      const n = cb.current.planeNormal?.(tag) ?? h.face.normal.toArray()
+      const normal = new THREE.Vector3(...n).normalize()
+      drag = { shape, tag, p0: h.point.toArray(), p1: h.point.toArray(), normal: normal.toArray(), plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, h.point) }
+      state.controls.enabled = false
+      renderer.domElement.setPointerCapture(ev.pointerId)
+    })
+    renderer.domElement.addEventListener('pointermove', (ev) => {
+      if (drag) dragEvent(ev, false)
+    })
+    renderer.domElement.addEventListener('pointerup', (ev) => {
+      if (!drag) return
+      dragEvent(ev, true)
+      drag = null
+      state.controls.enabled = true
+      state.justDrew = true
+    })
+
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.15
@@ -57,8 +108,9 @@ export default function Viewport({
     const state = {
       renderer, scene, camera, controls, dirty: true, raf: 0,
       group: new THREE.Group(), surf: null, edges: null, wire: null, ghost: null, arrows: new THREE.Group(),
-      texture: bandTexture(), labelNodes: [],
+      texture: bandTexture(), labelNodes: [], overlays: new THREE.Group(),
     }
+    scene.add(state.overlays)
     scene.add(state.group)
     scene.add(state.arrows)
     ctx.current = state
@@ -108,6 +160,7 @@ export default function Viewport({
     }
     const onDown = (ev) => (down = [ev.clientX, ev.clientY])
     const onUp = (ev) => {
+      if (state.justDrew) return (state.justDrew = false)
       if (!down || Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) > 4) return
       const h = hit(ev)
       const { mode, pickable, onPick, onProbe } = cb.current
@@ -131,8 +184,8 @@ export default function Viewport({
       hoverPending = true
       requestAnimationFrame(() => {
         hoverPending = false
-        const { mode, pickable } = cb.current
-        if (mode !== 'setup' || !pickable) return setHoverTag(null)
+        const { mode, pickable, drawing } = cb.current
+        if (mode !== 'setup' || !(pickable || drawing)) return setHoverTag(null)
         const h = hit(ev)
         setHoverTag(h ? state.triSurface[h.faceIndex] : null)
       })
@@ -295,6 +348,20 @@ export default function Viewport({
     s.dirty = true
   }, [arrows, mode])
 
+  // --- Wirkbereiche ------------------------------------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    for (const o of s.overlays.children) o.traverse((x) => (x.geometry?.dispose(), x.material?.dispose()))
+    s.overlays.clear()
+    if (mesh) {
+      const [lo, hi] = mesh.bbox
+      const offset = 0.002 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+      for (const o of overlays ?? []) s.overlays.add(regionObject(o, offset))
+    }
+    s.overlays.visible = mode === 'setup'
+    s.dirty = true
+  }, [overlays, mesh, mode])
+
   useEffect(() => {
     const s = ctx.current
     const scale = mode === 'result' && result ? result.scale : 0
@@ -326,7 +393,7 @@ export default function Viewport({
 
   return (
     <div className="viewport">
-      <div ref={host} className="viewport-canvas" style={{ cursor: pickable && hoverTag != null ? 'pointer' : 'default' }} />
+      <div ref={host} className="viewport-canvas" style={{ cursor: drawing && hoverTag != null ? 'crosshair' : pickable && hoverTag != null ? 'pointer' : 'default' }} />
       {mesh && (
         <div className="view-buttons">
           {Object.entries(VIEWS).map(([k, v]) => (
@@ -344,6 +411,54 @@ export default function Viewport({
       ))}
     </div>
   )
+}
+
+// Bereich als halbdurchsichtige Fläche mit Umriss
+function regionObject({ region, cyl, color, active }, offset) {
+  const g = regionGrid(region, cyl, offset)
+  const pts = []
+  for (let i = 0; i < g.nu; i++) for (let j = 0; j < g.nv; j++) pts.push(...g.P(i, j))
+  const idx = []
+  for (let i = 0; i + 1 < g.nu; i++)
+    for (let j = 0; j + 1 < g.nv; j++) {
+      const a = i * g.nv + j, b = a + 1, c = a + g.nv, d = c + 1
+      idx.push(a, c, b, b, c, d)
+    }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+  geo.setIndex(idx)
+  const fill = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: active ? 0.55 : 0.4, side: THREE.DoubleSide, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    }),
+  )
+  // Umriss: äußerer Rand (Kreis/Rechteck) bzw. ganzer Rand des Wellenabschnitts
+  const ring = []
+  const P = (i, j) => g.P(i, j)
+  if (g.band) {
+    for (let j = 0; j < g.nv; j++) ring.push(P(0, j))
+    if (!g.closed) for (let j = g.nv - 1; j >= 0; j--) ring.push(P(1, j))
+    else ring.push(null)
+    if (g.closed) for (let j = 0; j < g.nv; j++) ring.push(P(1, j))
+  } else for (let j = 0; j < g.nv; j++) ring.push(P(g.nu - 1, j))
+  const group = new THREE.Group()
+  group.add(fill)
+  const lineMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 })
+  let seg = []
+  const flush = () => {
+    if (seg.length > 1) {
+      const lg = new THREE.BufferGeometry().setFromPoints(seg.map((p) => new THREE.Vector3(...p)))
+      group.add(g.closed || g.band ? new THREE.Line(lg, lineMat) : new THREE.LineLoop(lg, lineMat))
+    }
+    seg = []
+  }
+  for (const p of ring) (p ? seg.push(p) : flush())
+  if (g.band && !g.closed && seg.length) seg.push(seg[0])
+  flush()
+  group.renderOrder = 5
+  return group
 }
 
 // Normalen glätten innerhalb einer CAD-Fläche, scharf an Flächengrenzen

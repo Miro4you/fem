@@ -11,6 +11,7 @@ pub mod material;
 pub mod mesh;
 pub mod model;
 pub mod pcg;
+pub mod region;
 pub mod results;
 pub mod solver;
 pub mod sparse;
@@ -19,7 +20,8 @@ pub mod vtk;
 
 pub use material::Material;
 pub use mesh::{Mesh, Order};
-pub use model::{Axis, Fix, Load, Model, Selection, SolverKind, Support};
+pub use model::{Axis, Fix, Group, Load, Model, Selection, SolverKind, Support};
+pub use region::Region;
 pub use results::Results;
 pub use solver::solve;
 
@@ -35,6 +37,8 @@ pub enum FemError {
     Underconstrained,
     #[error("Iterativer Löser nach {0} Schritten nicht konvergiert – Lagerung prüfen oder direkten Löser wählen")]
     NotConverged(usize),
+    #[error("Last/Lager „{0}“: {1}")]
+    BadLoad(String, String),
     #[error("Gmsh: {0}")]
     Gmsh(String),
     #[error("Ungültige Eingabe: {0}")]

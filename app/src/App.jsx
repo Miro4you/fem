@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FolderOpen, Save, FileUp, Play, Plus, Trash2, MousePointerClick, Anchor, ArrowDownToLine,
-  TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge,
+  TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine,
 } from 'lucide-react'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
 import * as api from './api.js'
 import { MATERIALS } from './materials.js'
 import { fmt, fmtVec } from './format.js'
+import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES } from './region.js'
 
 const SUPPORT_COLOR = '#5b8def'
 const SUPPORT_ACTIVE = '#1f5fd6'
 const LOAD_COLOR = '#f2a24a'
 const LOAD_ACTIVE = '#e0700f'
+const MOMENT_COLOR = '#9b4dca'
+// Flächen, auf denen nur ein Teilbereich wirkt, blasser einfärben
+const SUPPORT_PALE = '#b3c6ee'
+const LOAD_PALE = '#f1cfa9'
 
 const QUANTITIES = {
   von_mises: { label: 'Vergleichsspannung', unit: 'MPa', hint: 'von Mises' },
@@ -23,8 +28,17 @@ const QUANTITIES = {
 }
 
 let nextId = 1
-const newSupport = () => ({ id: nextId++, kind: 'fixed', axes: { x: true, y: true, z: true }, surfaces: [] })
-const newLoad = () => ({ id: nextId++, kind: 'force', force: [0, 0, -1000], pressure: 1, surfaces: [] })
+const newSupport = () => ({ id: nextId++, kind: 'fixed', axes: { x: true, y: true, z: true }, surfaces: [], region: null })
+const newLoad = () => ({
+  id: nextId++, kind: 'force', force: [0, 0, -1000], pressure: 1, moment: [0, 0, 100], surfaces: [], region: null,
+})
+
+const LOAD_KINDS = {
+  force: 'Kraft (gleichmäßig verteilt)',
+  pressure: 'Druck',
+  moment: 'Moment',
+  bearing: 'Lagerlast (Bolzen/Welle, halber Umfang)',
+}
 
 export default function App() {
   const [gmsh, setGmsh] = useState(undefined)
@@ -35,6 +49,8 @@ export default function App() {
   const [supports, setSupports] = useState([])
   const [loads, setLoads] = useState([])
   const [active, setActive] = useState(null)
+  // Bereich zeichnen: { type: 'support' | 'load', id, shape }
+  const [drawing, setDrawing] = useState(null)
   const [result, setResult] = useState(null)
   const [resultStale, setResultStale] = useState(false)
   const [view, setView] = useState('setup')
@@ -85,6 +101,7 @@ export default function App() {
         setSupports([])
         setLoads([])
         setActive(null)
+        setDrawing(null)
       }
       return m
     } catch (e) {
@@ -122,8 +139,8 @@ export default function App() {
       const m = await loadGeometry(d.step, d.meshSize, true)
       if (!m) return
       setMaterial(d.material)
-      setSupports(d.supports.map((s) => ({ ...s, id: nextId++ })))
-      setLoads(d.loads.map((l) => ({ ...l, id: nextId++ })))
+      setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
+      setLoads(d.loads.map((l) => ({ ...newLoad(), ...l, id: nextId++ })))
       setActive(null)
     } catch (e) {
       setError(String(e))
@@ -148,12 +165,60 @@ export default function App() {
 
   const surfaceTint = useCallback(
     (tag) => {
-      for (const l of loads) if (l.surfaces.includes(tag)) return active?.id === l.id ? LOAD_ACTIVE : LOAD_COLOR
-      for (const s of supports) if (s.surfaces.includes(tag)) return active?.id === s.id ? SUPPORT_ACTIVE : SUPPORT_COLOR
+      for (const l of loads)
+        if (l.surfaces.includes(tag)) return l.region ? LOAD_PALE : active?.id === l.id ? LOAD_ACTIVE : LOAD_COLOR
+      for (const s of supports)
+        if (s.surfaces.includes(tag)) return s.region ? SUPPORT_PALE : active?.id === s.id ? SUPPORT_ACTIVE : SUPPORT_COLOR
       return null
     },
     [supports, loads, active],
   )
+
+  // --- Wirkbereiche ------------------------------------------------------------------
+  const updateItem = (type, id, patch) => {
+    const f = (items) => items.map((x) => (x.id === id ? { ...x, ...(typeof patch === 'function' ? patch(x) : patch) } : x))
+    if (type === 'support') setSupports(f)
+    else setLoads(f)
+  }
+
+  function startDrawing(type, item, shape) {
+    setActive(null)
+    setDrawing({ type, id: item.id, shape })
+  }
+
+  const onDraw = useCallback(
+    (ev) => {
+      if (!drawing) return
+      const info = surfaceInfo.get(ev.tag)
+      if (drawing.shape === 'band' && !info?.cylinder) {
+        if (ev.final) setError('Ein Wellen-/Bohrungsabschnitt lässt sich nur auf einer zylindrischen Fläche zeichnen.')
+        return
+      }
+      const region = regionFromDrag(drawing.shape, ev, info?.cylinder)
+      updateItem(drawing.type, drawing.id, (x) => ({
+        region,
+        surfaces: x.surfaces.includes(ev.tag) ? x.surfaces : [...x.surfaces, ev.tag],
+      }))
+      if (ev.final) setDrawing(null)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [drawing, surfaceInfo],
+  )
+
+  const planeNormal = useCallback((tag) => surfaceInfo.get(tag)?.normal ?? null, [surfaceInfo])
+
+  const overlays = useMemo(() => {
+    const out = []
+    const push = (item, color, activeColor) => {
+      const region = regionNumbers(item.region)
+      if (!region || Object.values(region).some((v) => (Array.isArray(v) ? v.some((x) => !Number.isFinite(x)) : v !== region.shape && !Number.isFinite(v)))) return
+      const isActive = active?.id === item.id || drawing?.id === item.id
+      out.push({ region, cyl: selectionCylinder(item.surfaces, surfaceInfo), color: isActive ? activeColor : color, active: isActive })
+    }
+    for (const s of supports) push(s, SUPPORT_COLOR, SUPPORT_ACTIVE)
+    for (const l of loads) push(l, LOAD_COLOR, LOAD_ACTIVE)
+    return out
+  }, [supports, loads, surfaceInfo, active, drawing])
 
   function supportFix(s) {
     if (s.kind === 'fixed') return { fix: { x: 0, y: 0, z: 0 } }
@@ -200,9 +265,19 @@ export default function App() {
         for (let k = 0; k < 3; k++) c[k] += s.center[k] * s.area
       }
       if (!area) continue
-      const tip = c.map((v) => v / area)
+      let tip = c.map((v) => v / area)
+      const region = regionNumbers(l.region)
+      if (region) tip = regionAnchor(region, selectionCylinder(l.surfaces, surfaceInfo))
       let dir = null
-      if (l.kind === 'force' && Math.hypot(...l.force) > 0) dir = l.force
+      if ((l.kind === 'force' || l.kind === 'bearing') && Math.hypot(...l.force) > 0) dir = l.force
+      if (l.kind === 'moment' && Math.hypot(...l.moment.map(Number)) > 0) {
+        // Momentenvektor (rechte Hand) vom Bereich weg
+        const m = l.moment.map(Number)
+        const len = Math.hypot(...m)
+        const L = 0.2 * diag
+        out.push({ tip: tip.map((v, k) => v + (m[k] / len) * L), dir: m, length: L, color: MOMENT_COLOR })
+        continue
+      }
       if (l.kind === 'pressure') {
         const n = loadNormal(l)
         if (n) dir = n.map((v) => -v * Math.sign(l.pressure || 1))
@@ -211,7 +286,7 @@ export default function App() {
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loads, surfaceInfo, diag, active])
+  }, [loads, surfaceInfo, diag, active, drawing])
 
   // --- Rechnen ---------------------------------------------------------------------
   const problems = useMemo(() => {
@@ -226,24 +301,33 @@ export default function App() {
     if (!loads.length) p.push('Mindestens eine Last anlegen')
     loads.forEach((l, i) => {
       if (!l.surfaces.length) p.push(`Last ${i + 1}: Flächen wählen`)
+      if (l.kind === 'bearing' && l.surfaces.some((t) => !surfaceInfo.get(t)?.cylinder))
+        p.push(`Last ${i + 1}: Lagerlast nur auf zylindrischen Flächen (Bohrung, Welle)`)
     })
+    for (const [what, items] of [['Lager', supports], ['Last', loads]])
+      items.forEach((x, i) => {
+        if (drawing?.id === x.id && !x.region) p.push(`${what} ${i + 1}: Bereich auf die Fläche zeichnen`)
+      })
     return p
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mesh, supports, loads, surfaceInfo])
+  }, [mesh, supports, loads, surfaceInfo, drawing])
 
   async function onSolve() {
     setBusy('Rechne …')
     setError(null)
     setActive(null)
+    setDrawing(null)
     try {
       const setup = {
         material: { name: material.name, E: Number(material.E), nu: Number(material.nu), yield: material.yield ? Number(material.yield) : null },
-        supports: supports.map((s) => ({ surfaces: s.surfaces, fix: supportFix(s).fix })),
-        loads: loads.map((l) =>
-          l.kind === 'force'
-            ? { type: 'force', surfaces: l.surfaces, force: l.force.map(Number) }
-            : { type: 'pressure', surfaces: l.surfaces, pressure: Number(l.pressure) },
-        ),
+        supports: supports.map((s) => ({ surfaces: s.surfaces, fix: supportFix(s).fix, region: regionNumbers(s.region) })),
+        loads: loads.map((l) => {
+          const base = { type: l.kind, surfaces: l.surfaces, region: regionNumbers(l.region) }
+          if (l.kind === 'pressure') return { ...base, pressure: Number(l.pressure) }
+          // Moment in der Oberfläche in N·m, im Rechenkern N·mm
+          if (l.kind === 'moment') return { ...base, moment: l.moment.map((v) => Number(v) * 1000) }
+          return { ...base, force: l.force.map(Number) }
+        }),
       }
       const r = await api.solve(setup)
       setResult(r)
@@ -433,7 +517,15 @@ export default function App() {
                             ))}
                           </div>
                         )}
-                        <PickButton active={isActive} count={s.surfaces.length} onClick={() => setActive(isActive ? null : { type: 'support', id: s.id })} />
+                        <RegionEditor
+                          item={s}
+                          cyl={selectionCylinder(s.surfaces, surfaceInfo)}
+                          drawing={drawing?.id === s.id ? drawing : null}
+                          onStart={(shape) => startDrawing('support', s, shape)}
+                          onCancel={() => setDrawing(null)}
+                          onChange={(region) => updateItem('support', s.id, { region })}
+                        />
+                        <PickButton active={isActive} count={s.surfaces.length} onClick={() => { setDrawing(null); setActive(isActive ? null : { type: 'support', id: s.id }) }} />
                         {f.error && s.surfaces.length > 0 && <p className="error-text">{f.error}</p>}
                       </div>
                     )
@@ -450,6 +542,7 @@ export default function App() {
                     const isActive = active?.id === l.id
                     const upd = (patch) => setLoads(loads.map((x) => (x.id === l.id ? { ...x, ...patch } : x)))
                     const n = loadNormal(l)
+                    const cyl = selectionCylinder(l.surfaces, surfaceInfo)
                     return (
                       <div key={l.id} className={'item' + (isActive ? ' active load' : '')}>
                         <div className="item-head">
@@ -461,10 +554,42 @@ export default function App() {
                           </button>
                         </div>
                         <select value={l.kind} onChange={(e) => upd({ kind: e.target.value })}>
-                          <option value="force">Kraft (gleichmäßig verteilt)</option>
-                          <option value="pressure">Druck</option>
+                          {Object.entries(LOAD_KINDS).map(([k, v]) => (
+                            <option key={k} value={k}>
+                              {v}
+                            </option>
+                          ))}
                         </select>
-                        {l.kind === 'force' ? (
+                        {l.kind === 'moment' ? (
+                          <>
+                            <div className="grid3">
+                              {['Mx', 'My', 'Mz'].map((lab, k) => (
+                                <NumField key={lab} label={lab} unit="N·m" value={l.moment[k]} onChange={(v) => upd({ moment: l.moment.map((f, j) => (j === k ? v : f)) })} />
+                              ))}
+                            </div>
+                            {cyl && (
+                              <button
+                                className="link"
+                                onClick={() => {
+                                  const mag = Math.hypot(...l.moment.map(Number)) || 100
+                                  upd({ moment: cyl.axis.map((v) => Number((v * mag).toPrecision(6))) })
+                                }}
+                              >
+                                Richtung: um die Wellenachse (Torsion)
+                              </button>
+                            )}
+                            <p className="hint">Wirkt um den Schwerpunkt des Bereichs, linear verteilt wie bei einem starren Anschlussteil. Drehsinn nach der rechten Hand.</p>
+                          </>
+                        ) : l.kind === 'bearing' ? (
+                          <>
+                            <div className="grid3">
+                              {['Fx', 'Fy', 'Fz'].map((lab, k) => (
+                                <NumField key={lab} label={lab} unit="N" value={l.force[k]} onChange={(v) => upd({ force: l.force.map((f, j) => (j === k ? v : f)) })} />
+                              ))}
+                            </div>
+                            <p className="hint">Kraft, mit der Bolzen bzw. Lager auf das Bauteil drücken. Sie wirkt nur auf der Hälfte, gegen die gedrückt wird (Druck ∝ cos φ).</p>
+                          </>
+                        ) : l.kind === 'force' ? (
                           <>
                             <div className="grid3">
                               {['Fx', 'Fy', 'Fz'].map((lab, k) => (
@@ -486,7 +611,15 @@ export default function App() {
                         ) : (
                           <NumField label="Druck (positiv = drückt auf die Fläche)" unit="MPa" value={l.pressure} onChange={(v) => upd({ pressure: v })} />
                         )}
-                        <PickButton active={isActive} count={l.surfaces.length} onClick={() => setActive(isActive ? null : { type: 'load', id: l.id })} />
+                        <RegionEditor
+                          item={l}
+                          cyl={cyl}
+                          drawing={drawing?.id === l.id ? drawing : null}
+                          onStart={(shape) => startDrawing('load', l, shape)}
+                          onCancel={() => setDrawing(null)}
+                          onChange={(region) => upd({ region })}
+                        />
+                        <PickButton active={isActive} count={l.surfaces.length} onClick={() => { setDrawing(null); setActive(isActive ? null : { type: 'load', id: l.id }) }} />
                       </div>
                     )
                   })}
@@ -552,7 +685,22 @@ export default function App() {
             arrows={arrows}
             markers={mode === 'result' ? markers : []}
             onProbe={setProbe}
+            drawing={view === 'setup' ? drawing?.shape : null}
+            planeNormal={planeNormal}
+            onDraw={onDraw}
+            overlays={overlays}
           />
+          {drawing && view === 'setup' && (
+            <div className="pick-hint">
+              <PenLine size={15} />
+              {drawing.shape === 'band'
+                ? 'Auf der Welle/Bohrung drücken und entlang der Achse ziehen (quer ziehen = nur ein Winkelbereich)'
+                : `${SHAPES[drawing.shape]} auf die Fläche zeichnen: drücken und ziehen`}
+              <button className="btn small" onClick={() => setDrawing(null)}>
+                <X size={14} /> Abbrechen
+              </button>
+            </div>
+          )}
           {active && view === 'setup' && (
             <div className="pick-hint">
               <MousePointerClick size={15} />
@@ -677,9 +825,9 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
   )
 }
 
-// Rundungsrauschen (z. B. 3e-9 N bei 1500 N Last) als 0 anzeigen
+// Rundungsrauschen (z. B. 3e-9 N bei 1500 N Last, iterativer Löser ~1e-7) als 0 anzeigen
 function clean(v, ref) {
-  return v.map((x) => (Math.abs(x) < 1e-9 * ref ? 0 : x))
+  return v.map((x) => (Math.abs(x) < 1e-6 * ref ? 0 : x))
 }
 
 function Section({ n, title, done, children }) {
@@ -712,6 +860,87 @@ function NumField({ label, unit, value, onChange }) {
         {unit && <em>{unit}</em>}
       </div>
     </label>
+  )
+}
+
+function RegionEditor({ item, cyl, drawing, onStart, onCancel, onChange }) {
+  const r = item.region
+  const shape = drawing?.shape ?? r?.shape ?? 'all'
+  const set = (patch) => onChange({ ...r, ...patch })
+  const vec = (key, labels) => (
+    <div className="grid3">
+      {labels.map((lab, k) => (
+        <NumField key={lab} label={lab} unit="mm" value={r[key][k]} onChange={(v) => set({ [key]: r[key].map((x, j) => (j === k ? v : x)) })} />
+      ))}
+    </div>
+  )
+  return (
+    <div className="region">
+      <label className="field">
+        <span>Wirkbereich</span>
+        <select
+          value={shape}
+          onChange={(e) => {
+            const v = e.target.value
+            if (v === 'all') {
+              onCancel()
+              onChange(null)
+            } else onStart(v)
+          }}
+        >
+          <option value="all">Ganze Fläche</option>
+          {Object.entries(SHAPES).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+      </label>
+      {drawing && <p className="hint draw">Im Bild auf die Fläche drücken und ziehen …</p>}
+      {r && !drawing && (
+        <>
+          {r.shape === 'circle' && (
+            <>
+              {vec('center', ['Mitte x', 'Mitte y', 'Mitte z'])}
+              <NumField label="Radius" unit="mm" value={r.radius} onChange={(v) => set({ radius: v })} />
+            </>
+          )}
+          {r.shape === 'rect' && (
+            <>
+              {vec('center', ['Mitte x', 'Mitte y', 'Mitte z'])}
+              <div className="grid3">
+                <NumField label="Breite" unit="mm" value={r.width} onChange={(v) => set({ width: v })} />
+                <NumField label="Höhe" unit="mm" value={r.height} onChange={(v) => set({ height: v })} />
+              </div>
+            </>
+          )}
+          {r.shape === 'band' && (
+            <>
+              <div className="grid3">
+                <NumField label="axial von" unit="mm" value={r.start} onChange={(v) => set({ start: v })} />
+                <NumField label="bis" unit="mm" value={r.end} onChange={(v) => set({ end: v })} />
+              </div>
+              <div className="grid3">
+                <NumField label="Winkel von" unit="°" value={r.angle_from} onChange={(v) => set({ angle_from: v })} />
+                <NumField label="bis" unit="°" value={r.angle_to} onChange={(v) => set({ angle_to: v })} />
+              </div>
+              <p className="hint">
+                Axial gemessen vom Anfang der Fläche{cyl ? ` (Länge ${fmt(cyl.length)} mm, Ø ${fmt(2 * cyl.radius)} mm)` : ''}.
+                0° = Richtung {axisName(r.reference) ?? 'Bezugsachse'}, Drehsinn um {axisName(r.axis) ?? 'die Achse'}.{' '}
+                {Math.abs(r.angle_to - r.angle_from) < 360 && (
+                  <button className="link inline" onClick={() => set({ angle_from: 0, angle_to: 360 })}>
+                    Ganzer Umfang
+                  </button>
+                )}
+              </p>
+            </>
+          )}
+          <button className="link" onClick={() => onStart(r.shape)}>
+            <PenLine size={13} /> Neu zeichnen
+          </button>
+        </>
+      )}
+    </div>
   )
 }
 

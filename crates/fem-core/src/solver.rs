@@ -1,11 +1,12 @@
 use faer::linalg::solvers::Solve;
 use faer::sparse::{SparseColMat, Triplet};
 use faer::{Col, Side};
-use nalgebra::Vector3;
+use nalgebra::{Matrix3, Vector3};
 use rayon::prelude::*;
 
-use crate::element::{tet_nodal_stress, tet_stiffness, tri_integration};
+use crate::element::{tet_nodal_stress, tet_stiffness, tri_integration_points, SurfacePoint};
 use crate::material::DMat;
+use crate::mesh::Face;
 use crate::model::{Load, Model, SolverKind};
 use crate::results::{principal, von_mises, Results};
 use crate::{pcg, FemError, Result};
@@ -47,6 +48,13 @@ pub fn solve(model: &Model) -> Result<Results> {
             .collect();
         nodes.sort_unstable();
         nodes.dedup();
+        if let Some(region) = model.group_region(&s.group)? {
+            let tol = mesh.tolerance();
+            nodes.retain(|&n| region.contains(mesh.nodes[n], tol));
+            if nodes.is_empty() {
+                return Err(FemError::BadLoad(s.group.clone(), "der Wirkbereich trifft die gewählten Flächen nicht".into()));
+            }
+        }
         for &n in &nodes {
             for (k, v) in s.fix.components().iter().enumerate() {
                 if v.is_some() {
@@ -57,31 +65,7 @@ pub fn solve(model: &Model) -> Result<Results> {
         support_nodes.push((s.group.clone(), nodes));
     }
 
-    // --- Lasten --------------------------------------------------------------
-    let mut f_ext = vec![0.0; ndof];
-    for load in &model.loads {
-        let ids = model.group_faces(load.group(), &faces)?;
-        let total_area: f64 = ids
-            .iter()
-            .map(|&i| tri_integration(&face_coords(model, &faces[i].nodes)).iter().map(|(_, n)| n.norm()).sum::<f64>())
-            .sum();
-        for &i in &ids {
-            let nodes = &faces[i].nodes;
-            for (nn, nda) in tri_integration(&face_coords(model, nodes)) {
-                let da = nda.norm();
-                let t: Vector3<f64> = match load {
-                    Load::Force { force, .. } => Vector3::from(*force) / total_area,
-                    Load::Traction { traction, .. } => Vector3::from(*traction),
-                    Load::Pressure { pressure, .. } => -nda / da * *pressure,
-                };
-                for (a, &node) in nodes.iter().enumerate() {
-                    for k in 0..3 {
-                        f_ext[3 * node + k] += nn[a] * t[k] * da;
-                    }
-                }
-            }
-        }
-    }
+    let f_ext = load_vector(model, &faces)?;
 
     let neq = prescribed.iter().filter(|p| p.is_none()).count();
     if neq == 0 {
@@ -251,6 +235,95 @@ fn solve_direct(model: &Model, prescribed: &[Option<f64>], f_ext: &[f64], d: &DM
     Ok(u)
 }
 
+/// Unterteilung der Randdreiecke, wenn eine Last nur auf einem Wirkbereich wirkt
+const REGION_SUBDIVISION: usize = 6;
+
+/// Knotenkräfte aller Lasten (3 je Knoten)
+pub fn load_vector(model: &Model, faces: &[Face]) -> Result<Vec<f64>> {
+    let mut f_ext = vec![0.0; 3 * model.mesh.nodes.len()];
+    for load in &model.loads {
+        add_load(model, load, faces, &mut f_ext)?;
+    }
+    Ok(f_ext)
+}
+
+/// Verteilt eine Last auf die Knoten (konsistente Knotenkräfte über die Formfunktionen).
+fn add_load(model: &Model, load: &Load, faces: &[Face], f_ext: &mut [f64]) -> Result<()> {
+    let name = load.group();
+    let bad = |msg: &str| FemError::BadLoad(name.into(), msg.into());
+    let region = model.group_region(name)?;
+    let tol = model.mesh.tolerance();
+    // Integrationspunkte (Fläche, Punkt) im Wirkbereich
+    let mut pts = Vec::new();
+    for i in model.group_faces(name, faces)? {
+        let coords = face_coords(model, &faces[i].nodes);
+        let sub = if region.is_some() { REGION_SUBDIVISION } else { 1 };
+        for p in tri_integration_points(&coords, sub) {
+            if region.is_none_or(|r| r.contains(p.x.into(), tol)) {
+                pts.push((i, p));
+            }
+        }
+    }
+    let area: f64 = pts.iter().map(|(_, p)| p.nda.norm()).sum();
+    if pts.is_empty() || area <= 0.0 {
+        return Err(bad("der Wirkbereich trifft die gewählten Flächen nicht"));
+    }
+    let center: Vector3<f64> = pts.iter().map(|(_, p)| p.x * p.nda.norm()).sum::<Vector3<f64>>() / area;
+
+    // Flächenlast je Integrationspunkt
+    let traction: Box<dyn Fn(&SurfacePoint) -> Vector3<f64>> = match load {
+        Load::Force { force, .. } => {
+            let t = Vector3::from(*force) / area;
+            Box::new(move |_| t)
+        }
+        Load::Traction { traction, .. } => {
+            let t = Vector3::from(*traction);
+            Box::new(move |_| t)
+        }
+        Load::Pressure { pressure, .. } => {
+            let p = *pressure;
+            Box::new(move |q| -q.nda.normalize() * p)
+        }
+        Load::Moment { moment, .. } => {
+            // t = ω × r mit ∫ r × (ω × r) dA = M  →  J·ω = M, J = ∫ (|r|²·I − r·rᵀ) dA
+            let mut j = Matrix3::zeros();
+            for (_, p) in &pts {
+                let r = p.x - center;
+                j += (Matrix3::identity() * r.norm_squared() - r * r.transpose()) * p.nda.norm();
+            }
+            let omega = j.lu().solve(&Vector3::from(*moment)).ok_or_else(|| bad("Moment lässt sich auf diese Fläche nicht verteilen"))?;
+            Box::new(move |p| omega.cross(&(p.x - center)))
+        }
+        Load::Bearing { force, .. } => {
+            let f = Vector3::from(*force);
+            let fmag = f.norm();
+            if fmag == 0.0 {
+                return Ok(());
+            }
+            let dir = f / fmag;
+            // Druck p = q·cos φ auf der Seite, gegen die gedrückt wird (Außennormale gegen die Kraft)
+            let w = move |p: &SurfacePoint| (-p.nda.normalize().dot(&dir)).max(0.0);
+            let norm: f64 = pts.iter().map(|(_, p)| w(p).powi(2) * p.nda.norm()).sum();
+            if norm <= 0.0 {
+                return Err(bad("keine Seite der Fläche liegt der Kraft gegenüber – Kraftrichtung prüfen"));
+            }
+            let q = fmag / norm;
+            Box::new(move |p| -p.nda.normalize() * q * w(p))
+        }
+    };
+
+    for (i, p) in &pts {
+        let t = traction(p);
+        let da = p.nda.norm();
+        for (a, &node) in faces[*i].nodes.iter().enumerate() {
+            for k in 0..3 {
+                f_ext[3 * node + k] += p.n[a] * t[k] * da;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn face_coords(model: &Model, nodes: &[usize]) -> Vec<[f64; 3]> {
     nodes.iter().map(|&n| model.mesh.nodes[n]).collect()
 }
@@ -260,6 +333,7 @@ mod tests {
     use super::*;
     use crate::generate::box_mesh;
     use crate::model::{Axis, Fix, Selection};
+    use crate::Region;
     use crate::{Material, Order};
 
     fn kragbalken(kind: SolverKind) -> Model {
@@ -295,6 +369,62 @@ mod tests {
         for k in 0..3 {
             assert!((direct.total_reaction[k] - iter.total_reaction[k]).abs() < 1e-5 * 100.0);
         }
+    }
+
+    /// Resultierende Kraft und Moment (um `c`) eines Lastvektors
+    fn resultant(model: &Model, f: &[f64], c: [f64; 3]) -> (Vector3<f64>, Vector3<f64>) {
+        let (mut fs, mut ms) = (Vector3::zeros(), Vector3::zeros());
+        for (n, p) in model.mesh.nodes.iter().enumerate() {
+            let fi = Vector3::new(f[3 * n], f[3 * n + 1], f[3 * n + 2]);
+            fs += fi;
+            ms += (Vector3::from(*p) - Vector3::from(c)).cross(&fi);
+        }
+        (fs, ms)
+    }
+
+    fn platte() -> Model {
+        Model::new(box_mesh([40.0, 20.0, 4.0], [20, 10, 2], Order::Quadratic).unwrap(), Material::steel())
+    }
+
+    #[test]
+    fn kraft_nur_im_kreis() {
+        let region = Region::Circle { center: [25.0, 8.0, 4.0], normal: [0.0, 0.0, 1.0], radius: 5.0 };
+        let model = platte()
+            .group_in("oben", Selection::Plane { axis: Axis::Z, value: 4.0 }, Some(region))
+            .load(Load::Force { group: "oben".into(), force: [0.0, 0.0, -500.0] });
+        let f = load_vector(&model, &model.mesh.boundary_faces()).unwrap();
+        let (fs, ms) = resultant(&model, &f, [25.0, 8.0, 4.0]);
+        assert!((fs - Vector3::new(0.0, 0.0, -500.0)).norm() < 1e-9);
+        // Kraft greift (fast) in der Kreismitte an
+        assert!(ms.norm() < 0.02 * 500.0 * 5.0, "{ms:?}");
+        // weit außerhalb keine Last
+        for (n, p) in model.mesh.nodes.iter().enumerate() {
+            if ((p[0] - 25.0).powi(2) + (p[1] - 8.0).powi(2)).sqrt() > 7.0 {
+                assert_eq!(f[3 * n + 2], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn moment_ergibt_reines_moment() {
+        let region = Region::Rect { center: [10.0, 10.0, 4.0], normal: [0.0, 0.0, 1.0], u: [1.0, 0.0, 0.0], width: 12.0, height: 8.0 };
+        let m = [300.0, -200.0, 1000.0];
+        let model = platte()
+            .group_in("oben", Selection::Plane { axis: Axis::Z, value: 4.0 }, Some(region))
+            .load(Load::Moment { group: "oben".into(), moment: m });
+        let f = load_vector(&model, &model.mesh.boundary_faces()).unwrap();
+        let (fs, ms) = resultant(&model, &f, [10.0, 10.0, 4.0]);
+        assert!(fs.norm() < 1e-9, "{fs:?}");
+        assert!((ms - Vector3::from(m)).norm() < 1e-9, "{ms:?}");
+    }
+
+    #[test]
+    fn bereich_trifft_nichts() {
+        let region = Region::Circle { center: [100.0, 100.0, 4.0], normal: [0.0, 0.0, 1.0], radius: 1.0 };
+        let model = platte()
+            .group_in("oben", Selection::Plane { axis: Axis::Z, value: 4.0 }, Some(region))
+            .load(Load::Force { group: "oben".into(), force: [0.0, 0.0, -1.0] });
+        assert!(matches!(load_vector(&model, &model.mesh.boundary_faces()), Err(FemError::BadLoad(..))));
     }
 
     #[test]

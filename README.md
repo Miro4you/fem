@@ -11,14 +11,21 @@ Sicherheit) mit Verformung, Maximum-Markierung, Messpunkt per Klick, Warnungen (
 Fließen, große Verformung), Gleichgewichtskontrolle, Projekt speichern/laden (`.fem.json`), Export `.vtu`.
 
 Lagerarten: fest eingespannt · reibungsfreie Auflage/Symmetrie (ebene, achsparallele Flächen) · Richtungen einzeln.
-Lasten: Kraft (gleichmäßig verteilt, Richtung frei oder senkrecht auf die Fläche) · Druck.
+Lasten: Kraft (gleichmäßig verteilt, Richtung frei oder senkrecht auf die Fläche) · Druck · Moment ·
+Lagerlast (Bolzen/Welle: nur der halbe Umfang, cos-verteilt).
+
+**Wirkbereich:** Lasten und Lager können statt auf der ganzen Fläche nur auf einem Teil wirken. Den Bereich
+zieht man mit der Maus direkt auf der Fläche auf: Kreis, Rechteck oder Abschnitt einer Welle/Bohrung (axial von–bis,
+optional nur ein Winkelbereich). Danach lassen sich die Maße als Zahlen anpassen. Die Lastresultierende stimmt
+exakt; wie scharf der Rand abgebildet wird, hängt vom Netz ab (Elemente deutlich kleiner als der Bereich wählen).
 
 ### Rechenkern
 
 - Lineare Statik für 3D-Volumenkörper, Tetraeder-Elemente **TET10** (quadratisch, Standard) und TET4
 - Werkstoff linear-elastisch, isotrop (E, ν, optional Streckgrenze)
 - Lager: Richtungen einzeln festhalten (Einspannung, Loslager, Symmetrie)
-- Lasten: Gesamtkraft auf Fläche, Flächenlast (Vektor), Druck
+- Lasten: Gesamtkraft auf Fläche, Flächenlast (Vektor), Druck, Moment (linear verteilt, wie starres Anschlussteil),
+  Lagerlast (cos-Verteilung auf der gedrückten Zylinderhälfte); jeweils optional nur in einem Wirkbereich
 - Ergebnisse: Verschiebungen, Vergleichsspannung (von Mises), Hauptspannungen, Lagerreaktionen,
   Gleichgewichtskontrolle, Sicherheit gegen Fließen
 - Gleichungslöser: direkt (Cholesky) bei kleinen Modellen, ab 50 000 Unbekannten automatisch **iterativ**
@@ -72,6 +79,11 @@ yield = 235.0                # optional → Sicherheit gegen Fließen
 [[group]]                    # benannte Flächenauswahl
 name = "einspannung"
 plane = { axis = "x", value = 0.0 }               # oder: box = { min = [...], max = [...] }
+# optional nur ein Teil der Flächen (Wirkbereich):
+# region = { shape = "circle", center = [x,y,z], normal = [0,0,1], radius = 5.0 }
+# region = { shape = "rect", center = [...], normal = [...], u = [1,0,0], width = 20.0, height = 10.0 }
+# region = { shape = "band", origin = [...], axis = [0,0,1], reference = [1,0,0], start = 80.0, end = 100.0,
+#            angle_from = 0.0, angle_to = 360.0 }   # Wellenabschnitt: axial von–bis, Winkel in Grad
 
 [[support]]
 group = "einspannung"
@@ -80,6 +92,8 @@ fix = ["x", "y", "z"]        # weglassen = alle Richtungen fest
 [[load]]
 group = "ende"
 force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 0.1 (MPa, drückt aufs Bauteil)
+                             # oder: moment = [Mx, My, Mz] (N·mm, um den Schwerpunkt des Bereichs)
+                             # oder: bearing = [...] (Lagerlast in N: Bolzen/Welle, nur halber Umfang, cos-verteilt)
 ```
 
 ## Validierung
@@ -92,6 +106,8 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 | Kragbalken TET10 (40×2×4) | Durchbiegung (Timoshenko) | −0,5 % |
 | Kragbalken TET10 (40×2×4) | Biegespannung bei l/2 | +0,2 % |
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
+| Welle Ø20, Torsionsmoment (STEP + Gmsh) | Schubspannung τ = 16T/(πd³) / Verdrehwinkel | +0,03 % / 0,00 % |
+| Welle Ø20, Lagerlast auf Abschnitt z = 80…100 | Biegespannung σ = F·a/W | −0,4 % |
 
 Beispiel `platte_druck.toml` (Viertelplatte mit Symmetrie): Durchbiegung 0,166 mm vs. Kirchhoff 0,159 mm,
 Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernachlässigte Dicke.
@@ -111,7 +127,10 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
 
   Ergebnisse beider Löser stimmen überein (Abbruch bei ‖r‖/‖f‖ < 10⁻⁹).
 - Reibungsfreie Auflage nur für ebene, achsparallele Flächen (schräge Flächen brauchen lokale Koordinaten – später).
-- Lasten wirken gleichmäßig über die Fläche; eine Lagerlast (Bolzen in Bohrung, nur halbe Fläche) kommt später.
+- Der Rand eines Wirkbereichs wird nicht ins Netz eingearbeitet (kein „Imprint“ wie in Ansys): Die Last wird an den
+  Integrationspunkten abgeschnitten. Bei Bereichen, die nur wenige Elemente groß sind, wirkt der Rand verschmiert.
+- Lagerlast: Die Kraft muss quer zur Bohrungsachse zeigen; bei nur teilweise belastetem Umfang kann eine kleine
+  Querkomponente entstehen (Anzeige „Summe aller Lasten“ prüfen).
 - Lagergruppen-Summen: Knoten auf gemeinsamen Kanten zählen in jeder Gruppe; maßgeblich ist „Summe aller Lager".
 
 ## Roadmap

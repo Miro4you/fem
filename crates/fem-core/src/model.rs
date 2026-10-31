@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::mesh::{Face, Mesh};
+use crate::region::Region;
 use crate::{FemError, Material, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,12 +108,22 @@ pub enum Load {
     Traction { group: String, traction: [f64; 3] },
     /// Druck senkrecht auf die Fläche (positiv = drückt auf das Bauteil)
     Pressure { group: String, pressure: f64 },
+    /// Moment (Vektor, Drehsinn rechte Hand) um den Flächenschwerpunkt, linear über die Fläche verteilt
+    /// wie bei einem starren Anschlussteil (Torsion → Schub, Biegung → Zug/Druck)
+    Moment { group: String, moment: [f64; 3] },
+    /// Lagerlast (Bolzen in Bohrung, Welle in Lager): Kraft wirkt nur auf die Hälfte der Zylinderfläche,
+    /// gegen die gedrückt wird, mit kosinusförmiger Druckverteilung
+    Bearing { group: String, force: [f64; 3] },
 }
 
 impl Load {
     pub fn group(&self) -> &str {
         match self {
-            Load::Force { group, .. } | Load::Traction { group, .. } | Load::Pressure { group, .. } => group,
+            Load::Force { group, .. }
+            | Load::Traction { group, .. }
+            | Load::Pressure { group, .. }
+            | Load::Moment { group, .. }
+            | Load::Bearing { group, .. } => group,
         }
     }
 }
@@ -130,11 +141,19 @@ pub enum SolverKind {
     Iterative,
 }
 
+/// Benannte Flächenauswahl, optional auf einen Wirkbereich eingeschränkt
+#[derive(Debug, Clone)]
+pub struct Group {
+    pub name: String,
+    pub selection: Selection,
+    pub region: Option<Region>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Model {
     pub mesh: Mesh,
     pub material: Material,
-    pub groups: Vec<(String, Selection)>,
+    pub groups: Vec<Group>,
     pub supports: Vec<Support>,
     pub loads: Vec<Load>,
     pub solver: SolverKind,
@@ -146,8 +165,23 @@ impl Model {
     }
 
     pub fn group(mut self, name: &str, sel: Selection) -> Self {
-        self.groups.push((name.into(), sel));
+        self.groups.push(Group { name: name.into(), selection: sel, region: None });
         self
+    }
+
+    /// Gruppe, die nur innerhalb von `region` wirkt (Last nur auf einem Teil der Fläche)
+    pub fn group_in(mut self, name: &str, sel: Selection, region: Option<Region>) -> Self {
+        self.groups.push(Group { name: name.into(), selection: sel, region });
+        self
+    }
+
+    fn find_group(&self, name: &str) -> Result<&Group> {
+        self.groups.iter().find(|g| g.name == name).ok_or_else(|| FemError::UnknownGroup(name.into()))
+    }
+
+    /// Wirkbereich einer Gruppe (`None` = ganze Fläche)
+    pub fn group_region(&self, name: &str) -> Result<Option<&Region>> {
+        Ok(self.find_group(name)?.region.as_ref())
     }
 
     pub fn support(mut self, group: &str, fix: Fix) -> Self {
@@ -167,13 +201,7 @@ impl Model {
 
     /// Flächenindizes einer benannten Gruppe.
     pub fn group_faces(&self, name: &str, faces: &[Face]) -> Result<Vec<usize>> {
-        let sel = self
-            .groups
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, s)| s)
-            .ok_or_else(|| FemError::UnknownGroup(name.into()))?;
-        let ids = sel.select(&self.mesh, faces);
+        let ids = self.find_group(name)?.selection.select(&self.mesh, faces);
         if ids.is_empty() {
             return Err(FemError::EmptyGroup(name.into()));
         }

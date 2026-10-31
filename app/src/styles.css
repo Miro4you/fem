@@ -87,7 +87,10 @@ h3.sub { margin: 6px 0 0; font-size: 12px; text-transform: uppercase; letter-spa
 .btn.pick { justify-content: flex-start; width: 100%; }
 .btn.pick .count { margin-left: auto; color: var(--muted); font-size: 12px; }
 .btn.pick.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-.link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-align: left; font-size: 12px; }
+.link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-align: left; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.link.inline { display: inline; }
+.region { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.hint.draw { color: var(--accent); }
 .icon-btn {
   display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; border: none;
   background: transparent; color: var(--muted); cursor: pointer;

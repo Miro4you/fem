@@ -195,6 +195,50 @@ pub fn tri_integration(coords: &[[f64; 3]]) -> Vec<(Vec<f64>, Vector3<f64>)> {
         .collect()
 }
 
+/// Integrationspunkt einer Randfläche
+pub struct SurfacePoint {
+    /// Formfunktionen der Flächenknoten
+    pub n: Vec<f64>,
+    /// Außennormale · dA
+    pub nda: Vector3<f64>,
+    /// Lage des Punkts
+    pub x: Vector3<f64>,
+}
+
+/// Wie `tri_integration`, aber jedes Dreieck in `sub × sub` Teildreiecke zerlegt
+/// (feinere Abtastung, wenn nur ein Teil der Fläche belastet ist).
+pub fn tri_integration_points(coords: &[[f64; 3]], sub: usize) -> Vec<SurfacePoint> {
+    let sub = sub.max(1);
+    let h = 1.0 / sub as f64;
+    let mut cells = Vec::with_capacity(sub * sub);
+    for i in 0..sub {
+        for j in 0..sub - i {
+            let (a, b) = (i as f64 * h, j as f64 * h);
+            cells.push([[a, b], [a + h, b], [a, b + h]]);
+            if i + j + 1 < sub {
+                cells.push([[a + h, b], [a + h, b + h], [a, b + h]]);
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(cells.len() * TRI_GAUSS.len());
+    for c in cells {
+        for g in TRI_GAUSS {
+            let xi = c[0][0] + g[0] * (c[1][0] - c[0][0]) + g[1] * (c[2][0] - c[0][0]);
+            let eta = c[0][1] + g[0] * (c[1][1] - c[0][1]) + g[1] * (c[2][1] - c[0][1]);
+            let (nn, dn) = tri_shape(coords.len(), xi, eta);
+            let (mut t1, mut t2, mut x) = (Vector3::zeros(), Vector3::zeros(), Vector3::zeros());
+            for (i, p) in coords.iter().enumerate() {
+                let p = Vector3::from(*p);
+                t1 += p * dn[i][0];
+                t2 += p * dn[i][1];
+                x += p * nn[i];
+            }
+            out.push(SurfacePoint { n: nn, nda: t1.cross(&t2) * g[2] * h * h, x });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +292,20 @@ mod tests {
                 let f = &k * u;
                 assert!(f.abs().max() < 1e-8 * k.abs().max(), "npe={npe} mode={mode}");
             }
+        }
+    }
+
+    #[test]
+    fn unterteilte_integration_gleiche_flaeche() {
+        // gekrümmtes TRI6
+        let c = [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [1.0, -0.2, 0.3], [1.1, 1.6, 0.1], [0.0, 1.5, 0.2]];
+        let a1: Vector3<f64> = tri_integration(&c).iter().map(|(_, n)| n).sum();
+        for sub in [1, 3, 6] {
+            let pts = tri_integration_points(&c, sub);
+            let a2: Vector3<f64> = pts.iter().map(|p| p.nda).sum();
+            assert!((a1 - a2).norm() < 1e-12, "sub {sub}");
+            // Formfunktionen summieren sich zu 1
+            assert!(pts.iter().all(|p| (p.n.iter().sum::<f64>() - 1.0).abs() < 1e-12));
         }
     }
 

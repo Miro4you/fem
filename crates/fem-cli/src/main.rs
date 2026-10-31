@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use fem_core::generate::box_mesh;
-use fem_core::{validate, Axis, Fix, Load, Material, Model, Order, Selection, SolverKind};
+use fem_core::{validate, Axis, Fix, Load, Material, Model, Order, Region, Selection, SolverKind};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -47,6 +47,8 @@ struct GroupDef {
     plane: Option<PlaneDef>,
     #[serde(rename = "box")]
     bbox: Option<BoxDef>,
+    /// Wirkbereich: Last/Lager nur auf diesem Teil der Flächen
+    region: Option<Region>,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +80,8 @@ struct LoadDef {
     force: Option<[f64; 3]>,
     traction: Option<[f64; 3]>,
     pressure: Option<f64>,
+    moment: Option<[f64; 3]>,
+    bearing: Option<[f64; 3]>,
 }
 
 fn build_model(case: Case) -> Result<Model> {
@@ -98,7 +102,7 @@ fn build_model(case: Case) -> Result<Model> {
             (None, Some(b)) => Selection::Box { min: b.min, max: b.max },
             _ => bail!("Gruppe „{}“: genau eine Auswahl angeben (plane oder box)", g.name),
         };
-        model = model.group(&g.name, sel);
+        model = model.group_in(&g.name, sel, g.region);
     }
     for s in case.support {
         let fix = match s.fix {
@@ -114,11 +118,13 @@ fn build_model(case: Case) -> Result<Model> {
         model = model.support(&s.group, fix);
     }
     for l in case.load {
-        let load = match (l.force, l.traction, l.pressure) {
-            (Some(force), None, None) => Load::Force { group: l.group, force },
-            (None, Some(traction), None) => Load::Traction { group: l.group, traction },
-            (None, None, Some(pressure)) => Load::Pressure { group: l.group, pressure },
-            _ => bail!("Last auf „{}“: genau eines von force, traction oder pressure angeben", l.group),
+        let load = match (l.force, l.traction, l.pressure, l.moment, l.bearing) {
+            (Some(force), None, None, None, None) => Load::Force { group: l.group, force },
+            (None, Some(traction), None, None, None) => Load::Traction { group: l.group, traction },
+            (None, None, Some(pressure), None, None) => Load::Pressure { group: l.group, pressure },
+            (None, None, None, Some(moment), None) => Load::Moment { group: l.group, moment },
+            (None, None, None, None, Some(force)) => Load::Bearing { group: l.group, force },
+            _ => bail!("Last auf „{}“: genau eines von force, traction, pressure, moment oder bearing angeben", l.group),
         };
         model = model.load(load);
     }

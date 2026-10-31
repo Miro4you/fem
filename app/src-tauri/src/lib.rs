@@ -7,7 +7,8 @@ use std::time::Instant;
 
 use fem_core::gmsh::{self, MeshOptions};
 use fem_core::mesh::Face;
-use fem_core::{Fix, Load, Material, Mesh, Model, Order, Results, Selection, SolverKind};
+use fem_core::region::{fit_cylinder, Cylinder};
+use fem_core::{Fix, Load, Material, Mesh, Model, Order, Region, Results, Selection, SolverKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Default)]
@@ -31,6 +32,8 @@ struct SurfaceInfo {
     center: [f64; 3],
     /// Flächennormale, falls die Fläche eben ist
     normal: Option<[f64; 3]>,
+    /// Achse, Radius usw., falls die Fläche ein Zylinder(ausschnitt) ist (Welle, Bohrung)
+    cylinder: Option<Cylinder>,
 }
 
 #[derive(Serialize)]
@@ -68,6 +71,8 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
     let mut tri_surface = Vec::new();
     let mut edge_tags: HashMap<(usize, usize), (i32, Option<i32>, Option<usize>)> = HashMap::new();
     let mut surf: HashMap<i32, (f64, [f64; 3], [f64; 3], Vec<[f64; 3]>)> = HashMap::new();
+    // Integrationspunkte je Fläche (Lage, Normale mit Flächengewicht) für die Zylindererkennung
+    let mut samples: HashMap<i32, (Vec<[f64; 3]>, Vec<([f64; 3], [f64; 3], f64)>)> = HashMap::new();
 
     for f in faces {
         let tag = f.tag.unwrap_or(-1);
@@ -101,6 +106,12 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
             for k in 0..3 {
                 nrm[k] += nda[k];
             }
+        }
+        let smp = samples.entry(tag).or_default();
+        smp.0.extend(p.iter().copied());
+        for q in fem_core::element::tri_integration_points(&p, 1) {
+            let da = q.nda.norm();
+            smp.1.push((q.x.into(), (q.nda / da.max(1e-300)).into(), da));
         }
         let c = [(p[0][0] + p[1][0] + p[2][0]) / 3.0, (p[0][1] + p[1][1] + p[2][1]) / 3.0, (p[0][2] + p[1][2] + p[2][2]) / 3.0];
         let e = surf.entry(tag).or_insert((0.0, [0.0; 3], [0.0; 3], Vec::new()));
@@ -136,7 +147,8 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
             let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-300);
             let n = [n[0] / l, n[1] / l, n[2] / l];
             let planar = normals.iter().all(|m| m[0] * n[0] + m[1] * n[1] + m[2] * n[2] > 1.0 - 1e-6);
-            SurfaceInfo { tag, area, center: [c[0] / area, c[1] / area, c[2] / area], normal: planar.then_some(n) }
+            let cylinder = if planar { None } else { samples.get(&tag).and_then(|(p, nr)| fit_cylinder(p, nr)) };
+            SurfaceInfo { tag, area, center: [c[0] / area, c[1] / area, c[2] / area], normal: planar.then_some(n), cylinder }
         })
         .collect();
     surfaces.sort_by_key(|s| s.tag);
@@ -203,13 +215,17 @@ pub fn open_step_impl(state: &AppState, path: &str, size: Option<f64>, linear: b
 struct SupportDef {
     surfaces: Vec<i32>,
     fix: Fix,
+    #[serde(default)]
+    region: Option<Region>,
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum LoadDef {
-    Force { surfaces: Vec<i32>, force: [f64; 3] },
-    Pressure { surfaces: Vec<i32>, pressure: f64 },
+    Force { surfaces: Vec<i32>, force: [f64; 3], #[serde(default)] region: Option<Region> },
+    Pressure { surfaces: Vec<i32>, pressure: f64, #[serde(default)] region: Option<Region> },
+    Moment { surfaces: Vec<i32>, moment: [f64; 3], #[serde(default)] region: Option<Region> },
+    Bearing { surfaces: Vec<i32>, force: [f64; 3], #[serde(default)] region: Option<Region> },
 }
 
 #[derive(Deserialize)]
@@ -273,19 +289,20 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver);
         for (i, s) in setup.supports.iter().enumerate() {
             let name = format!("Lager {}", i + 1);
-            model = model.group(&name, Selection::Surfaces(s.surfaces.clone())).support(&name, s.fix);
+            model = model.group_in(&name, Selection::Surfaces(s.surfaces.clone()), s.region.clone()).support(&name, s.fix);
         }
         for (i, l) in setup.loads.iter().enumerate() {
             let name = format!("Last {}", i + 1);
-            let (sel, load) = match l {
-                LoadDef::Force { surfaces, force } => {
-                    (surfaces, Load::Force { group: name.clone(), force: *force })
+            let group = name.clone();
+            let (sel, region, load) = match l {
+                LoadDef::Force { surfaces, force, region } => (surfaces, region, Load::Force { group, force: *force }),
+                LoadDef::Pressure { surfaces, pressure, region } => {
+                    (surfaces, region, Load::Pressure { group, pressure: *pressure })
                 }
-                LoadDef::Pressure { surfaces, pressure } => {
-                    (surfaces, Load::Pressure { group: name.clone(), pressure: *pressure })
-                }
+                LoadDef::Moment { surfaces, moment, region } => (surfaces, region, Load::Moment { group, moment: *moment }),
+                LoadDef::Bearing { surfaces, force, region } => (surfaces, region, Load::Bearing { group, force: *force }),
             };
-            model = model.group(&name, Selection::Surfaces(sel.clone())).load(load);
+            model = model.group_in(&name, Selection::Surfaces(sel.clone()), region.clone()).load(load);
         }
 
         let res = fem_core::solve(&model).map_err(|e| e.to_string())?;

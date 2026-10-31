@@ -133,6 +133,62 @@ pub fn lochplatte(step: &std::path::Path) -> Result<Vec<Check>> {
     ])
 }
 
+/// Welle Ø20 × 100 (STEP, Gmsh), bei z = 0 eingespannt.
+/// a) Torsionsmoment T auf der Stirnfläche: τ = 16·T/(π·d³), Verdrehwinkel φ = T·L/(G·Ip)
+/// b) Lagerlast F (nur halber Umfang belastet) auf dem Wellenabschnitt z = 80…100:
+///    Biegespannung bei z = 50: σ = F·(90 − 50)/W, W = π·d³/32
+pub fn welle(step: &std::path::Path) -> Result<Vec<Check>> {
+    use crate::region::Region;
+    let (d, l, t, f): (f64, f64, f64, f64) = (20.0, 100.0, 100_000.0, 1000.0);
+    let opts = crate::gmsh::MeshOptions { size: Some(2.5), curvature_points: 32, ..Default::default() };
+    let mesh = crate::gmsh::mesh_step(step, &opts)?;
+    let mat = Material::steel();
+    let tol = 0.01 * d;
+    let on_surface = |p: &[f64; 3]| ((p[0] * p[0] + p[1] * p[1]).sqrt() - d / 2.0).abs() < tol;
+    let name = format!("Welle Ø{d} (STEP, Gmsh, {} Elemente)", mesh.n_elems());
+
+    let torsion = Model::new(mesh.clone(), mat.clone())
+        .group("z0", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("ende", Selection::Plane { axis: Axis::Z, value: l })
+        .support("z0", Fix::all())
+        .load(Load::Moment { group: "ende".into(), moment: [0.0, 0.0, t] });
+    let res = solve(&torsion)?;
+    let m = &torsion.mesh;
+    let tau = mean(m.nodes.iter().zip(&res.stress).filter(|(p, _)| on_surface(p) && (p[2] - l / 2.0).abs() < 5.0).map(|(_, s)| {
+        (s[4] * s[4] + s[5] * s[5]).sqrt()
+    }));
+    let phi = mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| on_surface(p) && (p[2] - l).abs() < tol).map(|(p, u)| {
+        (p[0] * u[1] - p[1] * u[0]) / (p[0] * p[0] + p[1] * p[1])
+    }));
+    let ip = std::f64::consts::PI * d.powi(4) / 32.0;
+
+    let band = Region::Band {
+        origin: [0.0; 3],
+        axis: [0.0, 0.0, 1.0],
+        reference: [1.0, 0.0, 0.0],
+        start: 80.0,
+        end: 100.0,
+        angle_from: 0.0,
+        angle_to: 360.0,
+    };
+    let bearing = Model::new(mesh, mat.clone())
+        .group("z0", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group_in("mantel", Selection::Box { min: [-d, -d, -1.0], max: [d, d, l + 1.0] }, Some(band))
+        .support("z0", Fix::all())
+        .load(Load::Bearing { group: "mantel".into(), force: [0.0, f, 0.0] });
+    let res_b = solve(&bearing)?;
+    let mb = &bearing.mesh;
+    let sigma = mean(mb.nodes.iter().zip(&res_b.stress).filter(|(p, _)| (p[1] + d / 2.0).abs() < tol && (p[2] - 50.0).abs() < 2.0).map(|(_, s)| s[2]));
+    let w = std::f64::consts::PI * d.powi(3) / 32.0;
+
+    Ok(vec![
+        check(&name, "Torsion: τ am Umfang bei l/2 [MPa]", tau, 16.0 * t / (std::f64::consts::PI * d.powi(3)), 0.02),
+        check(&name, "Torsion: Verdrehwinkel am Ende [rad]", phi, t * l / (mat.shear_modulus() * ip), 0.02),
+        check(&name, "Lagerlast: Summe der Lasten Fy [N]", res_b.total_load[1], f, 1e-6),
+        check(&name, "Lagerlast: Biegespannung σz bei z = 50 [MPa]", sigma, f * 40.0 / w, 0.03),
+    ])
+}
+
 /// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
@@ -142,6 +198,10 @@ pub fn all() -> Result<Vec<Check>> {
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/lochplatte.step");
     if crate::gmsh::find_gmsh().is_some() && step.exists() {
         v.extend(lochplatte(&step)?);
+    }
+    let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/welle.step");
+    if crate::gmsh::find_gmsh().is_some() && step.exists() {
+        v.extend(welle(&step)?);
     }
     Ok(v)
 }

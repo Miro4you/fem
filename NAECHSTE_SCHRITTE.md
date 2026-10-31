@@ -36,7 +36,10 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - ✅ Speicher: iterativer Löser (CG + Mehrgitter) eingebaut, schaltet ab 50 000 Unbekannten automatisch um.
   Hebel 0,6 mm (1,3 Mio. Unbekannte) jetzt 70 s / 3,4 GB statt Absturz. Mögliche Ergänzung: Fortschrittsanzeige
   in der App während langer Rechnungen.
-- Lagerlast (Bolzen drückt nur auf eine Bohrungshälfte)
+- ✅ Lagerlast (Bolzen drückt nur auf eine Bohrungshälfte, cos-verteilt) + Moment als Last
+- ✅ Wirkbereich: Last/Lager nur auf einem gezeichneten Kreis/Rechteck oder Wellen-/Bohrungsabschnitt
+  → Felix: bitte in der App ausprobieren (Last anlegen → „Wirkbereich“ wählen → im Bild aufziehen)
+- Idee: Netz im Wirkbereich automatisch verfeinern (Gmsh-Größenfeld), damit kleine Bereiche scharf abgebildet werden
 - Reibungsfreie Lagerung auf schrägen Flächen
 - Mac-Build testen
 - Endgültiger Programmname
