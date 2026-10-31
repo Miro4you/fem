@@ -252,3 +252,8 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .warn-text { color: var(--warn-text); }
 
 .mouse-help { position: absolute; left: 12px; bottom: 10px; font-size: 11px; color: var(--muted); pointer-events: none; opacity: 0.85; }
+
+/* Lastpfeil ausrichten */
+.aim-bar { gap: 10px; white-space: nowrap; max-width: calc(100% - 140px); }
+.aim-angle { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 120px; }
+.muted.small { color: var(--muted); font-size: 11px; }

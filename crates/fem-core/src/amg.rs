@@ -9,6 +9,7 @@
 use nalgebra::{Cholesky, DMatrix, Dyn};
 use rayon::prelude::*;
 
+use crate::solver::NodeFrames;
 use crate::sparse::Bsr;
 use crate::{FemError, Result};
 
@@ -39,8 +40,9 @@ pub struct Amg {
 impl Amg {
     /// `a`: Steifigkeitsmatrix (3×3-Knotenblöcke), `coords`: Knotenkoordinaten,
     /// `fixed`: vorgegebene Freiheitsgrade (Zeile/Spalte = Einheitsvektor in `a`).
-    pub fn new(a: Bsr, coords: &[[f64; 3]], fixed: &[bool]) -> Result<Amg> {
-        let mut b = rigid_body_modes(coords, fixed);
+    /// `frames`: lokale Knotenbasen (dort sind auch die Starrkörpermoden lokal anzugeben).
+    pub fn new(a: Bsr, coords: &[[f64; 3]], fixed: &[bool], frames: &NodeFrames) -> Result<Amg> {
+        let mut b = rigid_body_modes(coords, fixed, frames);
         let mut a = a;
         let mut levels = Vec::new();
         while a.nrows * a.br > COARSE_MAX_DOF && levels.len() + 1 < MAX_LEVELS {
@@ -115,7 +117,7 @@ impl Amg {
 }
 
 /// Starrkörperbewegungen (Translationen, Drehungen um den Schwerpunkt), an festen Freiheitsgraden null.
-fn rigid_body_modes(coords: &[[f64; 3]], fixed: &[bool]) -> Vec<f64> {
+fn rigid_body_modes(coords: &[[f64; 3]], fixed: &[bool], frames: &NodeFrames) -> Vec<f64> {
     let n = coords.len().max(1) as f64;
     let mut c = [0.0; 3];
     for p in coords {
@@ -129,7 +131,16 @@ fn rigid_body_modes(coords: &[[f64; 3]], fixed: &[bool]) -> Vec<f64> {
     let mut b = vec![0.0; coords.len() * 3 * NS];
     for (i, p) in coords.iter().enumerate() {
         let [x, y, z] = [0, 1, 2].map(|k| (p[k] - c[k]) / scale);
-        let rows = [[1.0, 0.0, 0.0, -y, 0.0, z], [0.0, 1.0, 0.0, x, -z, 0.0], [0.0, 0.0, 1.0, 0.0, y, -x]];
+        let mut rows = [[1.0, 0.0, 0.0, -y, 0.0, z], [0.0, 1.0, 0.0, x, -z, 0.0], [0.0, 0.0, 1.0, 0.0, y, -x]];
+        if let Some(r) = frames.get(i) {
+            // Moden in die lokale Knotenbasis drehen
+            let g = rows;
+            for (d, row) in rows.iter_mut().enumerate() {
+                for (m, v) in row.iter_mut().enumerate() {
+                    *v = (0..3).map(|k| r[(d, k)] * g[k][m]).sum();
+                }
+            }
+        }
         for (d, row) in rows.iter().enumerate() {
             if !fixed[3 * i + d] {
                 b[(3 * i + d) * NS..(3 * i + d + 1) * NS].copy_from_slice(row);

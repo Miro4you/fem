@@ -189,6 +189,88 @@ pub fn welle(step: &std::path::Path) -> Result<Vec<Check>> {
     ])
 }
 
+/// Zugstab, beliebig im Raum gedreht, nur über reibungsfreie Auflagen auf den drei (schrägen)
+/// Symmetrieflächen gelagert: exakt σ = F/A, Δl = F·l/(E·A).
+pub fn zugstab_schraeg(kind: crate::SolverKind) -> Result<Vec<Check>> {
+    use crate::model::LocalFix;
+    use nalgebra::{Rotation3, Vector3};
+    let (l, b, h, f) = (100.0, 10.0, 10.0, 1000.0);
+    let mat = Material::steel();
+    let mut mesh = box_mesh([l, b, h], [10, 2, 2], Order::Quadratic)?;
+    let rot = Rotation3::from_euler_angles(0.4, -0.7, 1.1);
+    // Gruppen im ungedrehten Netz bestimmen (Flächenindizes ändern sich durch die Drehung nicht)
+    let faces = mesh.boundary_faces();
+    let sel = |s: Selection| Selection::Faces(s.select(&mesh, &faces));
+    let (x0, y0, z0, ende) = (
+        sel(Selection::Plane { axis: Axis::X, value: 0.0 }),
+        sel(Selection::Plane { axis: Axis::Y, value: 0.0 }),
+        sel(Selection::Plane { axis: Axis::Z, value: 0.0 }),
+        sel(Selection::Plane { axis: Axis::X, value: l }),
+    );
+    for p in mesh.nodes.iter_mut() {
+        *p = (rot * Vector3::from(*p)).into();
+    }
+    let dir = rot * Vector3::x();
+    let model = Model::new(mesh, mat.clone())
+        .group("x0", x0)
+        .group("y0", y0)
+        .group("z0", z0)
+        .group("ende", ende)
+        .support_local("x0", LocalFix::Normal)
+        .support_local("y0", LocalFix::Normal)
+        .support_local("z0", LocalFix::Normal)
+        .load(Load::Force { group: "ende".into(), force: (dir * f).into() })
+        .solver(kind);
+    let res = solve(&model)?;
+    let name = format!("Zugstab schräg im Raum, reibungsfreie Auflagen ({})", if kind == crate::SolverKind::Iterative { "iterativ" } else { "direkt" });
+    let vm_max = res.von_mises.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let vm_min = res.von_mises.iter().copied().fold(f64::INFINITY, f64::min);
+    let dl = res.displacement.iter().map(|u| Vector3::from(*u).dot(&dir)).fold(f64::NEG_INFINITY, f64::max);
+    Ok(vec![
+        check(&name, "Vergleichsspannung max [MPa]", vm_max, f / (b * h), 1e-5),
+        check(&name, "Vergleichsspannung min [MPa]", vm_min, f / (b * h), 1e-5),
+        check(&name, "Δl [mm]", dl, f * l / (mat.e * b * h), 1e-5),
+        check(&name, "Lagerkraft in Stabrichtung [N]", -Vector3::from(res.total_reaction).dot(&dir), f, 1e-6),
+    ])
+}
+
+/// Balken mit zwei Bolzenbohrungen als Gelenke (zylindrische Lagerung: radial + axial fest, drehbar),
+/// Einzellast in der Mitte: Einfeldträger, w = F·L³/(48·E·I) + F·L/(4·κ·G·A), σ(x) = F/2·x / W
+pub fn balken_gelenk(step: &std::path::Path) -> Result<Vec<Check>> {
+    use crate::model::LocalFix;
+    use crate::region::Region;
+    let (lb, b, h, f): (f64, f64, f64, f64) = (180.0, 10.0, 20.0, 1000.0);
+    let opts = crate::gmsh::MeshOptions { size: Some(2.0), curvature_points: 24, ..Default::default() };
+    let mat = Material::steel();
+    let pin = |x: f64| LocalFix::Cylindrical { origin: [x, 0.0, h / 2.0], axis: [0.0, 1.0, 0.0], radial: true, tangential: false, axial: true };
+    let hole = |x: f64| Selection::Box { min: [x - 4.5, -1.0, h / 2.0 - 4.5], max: [x + 4.5, b + 1.0, h / 2.0 + 4.5] };
+    let model = Model::new(crate::gmsh::mesh_step(step, &opts)?, mat.clone())
+        .group("bolzen links", hole(10.0))
+        .group("bolzen rechts", hole(190.0))
+        .group_in(
+            "oben mitte",
+            Selection::Plane { axis: Axis::Z, value: h },
+            Some(Region::Rect { center: [100.0, b / 2.0, h], normal: [0.0, 0.0, 1.0], u: [1.0, 0.0, 0.0], width: 6.0, height: b }),
+        )
+        .support_local("bolzen links", pin(10.0))
+        .support_local("bolzen rechts", pin(190.0))
+        .load(Load::Force { group: "oben mitte".into(), force: [0.0, 0.0, -f] });
+    let res = solve(&model)?;
+    let m = &model.mesh;
+    let tol = 0.3;
+    let w = -mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[0] - 100.0).abs() < tol && (p[2] - h / 2.0).abs() < 1.0).map(|(_, u)| u[2]));
+    let i = b * h.powi(3) / 12.0;
+    let w_theory = f * lb.powi(3) / (48.0 * mat.e * i) + f * lb / (4.0 * (5.0 / 6.0) * mat.shear_modulus() * b * h);
+    // Biegespannung unten bei x = 70 (Abstand 60 vom linken Bolzen)
+    let sigma = mean(m.nodes.iter().zip(&res.stress).filter(|(p, _)| (p[0] - 70.0).abs() < tol && p[2].abs() < 1e-6).map(|(_, s)| s[0]));
+    let name = format!("Balken mit zwei Gelenkbolzen (STEP, Gmsh, {} Elemente)", m.n_elems());
+    Ok(vec![
+        check(&name, "Durchbiegung Mitte [mm]", w, w_theory, 0.04),
+        check(&name, "Biegespannung σx unten bei x = 70 [MPa]", sigma, f / 2.0 * 60.0 / (b * h * h / 6.0), 0.03),
+        check(&name, "Lagerkraft links Fz [N]", res.reactions[0].1[2], f / 2.0, 0.01),
+    ])
+}
+
 /// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
@@ -198,6 +280,12 @@ pub fn all() -> Result<Vec<Check>> {
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/lochplatte.step");
     if crate::gmsh::find_gmsh().is_some() && step.exists() {
         v.extend(lochplatte(&step)?);
+    }
+    v.extend(zugstab_schraeg(crate::SolverKind::Direct)?);
+    v.extend(zugstab_schraeg(crate::SolverKind::Iterative)?);
+    let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");
+    if crate::gmsh::find_gmsh().is_some() && step.exists() {
+        v.extend(balken_gelenk(&step)?);
     }
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/welle.step");
     if crate::gmsh::find_gmsh().is_some() && step.exists() {

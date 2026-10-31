@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FolderOpen, Save, FileUp, Play, Plus, Trash2, MousePointerClick, Anchor, ArrowDownToLine,
-  TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine, Wifi, Copy,
+  TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine, Wifi, Copy, Move3d,
 } from 'lucide-react'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
@@ -28,7 +28,10 @@ const QUANTITIES = {
 }
 
 let nextId = 1
-const newSupport = () => ({ id: nextId++, kind: 'fixed', axes: { x: true, y: true, z: true }, surfaces: [], region: null })
+const newSupport = () => ({
+  id: nextId++, kind: 'fixed', axes: { x: true, y: true, z: true }, cyl: { radial: true, axial: true, tangential: false },
+  surfaces: [], region: null,
+})
 const newLoad = () => ({
   id: nextId++, kind: 'force', force: [0, 0, -1000], pressure: 1, moment: [0, 0, 100], surfaces: [], region: null,
 })
@@ -53,6 +56,8 @@ export default function App() {
   const [drawing, setDrawing] = useState(null)
   // Lastrichtung im Bild wählen: { id, key: 'force' | 'moment' }
   const [dirPick, setDirPick] = useState(null)
+  // Lastpfeil im Bild ausrichten: { id, field: 'force' | 'moment', plane: 'free' | 'xy' | 'yz' | 'xz' }
+  const [aim, setAim] = useState(null)
   const [result, setResult] = useState(null)
   const [resultStale, setResultStale] = useState(false)
   const [view, setView] = useState('setup')
@@ -201,6 +206,7 @@ export default function App() {
   function startDrawing(type, item, shape) {
     setActive(null)
     setDirPick(null)
+    setAim(null)
     setDrawing({ type, id: item.id, shape })
   }
 
@@ -244,19 +250,16 @@ export default function App() {
       if (!s.axes.x && !s.axes.y && !s.axes.z) return { error: 'Mindestens eine Richtung sperren' }
       return { fix: { x: s.axes.x ? 0 : null, y: s.axes.y ? 0 : null, z: s.axes.z ? 0 : null } }
     }
-    // reibungsfreie Auflage: nur senkrecht zur Fläche gesperrt
-    let axis = null
-    for (const t of s.surfaces) {
-      const n = surfaceInfo.get(t)?.normal
-      const k = n ? n.findIndex((v) => Math.abs(v) > 0.9999) : -1
-      if (k < 0) return { error: 'Nur für ebene, achsparallele Flächen möglich' }
-      if (axis !== null && axis !== k) return { error: 'Alle Flächen müssen dieselbe Ausrichtung haben' }
-      axis = k
-    }
-    if (axis === null) return { fix: null }
-    const fix = { x: null, y: null, z: null }
-    fix['xyz'[axis]] = 0
-    return { fix }
+    const free = { x: null, y: null, z: null }
+    // reibungsfreie Auflage: senkrecht zur Fläche gesperrt (beliebig schräg)
+    if (s.kind === 'frictionless') return { fix: free, local: { type: 'normal' } }
+    // zylindrische Lagerung: radial / tangential / axial je einzeln
+    const c = selectionCylinder(s.surfaces, surfaceInfo)
+    if (s.surfaces.some((t) => !surfaceInfo.get(t)?.cylinder)) return { error: 'Nur für zylindrische Flächen (Bohrung, Welle, Bolzen)' }
+    const cy = { radial: true, axial: true, tangential: false, ...s.cyl }
+    if (!cy.radial && !cy.axial && !cy.tangential) return { error: 'Mindestens eine Richtung sperren' }
+    if (!c) return { fix: free }
+    return { fix: free, local: { type: 'cylindrical', origin: c.origin, axis: c.axis, ...cy } }
   }
 
   function loadNormal(l) {
@@ -293,18 +296,48 @@ export default function App() {
         const m = l.moment.map(Number)
         const len = Math.hypot(...m)
         const L = 0.2 * diag
-        out.push({ tip: tip.map((v, k) => v + (m[k] / len) * L), dir: m, length: L, color: MOMENT_COLOR })
+        out.push({ id: l.id, anchor: tip, tip: tip.map((v, k) => v + (m[k] / len) * L), dir: m, length: L, color: MOMENT_COLOR })
         continue
       }
       if (l.kind === 'pressure') {
         const n = loadNormal(l)
         if (n) dir = n.map((v) => -v * Math.sign(l.pressure || 1))
       }
-      if (dir) out.push({ tip, dir, length: 0.16 * diag, color: active?.id === l.id ? LOAD_ACTIVE : LOAD_COLOR })
+      if (dir) out.push({ id: l.id, anchor: tip, tip, dir, length: 0.16 * diag, color: active?.id === l.id || aim?.id === l.id ? LOAD_ACTIVE : LOAD_COLOR })
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loads, surfaceInfo, diag, active, drawing])
+  }, [loads, surfaceInfo, diag, active, drawing, aim])
+
+  // Griff zum Ausrichten am Pfeil der gewählten Last
+  const aimView = useMemo(() => {
+    if (!aim) return null
+    const a = arrows.find((x) => x.id === aim.id)
+    if (!a) return null
+    return { anchor: a.anchor, dir: a.dir.map(Number), length: a.length, kind: aim.field === 'moment' ? 'moment' : 'force', plane: aim.plane, color: aim.field === 'moment' ? MOMENT_COLOR : LOAD_ACTIVE }
+  }, [aim, arrows])
+
+  const onAim = useCallback(
+    (dir) => {
+      if (!aim) return
+      setLoads((ls) =>
+        ls.map((x) => {
+          if (x.id !== aim.id) return x
+          const ui = dirUi(x[aim.field], x[aim.field + 'Ui'])
+          const next = { ...ui, mode: 'dir', mag: currentMag(x[aim.field], ui), ...anglesOf(dir) }
+          return { ...x, [aim.field + 'Ui']: next, [aim.field]: vectorOf(next) }
+        }),
+      )
+    },
+    [aim],
+  )
+
+  function startAim(id, field) {
+    setActive(null)
+    setDrawing(null)
+    setDirPick(null)
+    setAim(aim?.id === id && aim.field === field ? null : { id, field, plane: aim?.plane ?? 'free' })
+  }
 
   // --- Rechnen ---------------------------------------------------------------------
   const problems = useMemo(() => {
@@ -335,10 +368,14 @@ export default function App() {
     setError(null)
     setActive(null)
     setDrawing(null)
+    setAim(null)
     try {
       const setup = {
         material: { name: material.name, E: Number(material.E), nu: Number(material.nu), yield: material.yield ? Number(material.yield) : null },
-        supports: supports.map((s) => ({ surfaces: s.surfaces, fix: supportFix(s).fix, region: regionNumbers(s.region) })),
+        supports: supports.map((s) => {
+          const f = supportFix(s)
+          return { surfaces: s.surfaces, fix: f.fix, local: f.local ?? null, region: regionNumbers(s.region) }
+        }),
         loads: loads.map((l) => {
           const base = { type: l.kind, surfaces: l.surfaces, region: regionNumbers(l.region) }
           if (l.kind === 'pressure') return { ...base, pressure: Number(l.pressure) }
@@ -534,7 +571,31 @@ export default function App() {
                           <option value="fixed">Fest eingespannt</option>
                           <option value="frictionless">Reibungsfreie Auflage / Symmetrie</option>
                           <option value="axes">Richtungen einzeln sperren</option>
+                          <option value="cylindrical">Zylindrische Lagerung (Bolzen/Gelenk)</option>
                         </select>
+                        {s.kind === 'cylindrical' && (
+                          <>
+                            <div className="row axes">
+                              {[['radial', 'radial fest'], ['axial', 'axial fest'], ['tangential', 'Drehung gesperrt']].map(([k, lab]) => (
+                                <label key={k} className="check">
+                                  <input
+                                    type="checkbox"
+                                    checked={{ radial: true, axial: true, tangential: false, ...s.cyl }[k]}
+                                    onChange={(e) => setSupports(supports.map((x) => (x.id === s.id ? { ...x, cyl: { radial: true, axial: true, tangential: false, ...x.cyl, [k]: e.target.checked } } : x)))}
+                                  />
+                                  {lab}
+                                </label>
+                              ))}
+                            </div>
+                            <p className="hint">
+                              Bohrung oder Bolzen wählen. Standard = Gelenk: Das Bauteil bleibt am Bolzen, kann sich aber um die Achse drehen
+                              {!(s.cyl?.tangential ?? false) && ' – ein zweites Lager muss die Drehung verhindern'}.
+                            </p>
+                          </>
+                        )}
+                        {s.kind === 'frictionless' && (
+                          <p className="hint">Senkrecht zur Fläche gesperrt, entlang der Fläche frei – auch auf schrägen Flächen.</p>
+                        )}
                         {s.kind === 'axes' && (
                           <div className="row axes">
                             {['x', 'y', 'z'].map((a) => (
@@ -597,7 +658,9 @@ export default function App() {
                               unit="N·m"
                               upd={upd}
                               picking={dirPick?.id === l.id && dirPick.key === 'moment'}
-                              onPick={() => { setActive(null); setDrawing(null); setDirPick(dirPick ? null : { id: l.id, key: 'moment' }) }}
+                              onPick={() => { setActive(null); setDrawing(null); setAim(null); setDirPick(dirPick ? null : { id: l.id, key: 'moment' }) }}
+                              aiming={aim?.id === l.id && aim.field === 'moment'}
+                              onAimToggle={() => startAim(l.id, 'moment')}
                               presets={cyl ? [['um die Wellenachse (Torsion)', cyl.axis]] : []}
                             />
                             <p className="hint">Wirkt um den Schwerpunkt des Bereichs, linear verteilt wie bei einem starren Anschlussteil. Drehsinn nach der rechten Hand.</p>
@@ -611,7 +674,9 @@ export default function App() {
                               unit="N"
                               upd={upd}
                               picking={dirPick?.id === l.id && dirPick.key === 'force'}
-                              onPick={() => { setActive(null); setDrawing(null); setDirPick(dirPick ? null : { id: l.id, key: 'force' }) }}
+                              onPick={() => { setActive(null); setDrawing(null); setAim(null); setDirPick(dirPick ? null : { id: l.id, key: 'force' }) }}
+                              aiming={aim?.id === l.id && aim.field === 'force'}
+                              onAimToggle={() => startAim(l.id, 'force')}
                               presets={[]}
                             />
                             <p className="hint">Kraft, mit der Bolzen bzw. Lager auf das Bauteil drücken. Sie wirkt nur auf der Hälfte, gegen die gedrückt wird (Druck ∝ cos φ).</p>
@@ -625,7 +690,9 @@ export default function App() {
                               unit="N"
                               upd={upd}
                               picking={dirPick?.id === l.id && dirPick.key === 'force'}
-                              onPick={() => { setActive(null); setDrawing(null); setDirPick(dirPick ? null : { id: l.id, key: 'force' }) }}
+                              onPick={() => { setActive(null); setDrawing(null); setAim(null); setDirPick(dirPick ? null : { id: l.id, key: 'force' }) }}
+                              aiming={aim?.id === l.id && aim.field === 'force'}
+                              onAimToggle={() => startAim(l.id, 'force')}
                               presets={n ? [['senkrecht auf die gewählte Fläche', n.map((v) => -v)]] : []}
                             />
                           </>
@@ -710,7 +777,27 @@ export default function App() {
             planeNormal={planeNormal}
             onDraw={onDraw}
             overlays={overlays}
+            aim={view === 'setup' ? aimView : null}
+            onAim={onAim}
           />
+          {aim && aimView && view === 'setup' && (
+            <div className="pick-hint aim-bar">
+              <Move3d size={15} />
+              <span>Griff am Pfeil ziehen</span>
+              <div className="segmented small">
+                {[['free', 'Frei'], ['xy', 'XY'], ['yz', 'YZ'], ['xz', 'XZ']].map(([k, lab]) => (
+                  <button key={k} className={aim.plane === k ? 'on' : ''} onClick={() => setAim({ ...aim, plane: k })} title={k === 'free' ? 'Frei im Raum' : `nur in der Ebene ${lab}`}>
+                    {lab}
+                  </button>
+                ))}
+              </div>
+              <span className="aim-angle">{aimAngleText(aimView.dir, aim.plane)}</span>
+              <span className="muted small">Umschalt = stufenlos</span>
+              <button className="btn small" onClick={() => setAim(null)}>
+                <Check size={14} /> Fertig
+              </button>
+            </div>
+          )}
           {dirPick && view === 'setup' && (
             <div className="pick-hint">
               <MousePointerClick size={15} />
@@ -968,9 +1055,21 @@ function vectorOf(ui) {
   })
 }
 
+// Anzeige der Pfeilrichtung beim Ausrichten
+function aimAngleText(dir, plane) {
+  const len = Math.hypot(...dir) || 1
+  const [x, y, z] = dir.map((c) => c / len)
+  const f = (v) => `${Math.round(v * 10) / 10 || 0}°`
+  if (plane === 'xy') return `${f(Math.atan2(y, x) / deg)} von +X`
+  if (plane === 'yz') return `${f(Math.atan2(z, y) / deg)} von +Y`
+  if (plane === 'xz') return `${f(Math.atan2(z, x) / deg)} von +X`
+  const a = anglesOf(dir)
+  return `Winkel in XY ${f(Number(a.a))}, Neigung ${f(Number(a.b))}`
+}
+
 const AXIS_BUTTONS = [['+X', [1, 0, 0]], ['−X', [-1, 0, 0]], ['+Y', [0, 1, 0]], ['−Y', [0, -1, 0]], ['+Z', [0, 0, 1]], ['−Z', [0, 0, -1]]]
 
-function VectorInput({ item, field, labels, unit, upd, picking, onPick, presets }) {
+function VectorInput({ item, field, labels, unit, upd, picking, onPick, presets, aiming, onAimToggle }) {
   const vec = item[field]
   const ui = dirUi(vec, item[field + 'Ui'])
   const setUi = (patch) => {
@@ -1024,6 +1123,9 @@ function VectorInput({ item, field, labels, unit, upd, picking, onPick, presets 
         </>
       )}
       <div className="dir-links">
+        <button className={'link' + (aiming ? ' on' : '')} onClick={onAimToggle}>
+          <Move3d size={13} /> {aiming ? 'Ausrichten beenden' : 'Im Bild ausrichten (Pfeil ziehen)'}
+        </button>
         <button className={'link' + (picking ? ' on' : '')} onClick={onPick}>
           <MousePointerClick size={13} /> {picking ? 'Auswahl abbrechen' : 'Richtung im Bild wählen'}
         </button>

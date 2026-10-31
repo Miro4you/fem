@@ -30,11 +30,13 @@ export default function Viewport({
   planeNormal,
   onDraw,
   overlays,
+  aim,
+  onAim,
 }) {
   const host = useRef(null)
   const ctx = useRef(null)
   const cb = useRef({})
-  cb.current = { onPick, onProbe, pickable, mode, drawing, planeNormal, onDraw }
+  cb.current = { onPick, onProbe, pickable, mode, drawing, planeNormal, onDraw, aim, onAim }
   const [hoverTag, setHoverTag] = useState(null)
   const [labels, setLabels] = useState([])
 
@@ -77,7 +79,53 @@ export default function Viewport({
       const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).toArray()
       cb.current.onDraw?.({ tag: drag.tag, p0: drag.p0, p1: drag.p1, normal: drag.normal, right, final })
     }
+    // Lastpfeil ausrichten: Griff am Pfeilende ziehen
+    let aimDrag = null
+    const aimDir = (ev) => {
+      const a = cb.current.aim
+      const ray = rayAt(ev).ray
+      const anchor = new THREE.Vector3(...a.anchor)
+      let p = null
+      const basis = AIM_PLANES[a.plane]
+      if (basis) {
+        const n = new THREE.Vector3(...basis[0]).cross(new THREE.Vector3(...basis[1]))
+        p = ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(n, anchor), new THREE.Vector3())
+      } else {
+        // frei: Kugel um den Angriffspunkt, sonst nächster Punkt des Strahls
+        p = ray.intersectSphere(new THREE.Sphere(anchor, a.length), new THREE.Vector3()) ?? ray.closestPointToPoint(anchor, new THREE.Vector3())
+      }
+      if (!p) return null
+      let d = p.sub(anchor)
+      if (a.kind === 'force') d.negate() // Griff am Pfeilende: Kraft zeigt zum Angriffspunkt hin
+      if (d.lengthSq() < 1e-12) return null
+      return snapDirection(d.normalize(), a.plane, ev.shiftKey ? 0 : 5)
+    }
     renderer.domElement.addEventListener('pointerdown', (ev) => {
+      if (cb.current.aim && state.aimHandle && ev.button === 0) {
+        const h = rayAt(ev).intersectObject(state.aimHandle, false)[0]
+        if (h) {
+          aimDrag = true
+          state.controls.enabled = false
+          renderer.domElement.setPointerCapture(ev.pointerId)
+          return
+        }
+      }
+    })
+    renderer.domElement.addEventListener('pointermove', (ev) => {
+      if (!aimDrag) return
+      const d = aimDir(ev)
+      if (d) cb.current.onAim?.(d, false)
+    })
+    renderer.domElement.addEventListener('pointerup', (ev) => {
+      if (!aimDrag) return
+      const d = aimDir(ev)
+      if (d) cb.current.onAim?.(d, true)
+      aimDrag = null
+      state.controls.enabled = true
+      state.justDrew = true
+    })
+    renderer.domElement.addEventListener('pointerdown', (ev) => {
+      if (aimDrag) return
       const shape = cb.current.drawing
       if (!shape || !state.surf || ev.button !== 0) return
       const h = rayAt(ev).intersectObject(state.surf, false)[0]
@@ -131,9 +179,10 @@ export default function Viewport({
     const state = {
       renderer, scene, camera, controls, dirty: true, raf: 0,
       group: new THREE.Group(), surf: null, edges: null, wire: null, ghost: null, arrows: new THREE.Group(),
-      texture: bandTexture(), labelNodes: [], overlays: new THREE.Group(),
+      texture: bandTexture(), labelNodes: [], overlays: new THREE.Group(), aimGroup: new THREE.Group(), aimHandle: null,
     }
     scene.add(state.overlays)
+    scene.add(state.aimGroup)
     scene.add(state.group)
     scene.add(state.arrows)
     ctx.current = state
@@ -370,6 +419,57 @@ export default function Viewport({
     s.dirty = true
   }, [arrows, mode])
 
+  // --- Lastpfeil ausrichten: Griff, Ebene mit Winkelteilung -------------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    s.aimGroup.traverse((x) => (x.geometry?.dispose(), x.material?.dispose()))
+    s.aimGroup.clear()
+    s.aimHandle = null
+    if (aim && mode === 'setup') {
+      const anchor = new THREE.Vector3(...aim.anchor)
+      const L = aim.length
+      const dir = new THREE.Vector3(...aim.dir).normalize()
+      const end = anchor.clone().addScaledVector(dir, aim.kind === 'force' ? -L : L)
+      const front = (m) => {
+        m.depthTest = false
+        m.transparent = true
+        return m
+      }
+      const basis = AIM_PLANES[aim.plane]
+      if (basis) {
+        const u = new THREE.Vector3(...basis[0])
+        const v = new THREE.Vector3(...basis[1])
+        const pts = []
+        for (let i = 0; i <= 96; i++) {
+          const t = (i / 96) * 2 * Math.PI
+          pts.push(anchor.clone().addScaledVector(u, L * Math.cos(t)).addScaledVector(v, L * Math.sin(t)))
+        }
+        const disc = new THREE.Mesh(
+          new THREE.BufferGeometry().setFromPoints([anchor, ...pts]).setIndex([...Array(96).keys()].flatMap((i) => [0, i + 1, i + 2])),
+          front(new THREE.MeshBasicMaterial({ color: aim.color, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false })),
+        )
+        s.aimGroup.add(disc)
+        s.aimGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), front(new THREE.LineBasicMaterial({ color: aim.color, opacity: 0.6 }))))
+        // Teilung alle 15°, Achsen (0°, 90° …) länger
+        const ticks = []
+        for (let k = 0; k < 24; k++) {
+          const t = (k * 15 * Math.PI) / 180
+          const r0 = k % 6 === 0 ? 0 : 0.88
+          const c = u.clone().multiplyScalar(Math.cos(t)).addScaledVector(v, Math.sin(t))
+          ticks.push(anchor.clone().addScaledVector(c, L * r0), anchor.clone().addScaledVector(c, L))
+        }
+        s.aimGroup.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(ticks), front(new THREE.LineBasicMaterial({ color: aim.color, opacity: 0.45 }))))
+      }
+      s.aimGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([anchor, end]), front(new THREE.LineBasicMaterial({ color: aim.color }))))
+      const handle = new THREE.Mesh(new THREE.SphereGeometry(L * 0.07, 20, 14), front(new THREE.MeshBasicMaterial({ color: aim.color, opacity: 0.95 })))
+      handle.position.copy(end)
+      handle.renderOrder = 30
+      s.aimGroup.add(handle)
+      s.aimHandle = handle
+    }
+    s.dirty = true
+  }, [aim, mode])
+
   // --- Wirkbereiche ------------------------------------------------------------
   useEffect(() => {
     const s = ctx.current
@@ -409,7 +509,7 @@ export default function Viewport({
 
   return (
     <div className="viewport">
-      <div ref={host} className="viewport-canvas" style={{ cursor: drawing && hoverTag != null ? 'crosshair' : pickable && hoverTag != null ? 'pointer' : 'default' }} />
+      <div ref={host} className="viewport-canvas" style={{ cursor: aim ? 'default' : drawing && hoverTag != null ? 'crosshair' : pickable && hoverTag != null ? 'pointer' : 'default' }} />
       {mesh && (
         <div className="view-buttons">
           {Object.entries(VIEWS).map(([k, v]) => (
@@ -428,6 +528,29 @@ export default function Viewport({
       ))}
     </div>
   )
+}
+
+// Ebenen für das Ausrichten des Lastpfeils: zwei Richtungen (u, v); Winkel wird von u nach v gemessen
+export const AIM_PLANES = {
+  xy: [[1, 0, 0], [0, 1, 0]],
+  yz: [[0, 1, 0], [0, 0, 1]],
+  xz: [[1, 0, 0], [0, 0, 1]],
+}
+
+// Richtung auf ganze `step` Grad runden (in der Ebene bzw. als Winkel in XY + Neigung)
+function snapDirection(d, plane, step) {
+  const basis = AIM_PLANES[plane]
+  const snap = (a) => (step ? Math.round(a / step) * step : a)
+  const rad = Math.PI / 180
+  if (basis) {
+    const u = new THREE.Vector3(...basis[0])
+    const v = new THREE.Vector3(...basis[1])
+    const t = snap(Math.atan2(d.dot(v), d.dot(u)) / rad) * rad
+    return u.multiplyScalar(Math.cos(t)).addScaledVector(v, Math.sin(t)).toArray()
+  }
+  const b = snap(Math.asin(Math.max(-1, Math.min(1, d.z))) / rad) * rad
+  const a = snap(Math.atan2(d.y, d.x) / rad) * rad
+  return [Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b)]
 }
 
 // Bereich als halbdurchsichtige Fläche mit Umriss

@@ -9,6 +9,7 @@ use nalgebra::DMatrix;
 use rayon::prelude::*;
 
 use crate::amg::Amg;
+use crate::solver::NodeFrames;
 use crate::sparse::Bsr;
 use crate::{FemError, Result};
 
@@ -129,9 +130,16 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
 }
 
 /// Löst K·x = b mit AMG-vorkonditioniertem CG bis ‖r‖/‖b‖ < `tol`.
-pub fn solve(sys: System, coords: &[[f64; 3]], fixed: &[bool], tol: f64, max_iter: usize) -> Result<Solution> {
+pub fn solve(
+    sys: System,
+    coords: &[[f64; 3]],
+    fixed: &[bool],
+    frames: &NodeFrames,
+    tol: f64,
+    max_iter: usize,
+) -> Result<Solution> {
     let System { k, b } = sys;
-    let amg = Amg::new(k, coords, fixed)?;
+    let amg = Amg::new(k, coords, fixed, frames)?;
     let k = amg.matrix();
     let n = b.len();
 

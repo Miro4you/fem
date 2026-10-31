@@ -1,13 +1,12 @@
 use faer::linalg::solvers::Solve;
 use faer::sparse::{SparseColMat, Triplet};
 use faer::{Col, Side};
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{DMatrix, Matrix3, Vector3};
 use rayon::prelude::*;
 
 use crate::element::{tet_nodal_stress, tet_stiffness, tri_integration_points, SurfacePoint};
-use crate::material::DMat;
 use crate::mesh::Face;
-use crate::model::{Load, Model, SolverKind};
+use crate::model::{Load, LocalFix, Model, SolverKind};
 use crate::results::{principal, von_mises, Results};
 use crate::{pcg, FemError, Result};
 
@@ -40,6 +39,8 @@ pub fn solve(model: &Model) -> Result<Results> {
         }
     }
     let mut support_nodes = Vec::new();
+    // lokal festgehaltene Richtungen je Knoten (Einheitsvektoren, global)
+    let mut local_dirs: std::collections::BTreeMap<usize, Vec<Vector3<f64>>> = Default::default();
     for s in &model.supports {
         let mut nodes: Vec<usize> = model
             .group_faces(&s.group, &faces)?
@@ -55,17 +56,79 @@ pub fn solve(model: &Model) -> Result<Results> {
                 return Err(FemError::BadLoad(s.group.clone(), "der Wirkbereich trifft die gewählten Flächen nicht".into()));
             }
         }
-        for &n in &nodes {
-            for (k, v) in s.fix.components().iter().enumerate() {
-                if v.is_some() {
-                    prescribed[3 * n + k] = *v;
+        match &s.local {
+            None => {
+                for &n in &nodes {
+                    for (k, v) in s.fix.components().iter().enumerate() {
+                        if v.is_some() {
+                            prescribed[3 * n + k] = *v;
+                        }
+                    }
+                }
+            }
+            Some(LocalFix::Normal) => {
+                let normals = node_normals(model, &faces, &model.group_faces(&s.group, &faces)?);
+                for &n in &nodes {
+                    if let Some(nv) = normals.get(&n) {
+                        local_dirs.entry(n).or_default().push(*nv);
+                    }
+                }
+            }
+            Some(LocalFix::Cylindrical { origin, axis, radial, tangential, axial }) => {
+                let a = Vector3::from(*axis).normalize();
+                for &n in &nodes {
+                    let d = Vector3::from(mesh.nodes[n]) - Vector3::from(*origin);
+                    let r = d - a * d.dot(&a);
+                    if r.norm() <= mesh.tolerance() {
+                        return Err(FemError::BadLoad(s.group.clone(), "Knoten auf der Zylinderachse – Achse prüfen".into()));
+                    }
+                    let er = r.normalize();
+                    let dirs = local_dirs.entry(n).or_default();
+                    for (on, v) in [(*radial, er), (*tangential, a.cross(&er)), (*axial, a)] {
+                        if on {
+                            dirs.push(v);
+                        }
+                    }
                 }
             }
         }
         support_nodes.push((s.group.clone(), nodes));
     }
+    // Knoten mit lokalen Lagern: Basis aus den festgehaltenen Richtungen (inkl. globaler Lager am selben Knoten)
+    let mut frames = NodeFrames::new(n_nodes);
+    for (n, mut dirs) in local_dirs {
+        for k in 0..3 {
+            if let Some(v) = prescribed[3 * n + k] {
+                if v != 0.0 {
+                    return Err(FemError::Input("vorgegebene Verschiebung ≠ 0 an einem Knoten mit lokaler Lagerung".into()));
+                }
+                let mut e = Vector3::zeros();
+                e[k] = 1.0;
+                dirs.push(e);
+            }
+        }
+        let basis = orthonormal_basis(&dirs);
+        let fixed = basis.len();
+        if fixed == 0 {
+            continue;
+        }
+        for k in 0..3 {
+            prescribed[3 * n + k] = (k < fixed || fixed == 3).then_some(0.0);
+        }
+        if fixed < 3 {
+            frames.set(n, complete_basis(&basis));
+        }
+    }
 
     let f_ext = load_vector(model, &faces)?;
+    // im Gleichungssystem: lokale Komponenten an Knoten mit lokaler Basis
+    let mut f_sys = f_ext.clone();
+    frames.to_local(&mut f_sys);
+    let elem_k = |e: usize| -> Result<DMatrix<f64>> {
+        let mut ke = tet_stiffness(&mesh.elem_coords(e), &d).ok_or(FemError::DegenerateElement(e))?;
+        frames.transform_element(mesh.elem(e), &mut ke);
+        Ok(ke)
+    };
 
     let neq = prescribed.iter().filter(|p| p.is_none()).count();
     if neq == 0 {
@@ -77,15 +140,15 @@ pub fn solve(model: &Model) -> Result<Results> {
         SolverKind::Auto => neq >= AUTO_ITERATIVE_FROM,
     };
     let (u, iterations) = if iterative {
-        let sys = pcg::assemble(n_nodes, &mesh.conn, mesh.npe, &prescribed, &f_ext, |e| {
-            tet_stiffness(&mesh.elem_coords(e), &d).ok_or(FemError::DegenerateElement(e))
-        })?;
+        let sys = pcg::assemble(n_nodes, &mesh.conn, mesh.npe, &prescribed, &f_sys, elem_k)?;
         let fixed: Vec<bool> = prescribed.iter().map(Option::is_some).collect();
-        let sol = pcg::solve(sys, &mesh.nodes, &fixed, PCG_TOLERANCE, PCG_MAX_ITER)?;
+        let sol = pcg::solve(sys, &mesh.nodes, &fixed, &frames, PCG_TOLERANCE, PCG_MAX_ITER)?;
         (sol.x, Some(sol.iterations))
     } else {
-        (solve_direct(model, &prescribed, &f_ext, &d)?, None)
+        (solve_direct(model, &prescribed, &f_sys, &elem_k)?, None)
     };
+    let mut u = u;
+    frames.to_global(&mut u);
 
     // --- Spannungen und Reaktionen -------------------------------------------
     let per_elem: Vec<(Vec<[f64; 6]>, Vec<f64>)> = (0..mesh.n_elems())
@@ -119,29 +182,29 @@ pub fn solve(model: &Model) -> Result<Results> {
         }
     }
 
+    // Lagerkraft am Knoten: nur in den festgehaltenen (ggf. lokalen) Richtungen
+    let node_reaction = |n: usize| -> Vector3<f64> {
+        let r = Vector3::new(f_int[3 * n] - f_ext[3 * n], f_int[3 * n + 1] - f_ext[3 * n + 1], f_int[3 * n + 2] - f_ext[3 * n + 2]);
+        let mask = |v: Vector3<f64>| Vector3::from_fn(|k, _| if prescribed[3 * n + k].is_some() { v[k] } else { 0.0 });
+        match frames.get(n) {
+            Some(rm) => rm.transpose() * mask(rm * r),
+            None => mask(r),
+        }
+    };
     let reactions = support_nodes
         .into_iter()
         .map(|(name, nodes)| {
-            let mut r = [0.0; 3];
-            for n in nodes {
-                for k in 0..3 {
-                    if prescribed[3 * n + k].is_some() {
-                        r[k] += f_int[3 * n + k] - f_ext[3 * n + k];
-                    }
-                }
-            }
-            (name, r)
+            let r: Vector3<f64> = nodes.into_iter().map(node_reaction).sum();
+            (name, r.into())
         })
         .collect();
 
     let mut total_load = [0.0; 3];
-    let mut total_reaction = [0.0; 3];
     for i in 0..ndof {
         total_load[i % 3] += f_ext[i];
-        if prescribed[i].is_some() {
-            total_reaction[i % 3] += f_int[i] - f_ext[i];
-        }
     }
+    let total_reaction: Vector3<f64> = (0..n_nodes).map(node_reaction).sum();
+    let total_reaction: [f64; 3] = total_reaction.into();
 
     Ok(Results {
         displacement: (0..n_nodes).map(|n| [u[3 * n], u[3 * n + 1], u[3 * n + 2]]).collect(),
@@ -157,7 +220,12 @@ pub fn solve(model: &Model) -> Result<Results> {
 }
 
 /// Direkter Löser: freie Freiheitsgrade nummerieren, untere Hälfte von K assemblieren, Cholesky.
-fn solve_direct(model: &Model, prescribed: &[Option<f64>], f_ext: &[f64], d: &DMat) -> Result<Vec<f64>> {
+fn solve_direct(
+    model: &Model,
+    prescribed: &[Option<f64>],
+    f_ext: &[f64],
+    elem_k: &(dyn Fn(usize) -> Result<DMatrix<f64>> + Sync),
+) -> Result<Vec<f64>> {
     let mesh = &model.mesh;
     let ndof = prescribed.len();
 
@@ -177,7 +245,7 @@ fn solve_direct(model: &Model, prescribed: &[Option<f64>], f_ext: &[f64], d: &DM
     let per_elem: Vec<Result<(Vec<Triplet<usize, usize, f64>>, Vec<(usize, f64)>)>> = (0..mesh.n_elems())
         .into_par_iter()
         .map(|e| {
-            let ke = tet_stiffness(&mesh.elem_coords(e), d).ok_or(FemError::DegenerateElement(e))?;
+            let ke = elem_k(e)?;
             let dofs: Vec<usize> = mesh.elem(e).iter().flat_map(|&n| [3 * n, 3 * n + 1, 3 * n + 2]).collect();
             let mut trip = Vec::with_capacity(npe * npe * 5);
             let mut rhs = Vec::new();
@@ -233,6 +301,115 @@ fn solve_direct(model: &Model, prescribed: &[Option<f64>], f_ext: &[f64], d: &DM
         }
     }
     Ok(u)
+}
+
+/// Lokale Basis je Knoten (Zeilen = lokale Richtungen in globalen Koordinaten, u_lokal = R·u_global).
+/// Knoten ohne Eintrag rechnen global.
+pub struct NodeFrames {
+    index: Vec<u32>,
+    mats: Vec<Matrix3<f64>>,
+}
+
+impl NodeFrames {
+    fn new(n_nodes: usize) -> Self {
+        NodeFrames { index: vec![u32::MAX; n_nodes], mats: Vec::new() }
+    }
+
+    fn set(&mut self, n: usize, r: Matrix3<f64>) {
+        self.index[n] = self.mats.len() as u32;
+        self.mats.push(r);
+    }
+
+    pub fn get(&self, n: usize) -> Option<&Matrix3<f64>> {
+        self.index.get(n).and_then(|&i| self.mats.get(i as usize))
+    }
+
+    fn apply(&self, v: &mut [f64], transpose: bool) {
+        for (n, &i) in self.index.iter().enumerate() {
+            if i != u32::MAX {
+                let r = &self.mats[i as usize];
+                let x = Vector3::new(v[3 * n], v[3 * n + 1], v[3 * n + 2]);
+                let y = if transpose { r.transpose() * x } else { r * x };
+                v[3 * n..3 * n + 3].copy_from_slice(y.as_slice());
+            }
+        }
+    }
+
+    fn to_local(&self, v: &mut [f64]) {
+        self.apply(v, false)
+    }
+
+    fn to_global(&self, v: &mut [f64]) {
+        self.apply(v, true)
+    }
+
+    /// Elementsteifigkeit in die Knotenbasen drehen: K'_ab = R_a · K_ab · R_bᵀ
+    fn transform_element(&self, nodes: &[usize], ke: &mut DMatrix<f64>) {
+        if self.mats.is_empty() || nodes.iter().all(|&n| self.get(n).is_none()) {
+            return;
+        }
+        let m = nodes.len();
+        for (a, &na) in nodes.iter().enumerate() {
+            if let Some(r) = self.get(na) {
+                for c in 0..3 * m {
+                    let x = Vector3::new(ke[(3 * a, c)], ke[(3 * a + 1, c)], ke[(3 * a + 2, c)]);
+                    let y = r * x;
+                    (0..3).for_each(|k| ke[(3 * a + k, c)] = y[k]);
+                }
+            }
+        }
+        for (b, &nb) in nodes.iter().enumerate() {
+            if let Some(r) = self.get(nb) {
+                for row in 0..3 * m {
+                    let x = Vector3::new(ke[(row, 3 * b)], ke[(row, 3 * b + 1)], ke[(row, 3 * b + 2)]);
+                    let y = r * x;
+                    (0..3).for_each(|k| ke[(row, 3 * b + k)] = y[k]);
+                }
+            }
+        }
+    }
+}
+
+/// Orthonormalbasis des von `dirs` aufgespannten Raums (festgehaltene Richtungen)
+fn orthonormal_basis(dirs: &[Vector3<f64>]) -> Vec<Vector3<f64>> {
+    let mut basis: Vec<Vector3<f64>> = Vec::new();
+    for d in dirs {
+        let mut v = *d;
+        for b in &basis {
+            v -= b * b.dot(&v);
+        }
+        if v.norm() > 1e-6 * d.norm() && basis.len() < 3 {
+            basis.push(v.normalize());
+        }
+    }
+    basis
+}
+
+/// Ergänzt 1–2 Richtungen zu einer Rechtssystem-Basis (Zeilen der Drehmatrix)
+fn complete_basis(basis: &[Vector3<f64>]) -> Matrix3<f64> {
+    let e1 = basis[0];
+    let e2 = if basis.len() > 1 {
+        basis[1]
+    } else {
+        let k = (0..3).min_by(|&i, &j| e1[i].abs().partial_cmp(&e1[j].abs()).unwrap()).unwrap();
+        let mut t = Vector3::zeros();
+        t[k] = 1.0;
+        (t - e1 * e1.dot(&t)).normalize()
+    };
+    let e3 = e1.cross(&e2);
+    Matrix3::from_rows(&[e1.transpose(), e2.transpose(), e3.transpose()])
+}
+
+/// Mittlere Außennormale je Knoten über die gewählten Randflächen
+fn node_normals(model: &Model, faces: &[Face], ids: &[usize]) -> std::collections::HashMap<usize, Vector3<f64>> {
+    let mut acc: std::collections::HashMap<usize, Vector3<f64>> = Default::default();
+    for &i in ids {
+        let nda: Vector3<f64> = tri_integration_points(&face_coords(model, &faces[i].nodes), 1).iter().map(|p| p.nda).sum();
+        for &n in &faces[i].nodes {
+            *acc.entry(n).or_insert_with(Vector3::zeros) += nda;
+        }
+    }
+    acc.into_iter().filter(|(_, v)| v.norm() > 0.0).map(|(n, v)| (n, v.normalize())).collect()
 }
 
 /// Unterteilung der Randdreiecke, wenn eine Last nur auf einem Wirkbereich wirkt

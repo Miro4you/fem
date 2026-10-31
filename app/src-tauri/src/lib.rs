@@ -8,7 +8,7 @@ use std::time::Instant;
 use fem_core::gmsh::{self, MeshOptions};
 use fem_core::mesh::Face;
 use fem_core::region::{fit_cylinder, Cylinder};
-use fem_core::{Fix, Load, Material, Mesh, Model, Order, Region, Results, Selection, SolverKind};
+use fem_core::{Fix, Load, LocalFix, Material, Mesh, Model, Order, Region, Results, Selection, SolverKind};
 use serde::{Deserialize, Serialize};
 
 pub mod server;
@@ -219,6 +219,9 @@ struct SupportDef {
     fix: Fix,
     #[serde(default)]
     region: Option<Region>,
+    /// lokale Lagerung (reibungsfrei auf beliebiger Fläche, zylindrisch)
+    #[serde(default)]
+    local: Option<LocalFix>,
 }
 
 #[derive(Deserialize)]
@@ -291,7 +294,11 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver);
         for (i, s) in setup.supports.iter().enumerate() {
             let name = format!("Lager {}", i + 1);
-            model = model.group_in(&name, Selection::Surfaces(s.surfaces.clone()), s.region.clone()).support(&name, s.fix);
+            model = model.group_in(&name, Selection::Surfaces(s.surfaces.clone()), s.region.clone());
+            model = match &s.local {
+                Some(local) => model.support_local(&name, local.clone()),
+                None => model.support(&name, s.fix),
+            };
         }
         for (i, l) in setup.loads.iter().enumerate() {
             let name = format!("Last {}", i + 1);

@@ -20,7 +20,7 @@ pub mod vtk;
 
 pub use material::Material;
 pub use mesh::{Mesh, Order};
-pub use model::{Axis, Fix, Group, Load, Model, Selection, SolverKind, Support};
+pub use model::{Axis, Fix, Group, Load, LocalFix, Model, Selection, SolverKind, Support};
 pub use region::Region;
 pub use results::Results;
 pub use solver::solve;

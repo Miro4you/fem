@@ -46,7 +46,11 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - ✅ Wirkbereich: Last/Lager nur auf einem gezeichneten Kreis/Rechteck oder Wellen-/Bohrungsabschnitt
   → Felix: bitte in der App ausprobieren (Last anlegen → „Wirkbereich“ wählen → im Bild aufziehen)
 - Idee: Netz im Wirkbereich automatisch verfeinern (Gmsh-Größenfeld), damit kleine Bereiche scharf abgebildet werden
-- Reibungsfreie Lagerung auf schrägen Flächen
+- ✅ Reibungsfreie Lagerung auf schrägen Flächen (lokale Knotenbasen)
+- ✅ Zylindrische Lagerung (Bolzen/Gelenk), Lastpfeil im Bild ausrichten (Frei/XY/YZ/XZ, 5°-Raster)
+- Offen: Geometrie nach dem Ergebnis anpassen – Felix: STEP-Direktänderung und Onshape-API beide „nicht ganz optimal“
+  → klären, wie der Ablauf idealerweise aussehen soll
+- Danach: „wenig genutztes Material“ + Topologieoptimierung (Leichtbau)
 - Mac-Build testen
 - Endgültiger Programmname
 

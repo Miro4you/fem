@@ -93,10 +93,25 @@ impl Fix {
     }
 }
 
+/// Lager in lokalen Richtungen je Knoten (schräge oder gekrümmte Flächen)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum LocalFix {
+    /// Senkrecht zur Fläche festgehalten, in der Fläche frei (reibungsfreie Auflage, Symmetrie) – beliebig orientiert
+    Normal,
+    /// Zylindrische Lagerung um die Achse durch `origin` in Richtung `axis`, je Richtung fest (`true`) oder frei.
+    /// Bolzen/Gelenk: radial und axial fest, tangential frei (dreht um die Achse).
+    Cylindrical { origin: [f64; 3], axis: [f64; 3], radial: bool, tangential: bool, axial: bool },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Support {
     pub group: String,
+    /// festgehaltene globale Richtungen (bei `local` ignoriert)
     pub fix: Fix,
+    /// statt globaler Richtungen: lokale Richtungen je Knoten
+    #[serde(default)]
+    pub local: Option<LocalFix>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,7 +200,13 @@ impl Model {
     }
 
     pub fn support(mut self, group: &str, fix: Fix) -> Self {
-        self.supports.push(Support { group: group.into(), fix });
+        self.supports.push(Support { group: group.into(), fix, local: None });
+        self
+    }
+
+    /// Lager in lokalen Richtungen (z. B. zylindrische Lagerung, reibungsfreie Auflage auf schräger Fläche)
+    pub fn support_local(mut self, group: &str, local: LocalFix) -> Self {
+        self.supports.push(Support { group: group.into(), fix: Fix::default(), local: Some(local) });
         self
     }
 

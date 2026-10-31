@@ -10,7 +10,8 @@ Lager und Lasten per Klick auf CAD-Flächen → Rechnen → farbige Ergebnisse (
 Sicherheit) mit Verformung, Maximum-Markierung, Messpunkt per Klick, Warnungen (Singularität am Lager,
 Fließen, große Verformung), Gleichgewichtskontrolle, Projekt speichern/laden (`.fem.json`), Export `.vtu`.
 
-Lagerarten: fest eingespannt · reibungsfreie Auflage/Symmetrie (ebene, achsparallele Flächen) · Richtungen einzeln.
+Lagerarten: fest eingespannt · reibungsfreie Auflage/Symmetrie (beliebige, auch schräge Flächen) · Richtungen einzeln ·
+zylindrische Lagerung (Bolzen/Gelenk: radial, axial, Drehung je einzeln sperrbar).
 Lasten: Kraft (gleichmäßig verteilt, Richtung frei oder senkrecht auf die Fläche) · Druck · Moment ·
 Lagerlast (Bolzen/Welle: nur der halbe Umfang, cos-verteilt).
 
@@ -23,7 +24,8 @@ exakt; wie scharf der Rand abgebildet wird, hängt vom Netz ab (Elemente deutlic
 
 - Lineare Statik für 3D-Volumenkörper, Tetraeder-Elemente **TET10** (quadratisch, Standard) und TET4
 - Werkstoff linear-elastisch, isotrop (E, ν, optional Streckgrenze)
-- Lager: Richtungen einzeln festhalten (Einspannung, Loslager, Symmetrie)
+- Lager: Richtungen einzeln festhalten (Einspannung, Loslager, Symmetrie); lokale Lager je Knoten:
+  reibungsfrei senkrecht zur Fläche (auch schräg), zylindrisch (radial/tangential/axial)
 - Lasten: Gesamtkraft auf Fläche, Flächenlast (Vektor), Druck, Moment (linear verteilt, wie starres Anschlussteil),
   Lagerlast (cos-Verteilung auf der gedrückten Zylinderhälfte); jeweils optional nur in einem Wirkbereich
 - Ergebnisse: Verschiebungen, Vergleichsspannung (von Mises), Hauptspannungen, Lagerreaktionen,
@@ -124,6 +126,8 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 | Kragbalken TET10 (40×2×4) | Durchbiegung (Timoshenko) | −0,5 % |
 | Kragbalken TET10 (40×2×4) | Biegespannung bei l/2 | +0,2 % |
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
+| Zugstab schräg im Raum, nur reibungsfreie Auflagen | σ, Δl, Lagerkraft (direkt und iterativ) | exakt |
+| Balken mit zwei Gelenkbolzen (zylindrische Lagerung) | Durchbiegung / Biegespannung Einfeldträger | −0,6 % / −0,2 % |
 | Welle Ø20, Torsionsmoment (STEP + Gmsh) | Schubspannung τ = 16T/(πd³) / Verdrehwinkel | +0,03 % / 0,00 % |
 | Welle Ø20, Lagerlast auf Abschnitt z = 80…100 | Biegespannung σ = F·a/W | −0,4 % |
 
@@ -144,7 +148,6 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
   | 0,5 mm | 2,2 Mio. | – | 137 s, 5,5 GB |
 
   Ergebnisse beider Löser stimmen überein (Abbruch bei ‖r‖/‖f‖ < 10⁻⁹).
-- Reibungsfreie Auflage nur für ebene, achsparallele Flächen (schräge Flächen brauchen lokale Koordinaten – später).
 - Der Rand eines Wirkbereichs wird nicht ins Netz eingearbeitet (kein „Imprint“ wie in Ansys): Die Last wird an den
   Integrationspunkten abgeschnitten. Bei Bereichen, die nur wenige Elemente groß sind, wirkt der Rand verschmiert.
 - Lagerlast: Die Kraft muss quer zur Bohrungsachse zeigen; bei nur teilweise belastetem Umfang kann eine kleine

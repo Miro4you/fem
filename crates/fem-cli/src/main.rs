@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use fem_core::generate::box_mesh;
-use fem_core::{validate, Axis, Fix, Load, Material, Model, Order, Region, Selection, SolverKind};
+use fem_core::{validate, Axis, Fix, Load, LocalFix, Material, Model, Order, Region, Selection, SolverKind};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -71,6 +71,9 @@ struct SupportDef {
     group: String,
     /// festgehaltene Richtungen, Standard: alle (feste Einspannung)
     fix: Option<Vec<Axis>>,
+    /// lokale Lagerung: { type = "normal" } oder
+    /// { type = "cylindrical", origin = [...], axis = [...], radial = true, tangential = false, axial = true }
+    local: Option<LocalFix>,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +108,10 @@ fn build_model(case: Case) -> Result<Model> {
         model = model.group_in(&g.name, sel, g.region);
     }
     for s in case.support {
+        if let Some(local) = s.local {
+            model = model.support_local(&s.group, local);
+            continue;
+        }
         let fix = match s.fix {
             None => Fix::all(),
             Some(axes) => {
