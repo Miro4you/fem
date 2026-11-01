@@ -19,7 +19,7 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use crate::{open_step_impl, solve_impl, write_vtu_impl, AppState, Setup};
+use crate::{modify_geometry_impl, open_step_impl, solve_impl, write_vtu_impl, AppState, Setup};
 
 pub const DEFAULT_PORT: u16 = 8790;
 /// Höchstens so viele gleichzeitige Browser-Sitzungen (älteste fliegt raus)
@@ -153,6 +153,7 @@ fn router(shared: Shared) -> Router {
         .route("/upload", post(api_upload))
         .route("/file", get(api_file))
         .route("/open_step", post(api_open_step))
+        .route("/modify_geometry", post(api_modify_geometry))
         .route("/solve", post(api_solve))
         .route("/vtu", get(api_vtu))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
@@ -265,6 +266,25 @@ async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Jso
     }
     let state = s.session(&headers);
     let view = tokio::task::spawn_blocking(move || open_step_impl(&state, &a.path, a.size, a.linear == Some(true)))
+        .await
+        .map_err(bad)?
+        .map_err(bad)?;
+    Ok(Json(view).into_response())
+}
+
+#[derive(Deserialize)]
+struct ModifyArgs {
+    base: String,
+    ops: Vec<fem_core::geometry::GeoOp>,
+    size: Option<f64>,
+}
+
+async fn api_modify_geometry(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<ModifyArgs>) -> ApiResult<Response> {
+    if !is_step(Path::new(&a.base)) {
+        return Err(bad("Nur STEP-Dateien (.step, .stp)"));
+    }
+    let state = s.session(&headers);
+    let view = tokio::task::spawn_blocking(move || modify_geometry_impl(&state, &a.base, &a.ops, a.size))
         .await
         .map_err(bad)?
         .map_err(bad)?;

@@ -6,6 +6,7 @@
 pub mod amg;
 pub mod element;
 pub mod generate;
+pub mod geometry;
 pub mod gmsh;
 pub mod material;
 pub mod mesh;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FolderOpen, Save, FileUp, Play, Plus, Trash2, MousePointerClick, Anchor, ArrowDownToLine,
   TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine, Wifi, Copy, Move3d,
+  Spline, SquarePlus, SquareMinus, CircleDot, Wrench, RotateCcw,
 } from 'lucide-react'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
@@ -9,6 +10,7 @@ import * as api from './api.js'
 import { MATERIALS } from './materials.js'
 import { fmt, fmtVec } from './format.js'
 import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES } from './region.js'
+import { GEO_OPS, opFromSurface, newSketchOp, opPayload, opProblem, remapSurfaces, axisLabel } from './geoops.js'
 
 const SUPPORT_COLOR = '#5b8def'
 const SUPPORT_ACTIVE = '#1f5fd6'
@@ -58,6 +60,15 @@ export default function App() {
   const [dirPick, setDirPick] = useState(null)
   // Lastpfeil im Bild ausrichten: { id, field: 'force' | 'moment', plane: 'free' | 'xy' | 'yz' | 'xz' }
   const [aim, setAim] = useState(null)
+  // Geometrie anpassen
+  const [geoOps, setGeoOps] = useState([])
+  const [geoStep, setGeoStep] = useState(null) // geänderte STEP (null = Original)
+  const [geoApplied, setGeoApplied] = useState('[]') // zuletzt angewendete Änderungen (JSON)
+  const [geoInfo, setGeoInfo] = useState(null) // Volumen vorher/nachher
+  const [geoPick, setGeoPick] = useState(false)
+  const [geoWarnings, setGeoWarnings] = useState([])
+  // Ergebnis zum Vergleichen (z. B. Original vor den Geometrieänderungen)
+  const [reference, setReference] = useState(null)
   const [result, setResult] = useState(null)
   const [resultStale, setResultStale] = useState(false)
   const [view, setView] = useState('setup')
@@ -92,23 +103,32 @@ export default function App() {
   }, [mesh])
 
   // --- Geometrie ---------------------------------------------------------------
-  async function loadGeometry(path, size, keepSetup = false) {
+  // base = false: geänderte Geometrie neu vernetzen (Original und Änderungen bleiben)
+  async function loadGeometry(path, size, keepSetup = false, base = true) {
     setBusy('Vernetze Geometrie …')
     setError(null)
     try {
       const m = await api.openStep(path, size ? Number(size) : null)
       setMesh(m)
-      setStepPath(path)
       setMeshSize(String(Number(m.mesh_size.toPrecision(3))))
       setResult(null)
       setResultStale(false)
-      setView('setup')
       setProbe(null)
+      if (base) {
+        setStepPath(path)
+        setView('setup')
+        setGeoStep(null)
+        setGeoApplied('[]')
+        setGeoInfo(null)
+        setGeoWarnings([])
+      }
       if (!keepSetup) {
         setSupports([])
         setLoads([])
         setActive(null)
         setDrawing(null)
+        setGeoOps([])
+        setReference(null)
       }
       return m
     } catch (e) {
@@ -126,7 +146,7 @@ export default function App() {
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
     if (!stepPath) return
-    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads }
+    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, geoOps }
     try {
       await api.saveProject(stepPath, data)
     } catch (e) {
@@ -141,6 +161,23 @@ export default function App() {
       if (d.format !== 'projekt-fem') throw new Error('Keine Projekt-FEM-Datei')
       const m = await loadGeometry(d.step, d.meshSize, true)
       if (!m) return
+      const ops = d.geoOps ?? []
+      setGeoOps(ops)
+      setReference(null)
+      // gespeicherte Lager/Lasten beziehen sich auf die geänderte Geometrie → Änderungen gleich anwenden
+      const active = ops.filter((o) => o.enabled && !opProblem(o))
+      if (active.length) {
+        setBusy('Passe Geometrie an …')
+        try {
+          const g = await api.modifyGeometry(d.step, active.map(opPayload), d.meshSize ? Number(d.meshSize) : null)
+          setMesh(g.mesh)
+          setGeoStep(g.step)
+          setGeoInfo(g)
+          setGeoApplied(JSON.stringify(active.map(opPayload)))
+        } finally {
+          setBusy(null)
+        }
+      }
       setMaterial(d.material)
       setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
       setLoads(d.loads.map((l) => ({ ...newLoad(), ...l, id: nextId++ })))
@@ -153,6 +190,13 @@ export default function App() {
   // --- Lager / Lasten ---------------------------------------------------------------
   const onPick = useCallback(
     (tag) => {
+      if (geoPick) {
+        const op = opFromSurface(tag, surfaceInfo)
+        if (op.error) return setError(op.error)
+        setGeoOps((ops) => [...ops, { ...op, mesh: mesh?.positions?.length }])
+        setGeoPick(false)
+        return
+      }
       if (dirPick) {
         const info = surfaceInfo.get(tag)
         // ebene Fläche: Last drückt senkrecht auf die Fläche; Zylinder: entlang der Achse
@@ -182,18 +226,22 @@ export default function App() {
       if (active.type === 'support') setSupports(toggle)
       else setLoads(toggle)
     },
-    [active, dirPick, surfaceInfo],
+    [active, dirPick, geoPick, surfaceInfo, mesh],
   )
 
   const surfaceTint = useCallback(
     (tag) => {
+      if (view === 'geometry') {
+        // Radien/Bohrungen, die geändert werden (Flächennummern vom Zeitpunkt der Auswahl)
+        return geoOps.some((o) => o.enabled && o.tags?.includes(tag) && o.mesh === mesh?.positions?.length) ? '#c9a227' : null
+      }
       for (const l of loads)
         if (l.surfaces.includes(tag)) return l.region ? LOAD_PALE : active?.id === l.id ? LOAD_ACTIVE : LOAD_COLOR
       for (const s of supports)
         if (s.surfaces.includes(tag)) return s.region ? SUPPORT_PALE : active?.id === s.id ? SUPPORT_ACTIVE : SUPPORT_COLOR
       return null
     },
-    [supports, loads, active],
+    [supports, loads, active, view, geoOps, mesh],
   )
 
   // --- Wirkbereiche ------------------------------------------------------------------
@@ -214,6 +262,12 @@ export default function App() {
     (ev) => {
       if (!drawing) return
       const info = surfaceInfo.get(ev.tag)
+      if (drawing.type === 'geo') {
+        const sketch = regionFromDrag(drawing.shape, ev)
+        setGeoOps((ops) => ops.map((o) => (o.id === drawing.id ? { ...o, sketch } : o)))
+        if (ev.final) setDrawing(null)
+        return
+      }
       if (drawing.shape === 'band' && !info?.cylinder) {
         if (ev.final) setError('Ein Wellen-/Bohrungsabschnitt lässt sich nur auf einer zylindrischen Fläche zeichnen.')
         return
@@ -239,10 +293,18 @@ export default function App() {
       const isActive = active?.id === item.id || drawing?.id === item.id
       out.push({ region, cyl: selectionCylinder(item.surfaces, surfaceInfo), color: isActive ? activeColor : color, active: isActive })
     }
+    if (view === 'geometry') {
+      for (const o of geoOps) {
+        if (!o.sketch || !o.enabled) continue
+        const isActive = drawing?.id === o.id
+        out.push({ region: regionNumbers(o.sketch), cyl: null, color: o.op === 'add' ? '#2e9e5b' : '#d64545', active: isActive })
+      }
+      return out
+    }
     for (const s of supports) push(s, SUPPORT_COLOR, SUPPORT_ACTIVE)
     for (const l of loads) push(l, LOAD_COLOR, LOAD_ACTIVE)
     return out
-  }, [supports, loads, surfaceInfo, active, drawing])
+  }, [supports, loads, surfaceInfo, active, drawing, view, geoOps])
 
   function supportFix(s) {
     if (s.kind === 'fixed') return { fix: { x: 0, y: 0, z: 0 } }
@@ -337,6 +399,49 @@ export default function App() {
     setDrawing(null)
     setDirPick(null)
     setAim(aim?.id === id && aim.field === field ? null : { id, field, plane: aim?.plane ?? 'free' })
+  }
+
+  // --- Geometrie anpassen ----------------------------------------------------------------
+  const geoPending = useMemo(() => {
+    const act = geoOps.filter((o) => o.enabled && !opProblem(o)).map(opPayload)
+    return JSON.stringify(act) !== geoApplied
+  }, [geoOps, geoApplied])
+
+  async function onApplyGeometry() {
+    const act = geoOps.filter((o) => o.enabled && !opProblem(o))
+    const payload = act.map(opPayload)
+    // Ergebnis vor der ersten Änderung als Vergleich merken
+    if (result && !reference) setReference(summary(result, mesh, 'Original'))
+    setBusy(act.length ? 'Passe Geometrie an und vernetze …' : 'Stelle Original wieder her …')
+    setError(null)
+    setDrawing(null)
+    setGeoPick(false)
+    try {
+      const g = act.length ? await api.modifyGeometry(stepPath, payload, Number(meshSize) || null) : null
+      const m = g ? g.mesh : await api.openStep(stepPath, Number(meshSize) || null)
+      // Lager und Lasten auf die neuen Flächennummern umstellen
+      const map = remapSurfaces(mesh.surfaces, m.surfaces)
+      const warn = []
+      const remap = (items, what) =>
+        items.map((x, i) => {
+          const lost = x.surfaces.filter((t) => map.get(t) == null)
+          if (lost.length) warn.push(`${what} ${i + 1}: ${lost.length === 1 ? 'eine Fläche' : lost.length + ' Flächen'} nicht wiedergefunden – im Reiter Modell prüfen`)
+          return { ...x, surfaces: [...new Set(x.surfaces.map((t) => map.get(t)).filter((t) => t != null))] }
+        })
+      setSupports((ss) => remap(ss, 'Lager'))
+      setLoads((ls) => remap(ls, 'Last'))
+      setGeoWarnings(warn)
+      setMesh(m)
+      setGeoStep(g ? g.step : null)
+      setGeoInfo(g)
+      setGeoApplied(JSON.stringify(payload))
+      setProbe(null)
+      if (result) setResultStale(true)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
   }
 
   // --- Rechnen ---------------------------------------------------------------------
@@ -452,6 +557,9 @@ export default function App() {
           <button className={view === 'setup' ? 'on' : ''} onClick={() => setView('setup')}>
             Modell
           </button>
+          <button className={view === 'geometry' ? 'on' : ''} disabled={!mesh} onClick={() => { setActive(null); setAim(null); setDirPick(null); setDrawing(null); setView('geometry') }}>
+            Geometrie{geoOps.some((o) => o.enabled) ? ` (${geoOps.filter((o) => o.enabled).length})` : ''}
+          </button>
           <button className={view === 'result' ? 'on' : ''} disabled={!result} onClick={() => setView('result')}>
             Ergebnis{resultStale && result ? ' (veraltet)' : ''}
           </button>
@@ -512,7 +620,7 @@ export default function App() {
                     </label>
                     <button
                       className={'btn' + (Number(meshSize) !== Number(mesh.mesh_size.toPrecision(3)) ? ' primary' : '')}
-                      onClick={() => loadGeometry(stepPath, meshSize, true)}
+                      onClick={() => loadGeometry(geoStep ?? stepPath, meshSize, true, !geoStep)}
                     >
                       <Grid3x3 size={15} /> Neu vernetzen
                     </button>
@@ -732,6 +840,24 @@ export default function App() {
                 </div>
               )}
             </>
+          ) : view === 'geometry' ? (
+            <GeometryPanel
+              ops={geoOps}
+              setOps={setGeoOps}
+              pending={geoPending}
+              info={geoInfo}
+              warnings={geoWarnings}
+              picking={geoPick}
+              onPick={() => { setDrawing(null); setGeoPick(!geoPick) }}
+              drawing={drawing?.type === 'geo' ? drawing : null}
+              onDraw={(op) => { setGeoPick(false); setDrawing({ type: 'geo', id: op.id, shape: op.shape }) }}
+              onCancelDraw={() => setDrawing(null)}
+              onApply={onApplyGeometry}
+              busy={!!busy}
+              modified={!!geoStep}
+              onExport={() => api.exportStep(geoStep, (stepPath ?? 'geometrie').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') + '_geaendert.step').catch((e) => setError(String(e)))}
+              mesh={mesh}
+            />
           ) : (
             result && (
               <ResultPanel
@@ -746,6 +872,10 @@ export default function App() {
                 setShowMesh={setShowMesh}
                 stale={resultStale}
                 onExport={onExportVtu}
+                reference={reference}
+                current={summary(result, mesh, geoStep ? 'Geändert' : 'Aktuell')}
+                onPin={() => setReference(summary(result, mesh, geoStep ? 'Geändert' : 'Vorher'))}
+                onUnpin={() => setReference(null)}
               />
             )
           )}
@@ -766,14 +896,14 @@ export default function App() {
             mesh={mesh}
             mode={mode}
             surfaceTint={surfaceTint}
-            pickable={(!!active || !!dirPick) && view === 'setup'}
+            pickable={((!!active || !!dirPick) && view === 'setup') || (geoPick && view === 'geometry')}
             onPick={onPick}
             result={display}
             showMesh={showMesh}
-            arrows={arrows}
+            arrows={view === 'setup' ? arrows : []}
             markers={mode === 'result' ? markers : []}
             onProbe={setProbe}
-            drawing={view === 'setup' ? drawing?.shape : null}
+            drawing={view === 'setup' || view === 'geometry' ? drawing?.shape : null}
             planeNormal={planeNormal}
             onDraw={onDraw}
             overlays={overlays}
@@ -807,7 +937,16 @@ export default function App() {
               </button>
             </div>
           )}
-          {drawing && view === 'setup' && (
+          {geoPick && view === 'geometry' && (
+            <div className="pick-hint">
+              <MousePointerClick size={15} />
+              Radius- oder Bohrungsfläche anklicken
+              <button className="btn small" onClick={() => setGeoPick(false)}>
+                <X size={14} /> Abbrechen
+              </button>
+            </div>
+          )}
+          {drawing && (view === 'setup' || view === 'geometry') && (
             <div className="pick-hint">
               <PenLine size={15} />
               {drawing.shape === 'band'
@@ -859,7 +998,60 @@ export default function App() {
   )
 }
 
-function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport }) {
+// Kennwerte eines Ergebnisses für den Vergleich vorher/nachher
+function summary(result, mesh, label) {
+  return { label, vm: result.max_von_mises.value, u: result.max_displacement.value, safety: result.safety, volume: mesh?.volume ?? null }
+}
+
+function Compare({ reference, current, onUnpin }) {
+  const rows = [
+    ['σv max', 'vm', 'MPa', -1],
+    ['u max', 'u', 'mm', -1],
+    ['Sicherheit', 'safety', '', 1],
+    ['Volumen', 'volume', 'cm³', -1],
+  ]
+  const val = (o, k) => (k === 'volume' && o[k] != null ? o[k] / 1000 : o[k])
+  return (
+    <div className="compare">
+      <div className="item-head">
+        <strong>Vergleich</strong>
+        <span className="spacer" />
+        <button className="icon-btn" title="Vergleich beenden" onClick={onUnpin}>
+          <X size={14} />
+        </button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th />
+            <th>{reference.label}</th>
+            <th>{current.label}</th>
+            <th>Δ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([lab, k, unit, better]) => {
+            const a = val(reference, k)
+            const b = val(current, k)
+            if (a == null || b == null) return null
+            const d = a ? (b - a) / Math.abs(a) : 0
+            const cls = Math.abs(d) < 0.001 ? '' : d * better > 0 ? 'good' : 'bad'
+            return (
+              <tr key={k}>
+                <td>{lab}</td>
+                <td>{fmt(a)} {unit}</td>
+                <td>{fmt(b)} {unit}</td>
+                <td className={cls}>{d > 0 ? '+' : ''}{(100 * d).toFixed(1).replace('.', ',')} %</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, reference, current, onPin, onUnpin }) {
   const sf = result.safety
   const sfClass = sf == null ? '' : sf >= 1.5 ? 'good' : sf >= 1 ? 'ok' : 'bad'
   const balance = Math.hypot(...result.total_load.map((v, k) => v + result.total_reaction[k]))
@@ -871,6 +1063,15 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
           <TriangleAlert size={16} />
           <div>Das Modell wurde geändert. Das Ergebnis gehört noch zum vorherigen Stand – neu rechnen.</div>
         </div>
+      )}
+      {reference && !stale ? (
+        <Compare reference={reference} current={current} onUnpin={onUnpin} />
+      ) : (
+        !reference && (
+          <button className="link" onClick={onPin}>
+            Dieses Ergebnis zum Vergleichen merken
+          </button>
+        )
       )}
       {sf != null && (
         <div className={'safety ' + sfClass}>
@@ -977,6 +1178,165 @@ function NumField({ label, unit, value, onChange }) {
         {unit && <em>{unit}</em>}
       </div>
     </label>
+  )
+}
+
+// --- Geometrie anpassen -------------------------------------------------------------------------
+
+const OP_ICONS = { fillet: Spline, hole: CircleDot, add: SquarePlus, cut: SquareMinus }
+
+function GeometryPanel({ ops, setOps, pending, info, warnings, picking, onPick, drawing, onDraw, onCancelDraw, onApply, busy, modified, onExport, mesh }) {
+  const upd = (id, patch) => setOps(ops.map((o) => (o.id === id ? { ...o, ...patch } : o)))
+  const addSketch = (op, shape) => {
+    const o = newSketchOp(op, shape)
+    setOps([...ops, o])
+    onDraw(o)
+  }
+  const problems = ops.filter((o) => o.enabled).map((o) => opProblem(o)).filter(Boolean)
+  return (
+    <>
+      <section className="section">
+        <h2>
+          <Wrench size={15} /> Geometrie anpassen
+        </h2>
+        <p className="hint">
+          Für schnelle Abschätzungen „was wäre, wenn“: Radien und Bohrungen ändern, Material hinzufügen oder entfernen. Lager und
+          Lasten bleiben erhalten. Die Änderungen gehen nicht ins CAD – bei Bedarf die geänderte STEP-Datei speichern.
+        </p>
+        <div className="tool-grid">
+          <button className={'btn' + (picking ? ' on' : '')} onClick={onPick}>
+            <Spline size={15} /> Radius / Bohrung
+          </button>
+          <div className="tool-split">
+            <span>
+              <SquarePlus size={15} /> Material hinzu
+            </span>
+            <button className="btn small" onClick={() => addSketch('add', 'rect')}>Rechteck</button>
+            <button className="btn small" onClick={() => addSketch('add', 'circle')}>Kreis</button>
+          </div>
+          <div className="tool-split">
+            <span>
+              <SquareMinus size={15} /> Material weg
+            </span>
+            <button className="btn small" onClick={() => addSketch('cut', 'rect')}>Rechteck</button>
+            <button className="btn small" onClick={() => addSketch('cut', 'circle')}>Kreis</button>
+          </div>
+        </div>
+      </section>
+
+      {ops.length > 0 && (
+        <section className="section">
+          <h2>Änderungen</h2>
+          {ops.map((o, i) => {
+            const Icon = OP_ICONS[o.op]
+            const prob = opProblem(o)
+            const isDrawing = drawing?.id === o.id
+            return (
+              <div key={o.id} className={'item' + (isDrawing ? ' active load' : '') + (o.enabled ? '' : ' disabled')}>
+                <div className="item-head">
+                  <input type="checkbox" title="Änderung an/aus" checked={o.enabled} onChange={(e) => upd(o.id, { enabled: e.target.checked })} />
+                  <Icon size={14} />
+                  <strong>
+                    {i + 1}. {GEO_OPS[o.op]}
+                  </strong>
+                  <span className="spacer" />
+                  <button className="icon-btn" title="Löschen" onClick={() => { setOps(ops.filter((x) => x.id !== o.id)); if (isDrawing) onCancelDraw() }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                {o.op === 'fillet' && (
+                  <>
+                    <NumField label={`Radius (vorher R${fmt(o.was)})`} unit="mm" value={o.radius} onChange={(v) => upd(o.id, { radius: v })} />
+                    <p className="hint">{o.convex ? 'Außenkante' : 'Innenradius (Kehle)'}, Achse {axisLabel(o.axis)}. 0 = scharfe Kante.</p>
+                  </>
+                )}
+                {o.op === 'hole' && (
+                  <>
+                    <NumField label={`Durchmesser (vorher Ø${fmt(o.was)})`} unit="mm" value={o.diameter} onChange={(v) => upd(o.id, { diameter: v })} />
+                    <p className="hint">0 = Bohrung schließen.</p>
+                  </>
+                )}
+                {(o.op === 'add' || o.op === 'cut') && (
+                  <>
+                    {isDrawing ? (
+                      <p className="hint draw">{o.shape === 'circle' ? 'Kreis' : 'Rechteck'} im Bild auf eine Fläche zeichnen: drücken und ziehen …</p>
+                    ) : o.sketch ? (
+                      <>
+                        <div className="grid3">
+                          {['Mitte x', 'Mitte y', 'Mitte z'].map((lab, k) => (
+                            <NumField key={lab} label={lab} unit="mm" value={o.sketch.center[k]} onChange={(v) => upd(o.id, { sketch: { ...o.sketch, center: o.sketch.center.map((c, j) => (j === k ? v : c)) } })} />
+                          ))}
+                        </div>
+                        <div className="grid3">
+                          {o.sketch.shape === 'circle' ? (
+                            <NumField label="Durchmesser" unit="mm" value={2 * o.sketch.radius} onChange={(v) => upd(o.id, { sketch: { ...o.sketch, radius: Number(v) / 2 } })} />
+                          ) : (
+                            <>
+                              <NumField label="Breite" unit="mm" value={o.sketch.width} onChange={(v) => upd(o.id, { sketch: { ...o.sketch, width: v } })} />
+                              <NumField label="Länge" unit="mm" value={o.sketch.height} onChange={(v) => upd(o.id, { sketch: { ...o.sketch, height: v } })} />
+                            </>
+                          )}
+                          {o.op === 'add' ? (
+                            <NumField label="Höhe" unit="mm" value={o.height} onChange={(v) => upd(o.id, { height: v })} />
+                          ) : (
+                            !o.through && <NumField label="Tiefe" unit="mm" value={o.depth} onChange={(v) => upd(o.id, { depth: v })} />
+                          )}
+                        </div>
+                        {o.op === 'cut' && (
+                          <label className="check">
+                            <input type="checkbox" checked={o.through} onChange={(e) => upd(o.id, { through: e.target.checked })} /> durch alles
+                          </label>
+                        )}
+                        <button className="link" onClick={() => onDraw(o)}>
+                          <PenLine size={13} /> Neu zeichnen
+                        </button>
+                      </>
+                    ) : (
+                      <button className="link" onClick={() => onDraw(o)}>
+                        <PenLine size={13} /> Skizze zeichnen
+                      </button>
+                    )}
+                  </>
+                )}
+                {prob && !isDrawing && <p className="error-text">{prob}</p>}
+              </div>
+            )
+          })}
+        </section>
+      )}
+
+      {warnings.length > 0 && (
+        <div className="notice warn">
+          <TriangleAlert size={16} />
+          <div>{warnings.join(' · ')}</div>
+        </div>
+      )}
+
+      <div className="solve">
+        <button className="btn primary wide big" disabled={busy || !pending} onClick={onApply}>
+          <Check size={16} /> {pending ? 'Änderungen anwenden' : modified ? 'Änderungen angewendet' : 'Keine Änderungen'}
+        </button>
+        {problems.length > 0 && <p className="hint">Unvollständige Änderungen werden übersprungen: {problems.join(', ')}.</p>}
+        {info && (
+          <p className="hint">
+            Volumen {fmt(info.volume_before / 1000)} → {fmt(info.volume_after / 1000)} cm³ ({info.volume_after >= info.volume_before ? '+' : ''}
+            {fmt((100 * (info.volume_after - info.volume_before)) / info.volume_before)} %). Danach im Reiter Modell rechnen – das Ergebnis wird
+            mit dem vorherigen verglichen.
+          </p>
+        )}
+        {modified && (
+          <div className="row">
+            <button className="btn wide" onClick={onExport}>
+              <Download size={15} /> Geänderte STEP speichern
+            </button>
+            <button className="btn" title="Alle Änderungen ausschalten" onClick={() => setOps(ops.map((o) => ({ ...o, enabled: false })))}>
+              <RotateCcw size={15} /> Original
+            </button>
+          </div>
+        )}
+        {mesh && <p className="hint">{mesh.elements.toLocaleString('de-DE')} Elemente im aktuellen Netz.</p>}
+      </div>
+    </>
   )
 }
 

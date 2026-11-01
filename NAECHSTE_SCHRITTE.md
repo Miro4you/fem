@@ -48,8 +48,9 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - Idee: Netz im Wirkbereich automatisch verfeinern (Gmsh-Größenfeld), damit kleine Bereiche scharf abgebildet werden
 - ✅ Reibungsfreie Lagerung auf schrägen Flächen (lokale Knotenbasen)
 - ✅ Zylindrische Lagerung (Bolzen/Gelenk), Lastpfeil im Bild ausrichten (Frei/XY/YZ/XZ, 5°-Raster)
-- Offen: Geometrie nach dem Ergebnis anpassen – Felix: STEP-Direktänderung und Onshape-API beide „nicht ganz optimal“
-  → klären, wie der Ablauf idealerweise aussehen soll
+- ✅ Geometrie anpassen (grobe Abschätzung): Reiter „Geometrie“ – Radius/Bohrung ändern, Material hinzu/weg per
+  Skizze, Vorher/Nachher-Vergleich. Später möglich: Linienzug-Skizze, Kanten neu verrunden, Fasen
+- Hinweis: Die „R3“-Radien am Hebel (Flächen 16/17) sind laut Geometrie R6
 - Danach: „wenig genutztes Material“ + Topologieoptimierung (Leichtbau)
 - Mac-Build testen
 - Endgültiger Programmname

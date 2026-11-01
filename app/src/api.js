@@ -84,6 +84,20 @@ export const gmshPath = () => (isDesktop ? invoke('gmsh_path') : http('/gmsh'))
 export const openStep = (path, size, linear = false) =>
   isDesktop ? invoke('open_step', { path, size, linear }) : http('/open_step', { method: 'POST', json: { path, size, linear } })
 
+/// Geometrie ändern: Änderungen auf die Original-STEP anwenden, neu vernetzen
+export const modifyGeometry = (base, ops, size) =>
+  isDesktop ? invoke('modify_geometry', { base, ops, size }) : http('/modify_geometry', { method: 'POST', json: { base, ops, size } })
+
+/// geänderte STEP-Datei speichern
+export async function exportStep(path, name) {
+  if (isDesktop) {
+    const p = await save({ defaultPath: name, filters: [{ name: 'STEP-Geometrie', extensions: ['step', 'stp'] }] })
+    if (p) await invoke('copy_step', { from: path, to: p })
+    return
+  }
+  download(await http('/file?path=' + encodeURIComponent(path), { raw: true }), name)
+}
+
 export const solve = (setup) => (isDesktop ? invoke('solve', { setup }) : http('/solve', { method: 'POST', json: { setup } }))
 
 /// STEP auswählen → Pfad auf dem rechnenden Rechner (im Browser: hochladen)

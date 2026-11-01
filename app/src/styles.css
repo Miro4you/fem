@@ -257,3 +257,19 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .aim-bar { gap: 10px; white-space: nowrap; max-width: calc(100% - 140px); }
 .aim-angle { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 120px; }
 .muted.small { color: var(--muted); font-size: 11px; }
+
+/* Geometrie anpassen */
+.tool-grid { display: flex; flex-direction: column; gap: 6px; }
+.tool-split { display: flex; align-items: center; gap: 6px; }
+.tool-split > span { flex: 1; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.btn.on { border-color: var(--accent); color: var(--accent); }
+.item.disabled { opacity: 0.55; }
+.item-head input[type='checkbox'] { width: auto; height: auto; margin: 0; }
+.section h2 svg { color: var(--muted); }
+.compare { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.compare table { width: 100%; border-collapse: collapse; font-size: 11.5px; font-variant-numeric: tabular-nums; table-layout: auto; }
+.compare th { text-align: right; color: var(--muted); font-weight: 500; padding: 2px 4px; }
+.compare td { text-align: right; padding: 3px 3px; border-top: 1px solid var(--line); white-space: nowrap; }
+.compare td:first-child, .compare th:first-child { text-align: left; white-space: normal; }
+.compare td.good { color: var(--good); font-weight: 600; }
+.compare td.bad { color: var(--bad); font-weight: 600; }

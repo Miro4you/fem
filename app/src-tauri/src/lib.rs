@@ -211,6 +211,56 @@ pub fn open_step_impl(state: &AppState, path: &str, size: Option<f64>, linear: b
     }
 }
 
+// --- Geometrie anpassen -------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct GeometryView {
+    mesh: MeshView,
+    /// geänderte STEP-Datei (für Neuvernetzen und Export)
+    step: String,
+    volume_before: f64,
+    volume_after: f64,
+}
+
+/// Änderungen auf die Original-STEP anwenden, Ergebnis vernetzen.
+pub fn modify_geometry_impl(
+    state: &AppState,
+    base: &str,
+    ops: &[fem_core::geometry::GeoOp],
+    size: Option<f64>,
+) -> Result<GeometryView, String> {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let stem = PathBuf::from(base).file_stem().and_then(|s| s.to_str()).unwrap_or("geometrie").to_string();
+    let out = std::env::temp_dir().join("projekt-fem-geo").join(format!("{stamp}")).join(format!("{stem}_geaendert.step"));
+    let r = fem_core::geometry::modify_step(&PathBuf::from(base), ops, &out).map_err(|e| e.to_string())?;
+    let step = out.display().to_string();
+    let mesh = open_step_impl(state, &step, size, false)?;
+    Ok(GeometryView { mesh, step, volume_before: r.volume_before, volume_after: r.volume_after })
+}
+
+#[tauri::command]
+async fn modify_geometry(
+    state: tauri::State<'_, AppState>,
+    base: String,
+    ops: Vec<fem_core::geometry::GeoOp>,
+    size: Option<f64>,
+) -> Result<GeometryView, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || modify_geometry_impl(&state, &base, &ops, size))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Geänderte STEP-Datei speichern (Kopie)
+#[tauri::command]
+fn copy_step(from: String, to: String) -> Result<(), String> {
+    let ok = |p: &str| p.to_lowercase().ends_with(".step") || p.to_lowercase().ends_with(".stp");
+    if !ok(&from) || !ok(&to) {
+        return Err("Nur STEP-Dateien".into());
+    }
+    std::fs::copy(from, to).map(|_| ()).map_err(|e| e.to_string())
+}
+
 // --- Rechnung ---------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -495,6 +545,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             gmsh_path,
             open_step,
+            modify_geometry,
+            copy_step,
             solve,
             export_vtu,
             save_text,

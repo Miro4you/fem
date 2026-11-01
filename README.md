@@ -35,6 +35,16 @@ exakt; wie scharf der Rand abgebildet wird, hängt vom Netz ab (Elemente deutlic
 - Export als `.vtu` (anschauen z. B. mit [ParaView](https://www.paraview.org/))
 - Eingebauter Quader-Vernetzer (beliebige Geometrie über STEP/Gmsh kommt in Phase 2)
 
+## Geometrie anpassen (grobe Abschätzung)
+
+Reiter **„Geometrie“**: Radius oder Bohrung anklicken und neuen Wert eingeben (0 = scharfe Kante bzw. Bohrung zu),
+Material hinzufügen oder entfernen über eine Skizze (Rechteck/Kreis) auf einer Fläche mit Höhe bzw. Tiefe
+(„durch alles“). „Änderungen anwenden“ ändert die STEP-Datei, vernetzt neu und stellt Lager und Lasten auf die neuen
+Flächen um. Danach rechnen: Das Ergebnis wird mit dem vorherigen verglichen (Spannung, Verformung, Sicherheit,
+Volumen). Änderungen einzeln an/aus, Projekt speichert sie mit, geänderte STEP lässt sich exportieren.
+Braucht das Python-Modul von Gmsh (bei `uv tool install gmsh` dabei; sonst Pfad in `FEM_GMSH_PYTHON`).
+Die Änderungen gehen nicht zurück ins CAD-Modell.
+
 ## Im Heimnetz nutzen (Laptop, Arbeits-PC)
 
 Der starke Rechner rechnet, andere Geräte bedienen Projekt-FEM im Browser – ohne Installation.
