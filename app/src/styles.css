@@ -273,3 +273,17 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .compare td:first-child, .compare th:first-child { text-align: left; white-space: normal; }
 .compare td.good { color: var(--good); font-weight: 600; }
 .compare td.bad { color: var(--bad); font-weight: 600; }
+
+/* Werkstoff / 3D-Druck */
+.mat-table { display: grid; grid-template-columns: auto 1fr 1fr; gap: 6px 8px; align-items: center; }
+.mat-head { font-size: 11px; color: var(--muted); line-height: 1.2; }
+.mat-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.print-orient { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.print-orient .row { align-items: center; gap: 10px; }
+.orient-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.orient-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 2px 4px; }
+.orient-table td { padding: 4px; border-top: 1px solid var(--line); }
+.orient-table tr.current td { background: var(--accent-soft); }
+.orient-table td.good { color: var(--good); font-weight: 600; }
+.orient-table td.ok { color: var(--ok); font-weight: 600; }
+.orient-table td.bad { color: var(--bad); font-weight: 600; }

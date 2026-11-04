@@ -271,6 +271,46 @@ pub fn balken_gelenk(step: &std::path::Path) -> Result<Vec<Check>> {
     ])
 }
 
+/// 3D-Druck: Zugstab (PLA-Richtwerte, transversal isotrop), einmal in der Schicht belastet (Aufbaurichtung z),
+/// einmal quer zu den Schichten (Aufbaurichtung x). Exakt: Δl = F·l/(A·E), Δb = −ν·σ/E·b, Auslastung = σ/R.
+pub fn zugstab_gedruckt() -> Result<Vec<Check>> {
+    use crate::material::Layers;
+    let (l, b, h, f) = (100.0, 10.0, 10.0, 1000.0);
+    let sigma = f / (b * h);
+    let mut out = Vec::new();
+    for (dir, quer) in [([0.0, 0.0, 1.0], false), ([1.0, 0.0, 0.0], true)] {
+        let mat = Material {
+            name: "PLA (Richtwerte)".into(),
+            e: 3300.0,
+            nu: 0.35,
+            yield_strength: None,
+            tensile_strength: Some(50.0),
+            layers: Some(Layers { build_dir: dir, e_z: 2600.0, nu_z: Some(0.3), g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
+        };
+        let model = Model::new(box_mesh([l, b, h], [10, 2, 2], Order::Quadratic)?, mat.clone())
+            .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
+            .group("y0", Selection::Plane { axis: Axis::Y, value: 0.0 })
+            .group("z0", Selection::Plane { axis: Axis::Z, value: 0.0 })
+            .group("ende", Selection::Plane { axis: Axis::X, value: l })
+            .support("x0", Fix::only(Axis::X))
+            .support("y0", Fix::only(Axis::Y))
+            .support("z0", Fix::only(Axis::Z))
+            .load(Load::Force { group: "ende".into(), force: [f, 0.0, 0.0] });
+        let res = solve(&model)?;
+        let dl = res.displacement.iter().map(|u| u[0]).fold(f64::NEG_INFINITY, f64::max);
+        let db = res.displacement.iter().map(|u| u[1]).fold(f64::INFINITY, f64::min);
+        let (e, nu, r) = if quer { (2600.0, 0.3, 28.0) } else { (3300.0, 0.35, 50.0) };
+        let name = format!("3D-Druck-Zugstab {} (PLA-Richtwerte)", if quer { "quer zu den Schichten" } else { "in der Schicht" });
+        let u_max = res.max_utilization().map(|(_, u)| u).unwrap_or(0.0);
+        out.extend([
+            check(&name, "Δl [mm]", dl, f * l / (b * h * e), 1e-6),
+            check(&name, "Querkontraktion Δb [mm]", db, -nu * sigma / 3300.0 * b, 1e-6),
+            check(&name, "Auslastung", u_max, sigma / r, 1e-6),
+        ]);
+    }
+    Ok(out)
+}
+
 /// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
@@ -281,6 +321,7 @@ pub fn all() -> Result<Vec<Check>> {
     if crate::gmsh::find_gmsh().is_some() && step.exists() {
         v.extend(lochplatte(&step)?);
     }
+    v.extend(zugstab_gedruckt()?);
     v.extend(zugstab_schraeg(crate::SolverKind::Direct)?);
     v.extend(zugstab_schraeg(crate::SolverKind::Iterative)?);
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");

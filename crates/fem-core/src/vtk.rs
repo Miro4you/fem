@@ -47,6 +47,12 @@ pub fn write_vtu(out: &mut impl Write, mesh: &Mesh, res: &Results) -> std::io::R
     };
     array("Verschiebung", 3, &mut res.displacement.iter().flatten().copied());
     array("Vergleichsspannung", 1, &mut res.von_mises.iter().copied());
+    if let Some(u) = &res.utilization {
+        array("Auslastung", 1, &mut u.iter().copied());
+    }
+    if let Some(u) = &res.utilization_layers {
+        array("Auslastung Schichthaftung", 1, &mut u.iter().copied());
+    }
     array("Hauptspannungen", 3, &mut res.principal.iter().flatten().copied());
     // ParaView erwartet symmetrische Tensoren als xx yy zz xy yz xz
     array("Spannung", 6, &mut res.stress.iter().flatten().copied());

@@ -35,6 +35,22 @@ exakt; wie scharf der Rand abgebildet wird, hängt vom Netz ab (Elemente deutlic
 - Export als `.vtu` (anschauen z. B. mit [ParaView](https://www.paraview.org/))
 - Eingebauter Quader-Vernetzer (beliebige Geometrie über STEP/Gmsh kommt in Phase 2)
 
+## 3D-Druck: Schichtaufbau und Aufbaurichtung
+
+Werkstoff mit „3D-Druck: Schichtaufbau berücksichtigen“: eigene Werte **in der Schicht (XY)** und **quer zu den
+Schichten (Z)** für E, Re/Rp0,2 und Rm (transversal isotrop). Vorlagen für FDM (PLA, PETG, ABS, ASA, PC, PA12-CF),
+SLS/SLA (PA12, PA11, Resin) und Metall (AlSi10Mg, 316L, Ti-6Al-4V) – Richtwerte für 100 % Füllung, eigene Werte
+eintragen, wenn bekannt. Aufbaurichtung X/Y/Z oder „Fläche aufs Druckbett legen“; Schichtlinien und Druckbett werden
+angezeigt.
+
+Auslastung je Knoten: max(σv / R_xy, Schichthaftung), Schichthaftung = √((σ_z⁺ / R_z)² + (τ_z / S_z)²) in
+Schichtkoordinaten (Druck quer zu den Schichten zählt nicht, S_z = R_z). R = Re/Rp, ohne Streckgrenze Rm.
+Ergebnis: Sicherheit gesamt und „Sicherheit Schichthaftung“, maßgebliche Versagensart, Sicherheit gegen Bruch (Rm).
+**„Aufbaurichtung vergleichen“** rechnet X, Y und Z und zeigt die beste Ausrichtung.
+
+Grenzen: Füllgrad < 100 %, Wandlinien und Stützstrukturen werden nicht abgebildet (Werte entsprechend abmindern);
+linear-elastisch, kein Kriechen.
+
 ## Geometrie anpassen (grobe Abschätzung)
 
 Reiter **„Geometrie“**: Radius oder Bohrung anklicken und neuen Wert eingeben (0 = scharfe Kante bzw. Bohrung zu),
@@ -136,6 +152,7 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 | Kragbalken TET10 (40×2×4) | Durchbiegung (Timoshenko) | −0,5 % |
 | Kragbalken TET10 (40×2×4) | Biegespannung bei l/2 | +0,2 % |
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
+| 3D-Druck-Zugstab in der Schicht / quer zu den Schichten | Δl, Querkontraktion, Auslastung | exakt |
 | Zugstab schräg im Raum, nur reibungsfreie Auflagen | σ, Δl, Lagerkraft (direkt und iterativ) | exakt |
 | Balken mit zwei Gelenkbolzen (zylindrische Lagerung) | Durchbiegung / Biegespannung Einfeldträger | −0,6 % / −0,2 % |
 | Welle Ø20, Torsionsmoment (STEP + Gmsh) | Schubspannung τ = 16T/(πd³) / Verdrehwinkel | +0,03 % / 0,00 % |

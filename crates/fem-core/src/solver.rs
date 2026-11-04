@@ -206,7 +206,18 @@ pub fn solve(model: &Model) -> Result<Results> {
     let total_reaction: Vector3<f64> = (0..n_nodes).map(node_reaction).sum();
     let total_reaction: [f64; 3] = total_reaction.into();
 
+    let util = crate::results::utilization(&model.material, &stress, false);
+    let safety_break = crate::results::utilization(&model.material, &stress, true)
+        .map(|(u, _)| 1.0 / u.iter().copied().fold(0.0, f64::max).max(1e-300));
+    let (utilization, utilization_layers) = match util {
+        Some((u, l)) => (Some(u), l),
+        None => (None, None),
+    };
+
     Ok(Results {
+        utilization,
+        utilization_layers,
+        safety_break,
         displacement: (0..n_nodes).map(|n| [u[3 * n], u[3 * n + 1], u[3 * n + 2]]).collect(),
         von_mises: stress.iter().map(von_mises).collect(),
         principal: stress.iter().map(principal).collect(),

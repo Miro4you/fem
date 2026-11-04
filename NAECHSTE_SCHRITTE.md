@@ -48,6 +48,10 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - Idee: Netz im Wirkbereich automatisch verfeinern (Gmsh-Größenfeld), damit kleine Bereiche scharf abgebildet werden
 - ✅ Reibungsfreie Lagerung auf schrägen Flächen (lokale Knotenbasen)
 - ✅ Zylindrische Lagerung (Bolzen/Gelenk), Lastpfeil im Bild ausrichten (Frei/XY/YZ/XZ, 5°-Raster)
+- ✅ 3D-Druck: Schichtaufbau (E, Rp/Re, Rm je XY und Z), Aufbaurichtung wählen/vergleichen, Schichthaftung als
+  eigene Auslastung. Ideen: Füllgrad/Wandlinien berücksichtigen, Ausrichtung frei optimieren (nicht nur X/Y/Z),
+  Stützstrukturen/Überhänge bewerten, Materialdatenbank mit Herstellerwerten
+- Geometrie anpassen: Felix ist mit der Bearbeitung noch nicht zufrieden → Wunschablauf klären
 - ✅ Geometrie anpassen (grobe Abschätzung): Reiter „Geometrie“ – Radius/Bohrung ändern, Material hinzu/weg per
   Skizze, Vorher/Nachher-Vergleich. Später möglich: Linienzug-Skizze, Kanten neu verrunden, Fasen
 - Hinweis: Die „R3“-Radien am Hebel (Flächen 16/17) sind laut Geometrie R6

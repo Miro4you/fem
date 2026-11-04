@@ -1,5 +1,6 @@
 use nalgebra::{Matrix3, SymmetricEigen};
 
+use crate::material::stress_to_layers;
 use crate::Material;
 
 /// Ergebnis einer statischen Rechnung, alle Größen an den Knoten.
@@ -21,6 +22,32 @@ pub struct Results {
     pub n_equations: usize,
     /// Iterationen des iterativen Lösers (`None` = direkter Löser)
     pub iterations: Option<usize>,
+    /// Auslastung je Knoten gegen Fließen (Re/Rp, ersatzweise Rm), bei Schichtaufbau richtungsabhängig; 1 = Grenze
+    pub utilization: Option<Vec<f64>>,
+    /// Anteil Schichthaftung (Zug quer zu den Schichten + Schub zwischen den Schichten)
+    pub utilization_layers: Option<Vec<f64>>,
+    /// Sicherheit gegen Bruch (Rm), falls angegeben
+    pub safety_break: Option<f64>,
+}
+
+/// Auslastung je Knoten: (gesamt, Schichthaftung). Gesamt = max(σv / R_xy, Schichthaftung).
+/// Schichthaftung = √((max(σ_z, 0) / R_z)² + (τ_z / S_z)²) mit Spannungen in Schichtkoordinaten.
+pub fn utilization(material: &Material, stress: &[[f64; 6]], brk: bool) -> Option<(Vec<f64>, Option<Vec<f64>>)> {
+    let (r_xy, layer) = material.strengths(brk)?;
+    let rot = material.layers.as_ref().map(|l| l.rotation());
+    let mut total = Vec::with_capacity(stress.len());
+    let mut lay = layer.map(|_| Vec::with_capacity(stress.len()));
+    for s in stress {
+        let mut u = von_mises(s) / r_xy;
+        if let (Some((r_z, s_z)), Some(r), Some(lay)) = (layer, rot.as_ref(), lay.as_mut()) {
+            let l = stress_to_layers(s, r);
+            let a = ((l[2].max(0.0) / r_z).powi(2) + (l[4] * l[4] + l[5] * l[5]) / (s_z * s_z)).sqrt();
+            lay.push(a);
+            u = u.max(a);
+        }
+        total.push(u);
+    }
+    Some((total, lay))
 }
 
 pub fn von_mises(s: &[f64; 6]) -> f64 {
@@ -47,10 +74,14 @@ impl Results {
         argmax(self.von_mises.iter().copied())
     }
 
-    /// Sicherheit gegen Fließen S = Re / σv,max (falls Streckgrenze bekannt)
-    pub fn safety_factor(&self, material: &Material) -> Option<f64> {
-        let (_, s) = self.max_von_mises();
-        material.yield_strength.map(|re| re / s.max(1e-300))
+    /// Sicherheit gegen Fließen: 1 / größte Auslastung (isotrop: Re / σv,max; ohne Re mit Rm)
+    pub fn safety_factor(&self, _material: &Material) -> Option<f64> {
+        self.utilization.as_ref().map(|u| 1.0 / u.iter().copied().fold(0.0, f64::max).max(1e-300))
+    }
+
+    /// (Knoten, Wert) der größten Auslastung
+    pub fn max_utilization(&self) -> Option<(usize, f64)> {
+        self.utilization.as_ref().map(|u| argmax(u.iter().copied()))
     }
 }
 

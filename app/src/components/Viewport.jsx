@@ -32,6 +32,7 @@ export default function Viewport({
   overlays,
   aim,
   onAim,
+  layers,
 }) {
   const host = useRef(null)
   const ctx = useRef(null)
@@ -180,7 +181,11 @@ export default function Viewport({
       renderer, scene, camera, controls, dirty: true, raf: 0,
       group: new THREE.Group(), surf: null, edges: null, wire: null, ghost: null, arrows: new THREE.Group(),
       texture: bandTexture(), labelNodes: [], overlays: new THREE.Group(), aimGroup: new THREE.Group(), aimHandle: null,
+      bed: new THREE.Group(),
+      // Schichtlinien (3D-Druck) im Flächen-Shader
+      layerUniforms: { uLayerDir: { value: new THREE.Vector3(0, 0, 1) }, uLayerStep: { value: 1 }, uLayerOn: { value: 0 } },
     }
+    scene.add(state.bed)
     scene.add(state.overlays)
     scene.add(state.aimGroup)
     scene.add(state.group)
@@ -301,6 +306,25 @@ export default function Viewport({
       vertexColors: true, roughness: 0.62, metalness: 0.05, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
     })
+    s.setupMat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, s.layerUniforms)
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vLayerPos;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLayerPos = (modelMatrix * vec4(transformed, 1.0)).xyz;')
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vLayerPos;\nuniform vec3 uLayerDir;\nuniform float uLayerStep;\nuniform float uLayerOn;')
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          if (uLayerOn > 0.5) {
+            float t = dot(vLayerPos, uLayerDir) / uLayerStep;
+            float d = abs(fract(t + 0.5) - 0.5);
+            float w = max(fwidth(t), 1e-4);
+            float line = 1.0 - smoothstep(0.5 * w, 1.5 * w, d);
+            diffuseColor.rgb *= 1.0 - 0.28 * line;
+          }`,
+        )
+    }
     s.resultMat = new THREE.MeshStandardMaterial({
       map: s.texture, roughness: 0.75, metalness: 0, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
@@ -418,6 +442,43 @@ export default function Viewport({
     s.arrows.visible = mode === 'setup'
     s.dirty = true
   }, [arrows, mode])
+
+  // --- 3D-Druck: Schichtlinien und Druckbett ----------------------------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    s.bed.traverse((x) => (x.geometry?.dispose(), x.material?.dispose()))
+    s.bed.clear()
+    const on = !!(layers && mesh)
+    s.layerUniforms.uLayerOn.value = on ? 1 : 0
+    if (on) {
+      const dir = new THREE.Vector3(...layers.dir).normalize()
+      const [lo, hi] = mesh.bbox
+      const size = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+      s.layerUniforms.uLayerDir.value.copy(dir)
+      s.layerUniforms.uLayerStep.value = size / 70 // nur zur Anschauung, nicht die echte Schichthöhe
+      // Druckbett unter dem Bauteil (tiefster Punkt in Aufbaurichtung)
+      const center = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2)
+      let minT = Infinity
+      for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) minT = Math.min(minT, new THREE.Vector3(x, y, z).sub(center).dot(dir))
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
+      const pos = center.clone().addScaledVector(dir, minT - 0.01 * size)
+      const grid = new THREE.GridHelper(1.1 * size, 22, 0x6b7a90, 0x6b7a90)
+      grid.material.transparent = true
+      grid.material.opacity = 0.22
+      const plate = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.1 * size, 1.1 * size).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: 0x8fa3bf, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false }),
+      )
+      for (const o of [grid, plate]) {
+        o.quaternion.copy(q)
+        o.position.copy(pos)
+        s.bed.add(o)
+      }
+      const arrow = new THREE.ArrowHelper(dir, pos.clone().addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(q), 0.5 * size), 0.25 * size, 0x2e9e5b, 0.06 * size, 0.035 * size)
+      s.bed.add(arrow)
+    }
+    s.dirty = true
+  }, [layers?.dir?.join(','), mesh])
 
   // --- Lastpfeil ausrichten: Griff, Ebene mit Winkelteilung -------------------------------------
   useEffect(() => {

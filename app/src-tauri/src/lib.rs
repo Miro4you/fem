@@ -311,6 +311,15 @@ pub struct ResultView {
     max_sigma1: Extreme,
     min_sigma3: Extreme,
     safety: Option<f64>,
+    /// Sicherheit gegen Bruch (Rm)
+    safety_break: Option<f64>,
+    /// Auslastung je Anzeigeknoten (1 = Festigkeitsgrenze), bei Schichtaufbau richtungsabhängig
+    utilization: Option<Vec<f32>>,
+    /// Auslastung der Schichthaftung je Anzeigeknoten (nur bei Schichtaufbau)
+    utilization_layers: Option<Vec<f32>>,
+    max_utilization: Option<Extreme>,
+    /// Am Ort der größten Auslastung maßgeblich: „Schichthaftung“ oder „in der Schicht“
+    governing: Option<String>,
     reactions: Vec<[f64; 3]>,
     total_load: [f64; 3],
     total_reaction: [f64; 3],
@@ -384,11 +393,23 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             );
         }
         let safety = res.safety_factor(&model.material);
+        // maßgeblich bei Schichtaufbau: Schichthaftung oder Festigkeit in der Schicht
+        let governing = match (res.max_utilization(), &res.utilization_layers) {
+            (Some((n, u)), Some(l)) => Some(if l[n] >= u - 1e-12 { "Schichthaftung" } else { "in der Schicht" }.to_string()),
+            _ => None,
+        };
+        if governing.as_deref() == Some("Schichthaftung") {
+            warnings.push(
+                "Maßgeblich ist die Schichthaftung (Zug quer zu den Schichten bzw. Schub zwischen den Schichten). \
+                 Eine andere Aufbaurichtung kann deutlich mehr Sicherheit bringen – „Aufbaurichtung vergleichen“ nutzen."
+                    .into(),
+            );
+        }
         if let Some(sf) = safety {
             if sf < 1.0 {
                 warnings.push(format!(
-                    "Sicherheit {sf:.2} < 1: Die Streckgrenze wird überschritten, das Bauteil verformt sich bleibend. \
-                     Die Rechnung ist linear-elastisch, die Werte oberhalb der Streckgrenze sind daher nicht realistisch."
+                    "Sicherheit {sf:.2} < 1: Die Festigkeit wird überschritten – das Bauteil verformt sich bleibend oder bricht. \
+                     Die Rechnung ist linear-elastisch, die Werte oberhalb der Festigkeitsgrenze sind daher nicht realistisch."
                 ));
             }
         }
@@ -417,6 +438,11 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             max_sigma1: ext(s1n, s1),
             min_sigma3: ext(s3n, s3),
             safety,
+            safety_break: res.safety_break,
+            utilization: res.utilization.as_ref().map(|u| disp_nodes.iter().map(|&n| u[n] as f32).collect()),
+            utilization_layers: res.utilization_layers.as_ref().map(|u| disp_nodes.iter().map(|&n| u[n] as f32).collect()),
+            max_utilization: res.max_utilization().map(|(n, u)| ext(n, u)),
+            governing,
             reactions: res.reactions.iter().map(|r| r.1).collect(),
             total_load: res.total_load,
             total_reaction: res.total_reaction,

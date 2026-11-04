@@ -7,7 +7,7 @@ import {
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
 import * as api from './api.js'
-import { MATERIALS } from './materials.js'
+import { MATERIALS, MATERIAL_GROUPS, materialFromPreset, materialPayload } from './materials.js'
 import { fmt, fmtVec } from './format.js'
 import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES } from './region.js'
 import { GEO_OPS, opFromSurface, newSketchOp, opPayload, opProblem, remapSurfaces, axisLabel } from './geoops.js'
@@ -26,7 +26,14 @@ const QUANTITIES = {
   disp: { label: 'Verschiebung', unit: 'mm', hint: 'gesamt' },
   sigma1: { label: 'Hauptspannung σ1', unit: 'MPa', hint: 'größte (Zug)' },
   sigma3: { label: 'Hauptspannung σ3', unit: 'MPa', hint: 'kleinste (Druck)' },
-  safety: { label: 'Sicherheit', unit: '', hint: 'gegen Fließen' },
+  safety: { label: 'Sicherheit', unit: '', hint: 'gesamt' },
+  safety_layers: { label: 'Sicherheit Schichthaftung', unit: '', hint: 'quer zu den Schichten' },
+}
+
+const BUILD_DIRS = [['X', [1, 0, 0]], ['Y', [0, 1, 0]], ['Z', [0, 0, 1]]]
+const dirName = (d) => {
+  const k = [0, 1, 2].find((i) => Math.abs(Math.abs(d[i]) - 1) < 1e-6)
+  return k == null ? `(${d.map((v) => fmt(v)).join(' / ')})` : 'XYZ'[k]
 }
 
 let nextId = 1
@@ -50,7 +57,11 @@ export default function App() {
   const [stepPath, setStepPath] = useState(null)
   const [mesh, setMesh] = useState(null)
   const [meshSize, setMeshSize] = useState('')
-  const [material, setMaterial] = useState(MATERIALS[0])
+  const [material, setMaterial] = useState(() => materialFromPreset(MATERIALS[0]))
+  // Aufbaurichtung durch Anklicken der Fläche auf dem Druckbett wählen
+  const [bedPick, setBedPick] = useState(false)
+  // Ergebnisse des Vergleichs der Aufbaurichtungen
+  const [orientations, setOrientations] = useState(null)
   const [supports, setSupports] = useState([])
   const [loads, setLoads] = useState([])
   const [active, setActive] = useState(null)
@@ -178,7 +189,7 @@ export default function App() {
           setBusy(null)
         }
       }
-      setMaterial(d.material)
+      setMaterial({ ...materialFromPreset(MATERIALS[0]), ...d.material })
       setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
       setLoads(d.loads.map((l) => ({ ...newLoad(), ...l, id: nextId++ })))
       setActive(null)
@@ -190,6 +201,15 @@ export default function App() {
   // --- Lager / Lasten ---------------------------------------------------------------
   const onPick = useCallback(
     (tag) => {
+      if (bedPick) {
+        const n = surfaceInfo.get(tag)?.normal
+        if (!n) return setError('Bitte eine ebene Fläche anklicken – sie liegt dann auf dem Druckbett.')
+        // die Fläche liegt auf dem Bett: Aufbaurichtung zeigt von ihr weg ins Bauteil
+        setMaterial((m) => ({ ...m, buildDir: n.map((v) => (Math.abs(v) < 1e-9 ? 0 : -v)) }))
+        setOrientations(null)
+        setBedPick(false)
+        return
+      }
       if (geoPick) {
         const op = opFromSurface(tag, surfaceInfo)
         if (op.error) return setError(op.error)
@@ -226,7 +246,7 @@ export default function App() {
       if (active.type === 'support') setSupports(toggle)
       else setLoads(toggle)
     },
-    [active, dirPick, geoPick, surfaceInfo, mesh],
+    [active, dirPick, geoPick, bedPick, surfaceInfo, mesh],
   )
 
   const surfaceTint = useCallback(
@@ -468,15 +488,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesh, supports, loads, surfaceInfo, drawing])
 
-  async function onSolve() {
-    setBusy('Rechne …')
-    setError(null)
-    setActive(null)
-    setDrawing(null)
-    setAim(null)
-    try {
-      const setup = {
-        material: { name: material.name, E: Number(material.E), nu: Number(material.nu), yield: material.yield ? Number(material.yield) : null },
+  function buildSetup(mat) {
+    return {
+        material: materialPayload(mat),
         supports: supports.map((s) => {
           const f = supportFix(s)
           return { surfaces: s.surfaces, fix: f.fix, local: f.local ?? null, region: regionNumbers(s.region) }
@@ -489,11 +503,63 @@ export default function App() {
           return { ...base, force: l.force.map(Number) }
         }),
       }
-      const r = await api.solve(setup)
+  }
+
+  async function onSolve(mat = material) {
+    setBusy('Rechne …')
+    setError(null)
+    setActive(null)
+    setDrawing(null)
+    setAim(null)
+    setBedPick(false)
+    try {
+      const r = await api.solve(buildSetup(mat))
       setResult(r)
       setResultStale(false)
       setView('result')
       setProbe(null)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Modell ohne Aufbaurichtung – ändert sich das, ist ein Richtungsvergleich veraltet
+  function orientationKey() {
+    try {
+      const s = buildSetup({ ...material, buildDir: [0, 0, 1] })
+      return JSON.stringify(s) + (mesh?.nodes ?? 0)
+    } catch {
+      return ''
+    }
+  }
+
+  // Gleiche Rechnung für die Aufbaurichtungen X, Y, Z (und eine eigene): Sicherheit je Richtung.
+  // Die aktuelle Richtung wird zuletzt gerechnet, damit das angezeigte Ergebnis zu ihr passt.
+  async function onCompareOrientations() {
+    const cur = material.buildDir ?? [0, 0, 1]
+    const same = (a, b) => Math.abs(Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) - 1) < 1e-6
+    const dirs = BUILD_DIRS.map(([, d]) => d).filter((d) => !same(d, cur))
+    dirs.push(cur)
+    setError(null)
+    setActive(null)
+    setDrawing(null)
+    setBedPick(false)
+    const rows = []
+    try {
+      for (const [i, d] of dirs.entries()) {
+        setBusy(`Vergleiche Aufbaurichtung ${dirName(d)} (${i + 1}/${dirs.length}) …`)
+        const r = await api.solve(buildSetup({ ...material, buildDir: d }))
+        rows.push({ dir: d, safety: r.safety, safetyBreak: r.safety_break, governing: r.governing, u: r.max_displacement.value })
+        if (i === dirs.length - 1) {
+          setResult(r)
+          setResultStale(false)
+          setProbe(null)
+        }
+      }
+      rows.sort((a, b) => (b.safety ?? 0) - (a.safety ?? 0))
+      setOrientations({ rows, key: orientationKey() })
     } catch (e) {
       setError(String(e))
     } finally {
@@ -514,9 +580,9 @@ export default function App() {
     if (quantity === 'disp') {
       values = new Float32Array(n)
       for (let i = 0; i < n; i++) values[i] = Math.hypot(result.displacement[3 * i], result.displacement[3 * i + 1], result.displacement[3 * i + 2])
-    } else if (quantity === 'safety') {
-      const y = Number(material.yield) || 0
-      values = Float32Array.from(result.von_mises, (v) => Math.min(y / Math.max(v, 1e-12), 10))
+    } else if (quantity === 'safety' || quantity === 'safety_layers') {
+      const u = quantity === 'safety' ? result.utilization : result.utilization_layers
+      values = Float32Array.from(u ?? [], (v) => Math.min(1 / Math.max(v, 1e-12), 10))
       reverse = true
     } else values = Float32Array.from(result[quantity])
     let min = Infinity, max = -Infinity, imin = 0, imax = 0
@@ -528,14 +594,14 @@ export default function App() {
     const auto = umax > 0 ? (0.05 * diag) / umax : 0
     const scale = deform === 'off' ? 0 : deform === 'true' ? 1 : auto
     return { values, min, max, imin, imax, reverse, displacement: result.displacement, scale, auto }
-  }, [result, mesh, quantity, deform, diag, material.yield])
+  }, [result, mesh, quantity, deform, diag])
 
   const markers = useMemo(() => {
     if (!display) return []
     const q = QUANTITIES[quantity]
     const u = q.unit ? ' ' + q.unit : ''
     const m = []
-    if (quantity === 'safety') m.push({ node: display.imin, label: `Min ${fmt(display.min)}` })
+    if (quantity === 'safety' || quantity === 'safety_layers') m.push({ node: display.imin, label: `Min ${fmt(display.min)}` })
     else if (quantity === 'sigma3') m.push({ node: display.imin, label: `Min ${fmt(display.min)}${u}` })
     else m.push({ node: display.imax, label: `Max ${fmt(display.max)}${u}` })
     if (probe) m.push({ node: probe.node, label: `${fmt(display.values[probe.node])}${u}`, probe: true })
@@ -642,21 +708,37 @@ export default function App() {
                     value={MATERIALS.some((m) => m.name === material.name) ? material.name : ''}
                     onChange={(e) => {
                       const m = MATERIALS.find((x) => x.name === e.target.value)
-                      setMaterial(m ? { ...m } : { ...material, name: 'Benutzerdefiniert' })
+                      setMaterial(m ? materialFromPreset(m, material.buildDir) : { ...material, name: 'Benutzerdefiniert' })
                     }}
                   >
-                    {MATERIALS.map((m) => (
-                      <option key={m.name} value={m.name}>
-                        {m.name}
-                      </option>
+                    {MATERIAL_GROUPS.map((g) => (
+                      <optgroup key={g} label={g}>
+                        {MATERIALS.filter((m) => m.group === g).map((m) => (
+                          <option key={m.name} value={m.name}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                     <option value="">Benutzerdefiniert</option>
                   </select>
-                  <div className="grid3">
-                    <NumField label="E-Modul" unit="MPa" value={material.E} onChange={(v) => setMaterial({ ...material, E: v, name: 'Benutzerdefiniert' })} />
-                    <NumField label="ν" value={material.nu} onChange={(v) => setMaterial({ ...material, nu: v, name: 'Benutzerdefiniert' })} />
-                    <NumField label="Re / Rp0,2" unit="MPa" value={material.yield ?? ''} onChange={(v) => setMaterial({ ...material, yield: v, name: 'Benutzerdefiniert' })} />
-                  </div>
+                  <MaterialFields material={material} setMaterial={setMaterial} />
+                  <label className="check">
+                    <input type="checkbox" checked={!!material.layered} onChange={(e) => setMaterial({ ...material, layered: e.target.checked, name: material.layered === e.target.checked ? material.name : 'Benutzerdefiniert' })} />
+                    3D-Druck: Schichtaufbau berücksichtigen
+                  </label>
+                  {material.layered && (
+                    <PrintOrientation
+                      material={material}
+                      setMaterial={(m) => setMaterial(m)}
+                      picking={bedPick}
+                      onPick={() => { setActive(null); setDrawing(null); setGeoPick(false); setBedPick(!bedPick) }}
+                      canCompare={problems.length === 0 && !busy}
+                      onCompare={onCompareOrientations}
+                      orientations={orientations?.key === orientationKey() ? orientations.rows : null}
+                      onUse={(d) => { const m = { ...material, buildDir: d }; setMaterial(m); onSolve(m) }}
+                    />
+                  )}
                 </Section>
               )}
 
@@ -827,7 +909,7 @@ export default function App() {
 
               {mesh && (
                 <div className="solve">
-                  <button className="btn primary wide big" disabled={problems.length > 0 || !!busy} onClick={onSolve}>
+                  <button className="btn primary wide big" disabled={problems.length > 0 || !!busy} onClick={() => onSolve()}>
                     <Play size={16} /> Rechnen
                   </button>
                   {problems.length > 0 && (
@@ -896,7 +978,8 @@ export default function App() {
             mesh={mesh}
             mode={mode}
             surfaceTint={surfaceTint}
-            pickable={((!!active || !!dirPick) && view === 'setup') || (geoPick && view === 'geometry')}
+            pickable={((!!active || !!dirPick || bedPick) && view === 'setup') || (geoPick && view === 'geometry')}
+            layers={material.layered && mode !== 'result' ? { dir: material.buildDir ?? [0, 0, 1] } : null}
             onPick={onPick}
             result={display}
             showMesh={showMesh}
@@ -933,6 +1016,15 @@ export default function App() {
               <MousePointerClick size={15} />
               Fläche anklicken: Richtung senkrecht darauf (ebene Fläche) oder entlang der Achse (Bohrung/Welle)
               <button className="btn small" onClick={() => setDirPick(null)}>
+                <X size={14} /> Abbrechen
+              </button>
+            </div>
+          )}
+          {bedPick && view === 'setup' && (
+            <div className="pick-hint">
+              <MousePointerClick size={15} />
+              Fläche anklicken, die auf dem Druckbett liegt
+              <button className="btn small" onClick={() => setBedPick(false)}>
                 <X size={14} /> Abbrechen
               </button>
             </div>
@@ -1079,8 +1171,15 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
           <div>
             <div className="safety-value">S = {fmt(sf)}</div>
             <div className="safety-text">
-              Sicherheit gegen Fließen ({material.name}, Re = {fmt(Number(material.yield))} MPa)
-              {sf < 1 ? ' – Streckgrenze überschritten' : ''}
+              {result.governing
+                ? `Sicherheit mit Schichtaufbau (${material.name}, Aufbaurichtung ${dirName(material.buildDir ?? [0, 0, 1])}) – maßgeblich: ${result.governing}`
+                : material.yield !== '' && material.yield != null
+                  ? `Sicherheit gegen Fließen (${material.name}, Re = ${fmt(Number(material.yield))} MPa)`
+                  : `Sicherheit gegen Bruch (${material.name}, Rm = ${fmt(Number(material.tensile))} MPa)`}
+              {sf < 1 ? ' – Festigkeit überschritten' : ''}
+              {result.safety_break != null && material.yield !== '' && material.yield != null && Math.abs(result.safety_break - sf) > 1e-6 && (
+                <div>gegen Bruch (Rm): S = {fmt(result.safety_break)}</div>
+              )}
             </div>
           </div>
         </div>
@@ -1101,7 +1200,7 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
       <h3 className="sub">Darstellung</h3>
       <div className="quantities">
         {Object.entries(QUANTITIES).map(([k, q]) => (
-          <button key={k} className={'q' + (quantity === k ? ' on' : '')} disabled={k === 'safety' && !material.yield} onClick={() => setQuantity(k)}>
+          <button key={k} className={'q' + (quantity === k ? ' on' : '')} disabled={(k === 'safety' && !result.utilization) || (k === 'safety_layers' && !result.utilization_layers)} onClick={() => setQuantity(k)}>
             <span>{q.label}</span>
             <em>{q.hint}</em>
           </button>
@@ -1172,12 +1271,117 @@ function Stat({ label, value }) {
 function NumField({ label, unit, value, onChange }) {
   return (
     <label className="field">
-      <span>{label}</span>
+      {label && <span>{label}</span>}
       <div className="input-unit">
         <input value={value} inputMode="decimal" onChange={(e) => onChange(e.target.value.replace(',', '.'))} />
         {unit && <em>{unit}</em>}
       </div>
     </label>
+  )
+}
+
+// --- Werkstoff ------------------------------------------------------------------------------------
+
+function MaterialFields({ material: m, setMaterial }) {
+  const set = (k) => (v) => setMaterial({ ...m, [k]: v, name: 'Benutzerdefiniert' })
+  if (!m.layered) {
+    return (
+      <>
+        <div className="grid3">
+          <NumField label="E-Modul" unit="MPa" value={m.E} onChange={set('E')} />
+          <NumField label="ν" value={m.nu} onChange={set('nu')} />
+        </div>
+        <div className="grid3">
+          <NumField label="Re / Rp0,2" unit="MPa" value={m.yield ?? ''} onChange={set('yield')} />
+          <NumField label="Rm" unit="MPa" value={m.tensile ?? ''} onChange={set('tensile')} />
+        </div>
+      </>
+    )
+  }
+  const row = (label, a, b) => (
+    <>
+      <span className="mat-label">{label}</span>
+      <NumField unit="MPa" value={m[a] ?? ''} onChange={set(a)} />
+      <NumField unit="MPa" value={m[b] ?? ''} onChange={set(b)} />
+    </>
+  )
+  return (
+    <>
+      <div className="mat-table">
+        <span />
+        <span className="mat-head">in der Schicht (XY)</span>
+        <span className="mat-head">quer zu den Schichten (Z)</span>
+        {row('E-Modul', 'E', 'E_z')}
+        {row('Re / Rp0,2', 'yield', 'yield_z')}
+        {row('Rm', 'tensile', 'tensile_z')}
+      </div>
+      <div className="grid3">
+        <NumField label="ν" value={m.nu} onChange={set('nu')} />
+      </div>
+      <p className="hint">
+        Re/Rp leer lassen, wenn es keine ausgeprägte Streckgrenze gibt (Kunststoffe) – dann wird mit Rm gerechnet. Richtwerte gelten für
+        100 % Füllung; bei weniger Füllung bzw. wenigen Wandlinien sind die Werte deutlich kleiner.
+      </p>
+    </>
+  )
+}
+
+function PrintOrientation({ material, setMaterial, picking, onPick, canCompare, onCompare, orientations, onUse }) {
+  const dir = material.buildDir ?? [0, 0, 1]
+  const isDir = (d) => Math.abs(Math.abs(d[0] * dir[0] + d[1] * dir[1] + d[2] * dir[2]) - 1) < 1e-6
+  return (
+    <div className="print-orient">
+      <div className="field">
+        <span>Aufbaurichtung (Z des Druckers)</span>
+        <div className="row">
+          <div className="segmented small">
+            {BUILD_DIRS.map(([lab, d]) => (
+              <button key={lab} className={isDir(d) ? 'on' : ''} onClick={() => setMaterial({ ...material, buildDir: d })}>
+                {lab}
+              </button>
+            ))}
+          </div>
+          <button className={'link' + (picking ? ' on' : '')} onClick={onPick}>
+            <MousePointerClick size={13} /> {picking ? 'Auswahl abbrechen' : 'Fläche aufs Druckbett legen'}
+          </button>
+        </div>
+        {!BUILD_DIRS.some(([, d]) => isDir(d)) && <p className="hint">Aufbaurichtung {dirName(dir)}</p>}
+      </div>
+      <button className="btn wide" disabled={!canCompare} onClick={onCompare} title={canCompare ? '' : 'Erst Lager und Lasten festlegen'}>
+        <Layers size={15} /> Aufbaurichtung vergleichen (X / Y / Z)
+      </button>
+      {orientations && (
+        <table className="orient-table">
+          <thead>
+            <tr>
+              <th>Richtung</th>
+              <th>Sicherheit</th>
+              <th>maßgeblich</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {orientations.map((r, i) => (
+              <tr key={i} className={isDir(r.dir) ? 'current' : ''}>
+                <td>
+                  {dirName(r.dir)}
+                  {i === 0 && ' ★'}
+                </td>
+                <td className={r.safety >= 1.5 ? 'good' : r.safety >= 1 ? 'ok' : 'bad'}>{fmt(r.safety)}</td>
+                <td>{r.governing ?? '–'}</td>
+                <td>
+                  {!isDir(r.dir) && (
+                    <button className="link" onClick={() => onUse(r.dir)}>
+                      übernehmen
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   )
 }
 
