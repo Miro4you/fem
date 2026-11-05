@@ -19,7 +19,7 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use crate::{modify_geometry_impl, open_step_impl, progress_impl, solve_impl, write_vtu_impl, AppState, Setup};
+use crate::{modify_geometry_impl, open_step_impl, progress_impl, section_impl, solve_impl, write_vtu_impl, AppState, Setup};
 use fem_core::gmsh::Refine;
 
 pub const DEFAULT_PORT: u16 = 8790;
@@ -157,6 +157,7 @@ fn router(shared: Shared) -> Router {
         .route("/open_step", post(api_open_step))
         .route("/modify_geometry", post(api_modify_geometry))
         .route("/solve", post(api_solve))
+        .route("/section", post(api_section))
         .route("/vtu", get(api_vtu))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
         .layer(axum::middleware::from_fn_with_state(shared.clone(), check_key));
@@ -309,6 +310,18 @@ struct SolveArgs {
 async fn api_solve(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<SolveArgs>) -> ApiResult<Response> {
     let state = s.session(&headers);
     let view = tokio::task::spawn_blocking(move || solve_impl(&state, a.setup)).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(view).into_response())
+}
+
+#[derive(Deserialize)]
+struct SectionArgs {
+    point: [f64; 3],
+    normal: [f64; 3],
+}
+
+async fn api_section(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<SectionArgs>) -> ApiResult<Response> {
+    let state = s.session(&headers);
+    let view = tokio::task::spawn_blocking(move || section_impl(&state, a.point, a.normal)).await.map_err(bad)?.map_err(bad)?;
     Ok(Json(view).into_response())
 }
 

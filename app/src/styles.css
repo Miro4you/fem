@@ -293,3 +293,8 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .busy-detail { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .progress-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .progress-bar > div { height: 100%; background: var(--accent); transition: width 0.3s; }
+
+.slim-range { height: 18px; padding: 0; border: none; background: transparent; accent-color: var(--accent); }
+
+.cut-box { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
+.cut-box .row { align-items: center; gap: 8px; }

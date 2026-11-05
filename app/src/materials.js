@@ -39,6 +39,7 @@ export function materialFromPreset(m, buildDir = [0, 0, 1]) {
     layered: !!m.print,
     E_z: m.print?.E_z ?? m.E, yield_z: m.print?.yield_z ?? '', tensile_z: m.print?.tensile_z ?? '',
     buildDir,
+    infill: { ...DEFAULT_INFILL },
   }
 }
 
@@ -48,5 +49,48 @@ const n = (v) => (v === '' || v == null ? null : Number(v))
 export function materialPayload(m) {
   const base = { name: m.name, E: Number(m.E), nu: Number(m.nu), yield: n(m.yield), tensile: n(m.tensile) }
   if (!m.layered) return base
-  return { ...base, layers: { build_dir: m.buildDir ?? [0, 0, 1], E_z: Number(m.E_z), yield_z: n(m.yield_z), tensile_z: n(m.tensile_z) } }
+  const inf = m.infill
+  return {
+    ...base,
+    layers: { build_dir: m.buildDir ?? [0, 0, 1], E_z: Number(m.E_z), yield_z: n(m.yield_z), tensile_z: n(m.tensile_z) },
+    infill: inf?.on
+      ? {
+          pattern: inf.pattern, density: Number(inf.percent) / 100, walls: Number(inf.walls), line_width: Number(inf.lineWidth),
+          layer_height: Number(inf.layerHeight), top_layers: Number(inf.top), bottom_layers: Number(inf.bottom),
+        }
+      : null,
+  }
+}
+
+// --- Füllung (Infill) --------------------------------------------------------------------
+// Gleiche Näherung wie im Rechenkern (fem-core/material.rs): Anteil f(ρ) = k·ρⁿ + (1 − k)·ρ⁸
+// je (E in der Schicht, E quer, R in der Schicht, R quer).
+export const INFILL_PATTERNS = {
+  gitter: { label: 'Gitter (Grid)', f: [[0.35, 1], [1, 1], [0.35, 1], [1, 1]] },
+  linien: { label: 'Linien (Rectilinear)', f: [[0.3, 1], [1, 2], [0.3, 1], [1, 2]] },
+  dreiecke: { label: 'Dreiecke (Triangles)', f: [[0.33, 1], [1, 1], [0.33, 1], [1, 1]] },
+  waben: { label: 'Waben (Honeycomb)', f: [[1.5, 3], [1, 1], [0.5, 2], [1, 1]] },
+  gyroid: { label: 'Gyroid', f: [[0.4, 1.8], [0.4, 1.8], [0.4, 1.5], [0.4, 1.5]] },
+  kubisch: { label: 'Kubisch (Cubic)', f: [[0.25, 1], [0.25, 1], [0.25, 1], [0.25, 1]] },
+  kreuz: { label: 'Kreuz (Cross)', f: [[0.5, 2], [0.5, 2], [0.3, 1.5], [0.3, 1.5]] },
+}
+
+// Voreinstellung ähnlich PrusaSlicer/OrcaSlicer (0,4-mm-Düse, 0,2 mm Schicht)
+export const DEFAULT_INFILL = { on: false, pattern: 'gyroid', percent: 20, walls: 2, lineWidth: 0.45, layerHeight: 0.2, top: 5, bottom: 4 }
+
+export function infillFractions(pattern, percent) {
+  const rho = Math.min(Math.max(Number(percent) / 100, 0), 1)
+  return INFILL_PATTERNS[pattern].f.map(([k, n]) => {
+    const kk = Math.min(k, 1)
+    return kk * rho ** n + (1 - kk) * rho ** 8
+  })
+}
+
+/// Dicke von Wand, Deck- und Bodenschicht [mm]
+export function shellThickness(inf) {
+  return {
+    wall: Number(inf.walls) * Number(inf.lineWidth),
+    top: Number(inf.top) * Number(inf.layerHeight),
+    bottom: Number(inf.bottom) * Number(inf.layerHeight),
+  }
 }

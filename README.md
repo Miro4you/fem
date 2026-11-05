@@ -48,8 +48,15 @@ Schichtkoordinaten (Druck quer zu den Schichten zählt nicht, S_z = R_z). R = Re
 Ergebnis: Sicherheit gesamt und „Sicherheit Schichthaftung“, maßgebliche Versagensart, Sicherheit gegen Bruch (Rm).
 **„Aufbaurichtung vergleichen“** rechnet X, Y und Z und zeigt die beste Ausrichtung.
 
-Grenzen: Füllgrad < 100 %, Wandlinien und Stützstrukturen werden nicht abgebildet (Werte entsprechend abmindern);
-linear-elastisch, kein Kriechen.
+**Wände und Infill** („Wände und Infill berücksichtigen“): Füllmuster (Gitter, Linien, Dreiecke, Waben, Gyroid,
+Kubisch, Kreuz), Füllgrad, Anzahl Wände × Linienbreite, Deck-/Bodenschichten × Schichthöhe. Elemente in Wand- bzw.
+Deckschichtdicke von der Oberfläche bekommen den vollen Werkstoff, der Kern einen Ersatzwerkstoff (Näherung
+f(ρ) = k·ρⁿ + (1−k)·ρ⁸ je Muster für E und R, in der Schicht und quer). Teilweise betroffene Elemente werden nach
+Volumenanteil gemischt; Auslastung getrennt für Wand und Infill. Das Netz wird an der Oberfläche auf Wandstärke
+verfeinert. Ergebnisansichten „Sicherheit Infill“ und „Wand / Infill“, dazu die **Schnittansicht** (X/Y/Z, Position).
+
+Grenzen: Ersatzwerte des Infills sind Näherungen (mit eigenem Zugstab kalibrieren); Stützstrukturen werden nicht
+abgebildet; linear-elastisch, kein Kriechen.
 
 ## Geometrie anpassen (grobe Abschätzung)
 
@@ -153,6 +160,7 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 | Kragbalken TET10 (40×2×4) | Biegespannung bei l/2 | +0,2 % |
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
 | 3D-Druck-Zugstab in der Schicht / quer zu den Schichten | Δl, Querkontraktion, Auslastung | exakt |
+| 3D-Druck-Zugstab mit Wand + 20 % Gitter-Infill | E·A (Wand und Kern parallel), Auslastung Wand/Infill | ±0,01 % |
 | Zugstab schräg im Raum, nur reibungsfreie Auflagen | σ, Δl, Lagerkraft (direkt und iterativ) | exakt |
 | Balken mit zwei Gelenkbolzen (zylindrische Lagerung) | Durchbiegung / Biegespannung Einfeldträger | −0,6 % / −0,2 % |
 | Welle Ø20, Torsionsmoment (STEP + Gmsh) | Schubspannung τ = 16T/(πd³) / Verdrehwinkel | +0,03 % / 0,00 % |

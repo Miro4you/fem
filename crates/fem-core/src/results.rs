@@ -28,26 +28,53 @@ pub struct Results {
     pub utilization_layers: Option<Vec<f64>>,
     /// Sicherheit gegen Bruch (Rm), falls angegeben
     pub safety_break: Option<f64>,
+    /// 3D-Druck mit Füllung: Auslastung im Infill je Knoten (die Wand steckt in `utilization`)
+    pub utilization_infill: Option<Vec<f64>>,
+    /// 3D-Druck mit Füllung: Wandanteil je Knoten (1 = volle Wand/Deckschicht, 0 = Infill)
+    pub shell_fraction: Option<Vec<f64>>,
 }
 
 /// Auslastung je Knoten: (gesamt, Schichthaftung). Gesamt = max(σv / R_xy, Schichthaftung).
 /// Schichthaftung = √((max(σ_z, 0) / R_z)² + (τ_z / S_z)²) mit Spannungen in Schichtkoordinaten.
 pub fn utilization(material: &Material, stress: &[[f64; 6]], brk: bool) -> Option<(Vec<f64>, Option<Vec<f64>>)> {
-    let (r_xy, layer) = material.strengths(brk)?;
-    let rot = material.layers.as_ref().map(|l| l.rotation());
+    let st = Strength::of(material, brk)?;
     let mut total = Vec::with_capacity(stress.len());
-    let mut lay = layer.map(|_| Vec::with_capacity(stress.len()));
+    let mut lay = st.layer.map(|_| Vec::with_capacity(stress.len()));
     for s in stress {
-        let mut u = von_mises(s) / r_xy;
-        if let (Some((r_z, s_z)), Some(r), Some(lay)) = (layer, rot.as_ref(), lay.as_mut()) {
-            let l = stress_to_layers(s, r);
-            let a = ((l[2].max(0.0) / r_z).powi(2) + (l[4] * l[4] + l[5] * l[5]) / (s_z * s_z)).sqrt();
+        let (u, a) = st.eval(s);
+        if let Some(lay) = lay.as_mut() {
             lay.push(a);
-            u = u.max(a);
         }
         total.push(u);
     }
     Some((total, lay))
+}
+
+/// Festigkeiten eines Werkstoffs für die Auslastung an einem Punkt
+#[derive(Debug, Clone)]
+pub struct Strength {
+    r_xy: f64,
+    layer: Option<(f64, f64)>,
+    rot: Option<nalgebra::Matrix3<f64>>,
+}
+
+impl Strength {
+    pub fn of(material: &Material, brk: bool) -> Option<Strength> {
+        let (r_xy, layer) = material.strengths(brk)?;
+        Some(Strength { r_xy, layer, rot: material.layers.as_ref().map(|l| l.rotation()) })
+    }
+
+    /// (Auslastung gesamt, Anteil Schichthaftung)
+    pub fn eval(&self, s: &[f64; 6]) -> (f64, f64) {
+        let mut u = von_mises(s) / self.r_xy;
+        let mut a = 0.0;
+        if let (Some((r_z, s_z)), Some(r)) = (self.layer, self.rot.as_ref()) {
+            let l = stress_to_layers(s, r);
+            a = ((l[2].max(0.0) / r_z).powi(2) + (l[4] * l[4] + l[5] * l[5]) / (s_z * s_z)).sqrt();
+            u = u.max(a);
+        }
+        (u, a)
+    }
 }
 
 pub fn von_mises(s: &[f64; 6]) -> f64 {

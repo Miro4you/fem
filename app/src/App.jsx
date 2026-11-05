@@ -7,7 +7,9 @@ import {
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
 import * as api from './api.js'
-import { MATERIALS, MATERIAL_GROUPS, materialFromPreset, materialPayload } from './materials.js'
+import {
+  MATERIALS, MATERIAL_GROUPS, materialFromPreset, materialPayload, INFILL_PATTERNS, DEFAULT_INFILL, infillFractions, shellThickness,
+} from './materials.js'
 import { fmt, fmtVec } from './format.js'
 import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES, regionRefine } from './region.js'
 import { GEO_OPS, opFromSurface, newSketchOp, opPayload, opProblem, remapSurfaces, axisLabel } from './geoops.js'
@@ -28,6 +30,15 @@ const QUANTITIES = {
   sigma3: { label: 'Hauptspannung σ3', unit: 'MPa', hint: 'kleinste (Druck)' },
   safety: { label: 'Sicherheit', unit: '', hint: 'gesamt' },
   safety_layers: { label: 'Sicherheit Schichthaftung', unit: '', hint: 'quer zu den Schichten' },
+  safety_infill: { label: 'Sicherheit Infill', unit: '', hint: 'Füllung innen' },
+  shell: { label: 'Wand / Infill', unit: '', hint: '1 = Wand, 0 = Infill' },
+}
+
+// Ergebnisfeld je Darstellung (für Oberfläche und Schnitt)
+const FIELD_OF = {
+  von_mises: ['von_mises'], sigma1: ['sigma1'], sigma3: ['sigma3'],
+  safety: ['utilization', true], safety_layers: ['utilization_layers', true], safety_infill: ['utilization_infill', true],
+  shell: ['shell_fraction'],
 }
 
 const BUILD_DIRS = [['X', [1, 0, 0]], ['Y', [0, 1, 0]], ['Z', [0, 0, 1]]]
@@ -91,6 +102,9 @@ export default function App() {
   const [meshRefineKey, setMeshRefineKey] = useState('[]')
   // Fortschritt der laufenden Rechnung (vom Rechenkern)
   const [progressInfo, setProgressInfo] = useState(null)
+  // Schnittansicht im Ergebnis
+  const [cut, setCut] = useState({ on: false, axis: 2, pos: 50, flip: false })
+  const [cutData, setCutData] = useState(null)
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
   const [probe, setProbe] = useState(null)
@@ -139,6 +153,12 @@ export default function App() {
   function currentRefine(size) {
     const h = Number(size) || mesh?.mesh_size || 5
     const out = []
+    // 3D-Druck mit Füllung: an der Oberfläche etwa so fein wie die Wand
+    if (material.layered && material.infill?.on && material.infill.refine !== false) {
+      const t = shellThickness(material.infill)
+      const thin = Math.min(...[t.wall, t.top, t.bottom].filter((v) => v > 0))
+      if (Number.isFinite(thin)) out.push({ type: 'surface', size: Math.max(thin, h / 6), dist: Math.max(thin, h / 6) })
+    }
     if (refineRegions) {
       for (const it of [...supports, ...loads]) {
         const r = regionNumbers(it.region)
@@ -236,7 +256,7 @@ export default function App() {
           setBusy(null)
         }
       }
-      setMaterial({ ...materialFromPreset(MATERIALS[0]), ...d.material })
+      setMaterial({ ...materialFromPreset(MATERIALS[0]), ...d.material, infill: { ...DEFAULT_INFILL, ...(d.material?.infill ?? {}) } })
       setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
       setLoads(d.loads.map((l) => ({ ...newLoad(), ...l, id: nextId++ })))
       setActive(null)
@@ -620,6 +640,38 @@ export default function App() {
     api.exportVtu(stepPath).catch((e) => setError(String(e)))
   }
 
+  // --- Schnitt ------------------------------------------------------------------------
+  const cutPlane = useMemo(() => {
+    if (!cut.on || !mesh) return null
+    const [lo, hi] = mesh.bbox
+    const point = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2]
+    const k = cut.axis
+    point[k] = lo[k] + ((hi[k] - lo[k]) * Math.min(Math.max(cut.pos, 0.5), 99.5)) / 100
+    const normal = [0, 0, 0]
+    normal[k] = cut.flip ? -1 : 1
+    return { point, normal }
+  }, [cut, mesh])
+
+  useEffect(() => {
+    if (!cutPlane || !result || resultStale) {
+      setCutData(null)
+      return
+    }
+    let stop = false
+    const t = setTimeout(async () => {
+      try {
+        const d = await api.section(cutPlane.point, cutPlane.normal)
+        if (!stop) setCutData(d)
+      } catch (e) {
+        if (!stop) setError(String(e))
+      }
+    }, 120)
+    return () => {
+      stop = true
+      clearTimeout(t)
+    }
+  }, [cutPlane, result, resultStale])
+
   // --- Ergebnisanzeige ----------------------------------------------------------------
   const display = useMemo(() => {
     if (!result || !mesh) return null
@@ -629,28 +681,47 @@ export default function App() {
     if (quantity === 'disp') {
       values = new Float32Array(n)
       for (let i = 0; i < n; i++) values[i] = Math.hypot(result.displacement[3 * i], result.displacement[3 * i + 1], result.displacement[3 * i + 2])
-    } else if (quantity === 'safety' || quantity === 'safety_layers') {
-      const u = quantity === 'safety' ? result.utilization : result.utilization_layers
+    } else if (FIELD_OF[quantity]?.[1]) {
+      const u = result[FIELD_OF[quantity][0]]
       values = Float32Array.from(u ?? [], (v) => Math.min(1 / Math.max(v, 1e-12), 10))
       reverse = true
+    } else if (quantity === 'shell') {
+      values = Float32Array.from(result.shell_fraction ?? [])
     } else values = Float32Array.from(result[quantity])
     let min = Infinity, max = -Infinity, imin = 0, imax = 0
     for (let i = 0; i < n; i++) {
       if (values[i] < min) (min = values[i]), (imin = i)
       if (values[i] > max) (max = values[i]), (imax = i)
     }
+    // Werte auf der Schnittfläche (gleiche Farbskala, Bereich ggf. erweitert)
+    let cutValues = null
+    if (cutData) {
+      const m = cutData.positions.length / 3
+      if (quantity === 'disp') {
+        cutValues = new Float32Array(m)
+        for (let i = 0; i < m; i++) cutValues[i] = Math.hypot(cutData.displacement[3 * i], cutData.displacement[3 * i + 1], cutData.displacement[3 * i + 2])
+      } else {
+        const [field, inv] = FIELD_OF[quantity] ?? []
+        const src = cutData.fields[field]
+        if (src) cutValues = Float32Array.from(src, (v) => (inv ? Math.min(1 / Math.max(v, 1e-12), 10) : v))
+      }
+      if (cutValues) for (const v of cutValues) (min = Math.min(min, v)), (max = Math.max(max, v))
+    }
     const umax = result.max_displacement.value
     const auto = umax > 0 ? (0.05 * diag) / umax : 0
     const scale = deform === 'off' ? 0 : deform === 'true' ? 1 : auto
-    return { values, min, max, imin, imax, reverse, displacement: result.displacement, scale, auto }
-  }, [result, mesh, quantity, deform, diag])
+    const cutView = cutData && cutValues && cutPlane ? { ...cutData, values: cutValues, plane: cutPlane } : null
+    return { values, min, max, imin, imax, reverse, displacement: result.displacement, scale, auto, cut: cutView }
+  }, [result, mesh, quantity, deform, diag, cutData, cutPlane])
 
   const markers = useMemo(() => {
     if (!display) return []
     const q = QUANTITIES[quantity]
     const u = q.unit ? ' ' + q.unit : ''
     const m = []
-    if (quantity === 'safety' || quantity === 'safety_layers') m.push({ node: display.imin, label: `Min ${fmt(display.min)}` })
+    if (quantity === 'shell') {
+      /* keine Markierung */
+    } else if (FIELD_OF[quantity]?.[1]) m.push({ node: display.imin, label: `Min ${fmt(display.min)}` })
     else if (quantity === 'sigma3') m.push({ node: display.imin, label: `Min ${fmt(display.min)}${u}` })
     else m.push({ node: display.imax, label: `Max ${fmt(display.max)}${u}` })
     if (probe) m.push({ node: probe.node, label: `${fmt(display.values[probe.node])}${u}`, probe: true })
@@ -764,7 +835,7 @@ export default function App() {
                     value={MATERIALS.some((m) => m.name === material.name) ? material.name : ''}
                     onChange={(e) => {
                       const m = MATERIALS.find((x) => x.name === e.target.value)
-                      setMaterial(m ? materialFromPreset(m, material.buildDir) : { ...material, name: 'Benutzerdefiniert' })
+                      setMaterial(m ? { ...materialFromPreset(m, material.buildDir), infill: material.infill ?? { ...DEFAULT_INFILL } } : { ...material, name: 'Benutzerdefiniert' })
                     }}
                   >
                     {MATERIAL_GROUPS.map((g) => (
@@ -795,6 +866,7 @@ export default function App() {
                       onUse={(d) => { const m = { ...material, buildDir: d }; setMaterial(m); onSolve(m) }}
                     />
                   )}
+                  {material.layered && <InfillFields material={material} setMaterial={setMaterial} />}
                 </Section>
               )}
 
@@ -1010,6 +1082,8 @@ export default function App() {
                 setShowMesh={setShowMesh}
                 stale={resultStale}
                 onExport={onExportVtu}
+                cut={cut}
+                setCut={setCut}
                 reference={reference}
                 current={summary(result, mesh, geoStep ? 'Geändert' : 'Aktuell')}
                 onPin={() => setReference(summary(result, mesh, geoStep ? 'Geändert' : 'Vorher'))}
@@ -1207,7 +1281,7 @@ function Compare({ reference, current, onUnpin }) {
   )
 }
 
-function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, reference, current, onPin, onUnpin }) {
+function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, reference, current, onPin, onUnpin, cut, setCut }) {
   const sf = result.safety
   const sfClass = sf == null ? '' : sf >= 1.5 ? 'good' : sf >= 1 ? 'ok' : 'bad'
   const balance = Math.hypot(...result.total_load.map((v, k) => v + result.total_reaction[k]))
@@ -1264,7 +1338,7 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
       <h3 className="sub">Darstellung</h3>
       <div className="quantities">
         {Object.entries(QUANTITIES).map(([k, q]) => (
-          <button key={k} className={'q' + (quantity === k ? ' on' : '')} disabled={(k === 'safety' && !result.utilization) || (k === 'safety_layers' && !result.utilization_layers)} onClick={() => setQuantity(k)}>
+          <button key={k} className={'q' + (quantity === k ? ' on' : '')} disabled={FIELD_OF[k] && FIELD_OF[k][0] !== 'von_mises' && !result[FIELD_OF[k][0]] && !['sigma1', 'sigma3'].includes(k)} onClick={() => setQuantity(k)}>
             <span>{q.label}</span>
             <em>{q.hint}</em>
           </button>
@@ -1283,6 +1357,28 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
       <label className="check">
         <input type="checkbox" checked={showMesh} onChange={(e) => setShowMesh(e.target.checked)} /> Netz anzeigen
       </label>
+      <div className="cut-box">
+        <label className="check">
+          <input type="checkbox" checked={cut.on} onChange={(e) => setCut({ ...cut, on: e.target.checked })} /> Schnitt (ins Bauteil schauen)
+        </label>
+        {cut.on && (
+          <>
+            <div className="row">
+              <div className="segmented small">
+                {['X', 'Y', 'Z'].map((a, k) => (
+                  <button key={a} className={cut.axis === k ? 'on' : ''} onClick={() => setCut({ ...cut, axis: k })}>
+                    {a}
+                  </button>
+                ))}
+              </div>
+              <button className="btn small" onClick={() => setCut({ ...cut, flip: !cut.flip })}>
+                ⇄ Seite
+              </button>
+            </div>
+            <input type="range" className="slim-range" min={0} max={100} step={0.5} value={cut.pos} onChange={(e) => setCut({ ...cut, pos: Number(e.target.value) })} />
+          </>
+        )}
+      </div>
       <p className="hint">Auf das Bauteil klicken, um den Wert an einer Stelle abzulesen.</p>
 
       <h3 className="sub">Lagerkräfte</h3>
@@ -1387,6 +1483,57 @@ function MaterialFields({ material: m, setMaterial }) {
         100 % Füllung; bei weniger Füllung bzw. wenigen Wandlinien sind die Werte deutlich kleiner.
       </p>
     </>
+  )
+}
+
+function InfillFields({ material, setMaterial }) {
+  const inf = { ...DEFAULT_INFILL, ...(material.infill ?? {}) }
+  const set = (patch) => setMaterial({ ...material, infill: { ...inf, ...patch } })
+  const t = shellThickness(inf)
+  const f = infillFractions(inf.pattern, inf.percent)
+  return (
+    <div className="print-orient">
+      <label className="check">
+        <input type="checkbox" checked={!!inf.on} onChange={(e) => set({ on: e.target.checked })} />
+        Wände und Infill berücksichtigen (sonst massiv)
+      </label>
+      {inf.on && (
+        <>
+          <div className="grid3">
+            <label className="field" style={{ gridColumn: 'span 2' }}>
+              <span>Füllmuster</span>
+              <select value={inf.pattern} onChange={(e) => set({ pattern: e.target.value })}>
+                {Object.entries(INFILL_PATTERNS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <NumField label="Füllgrad" unit="%" value={inf.percent} onChange={(v) => set({ percent: v })} />
+          </div>
+          <input type="range" className="slim-range" min={0} max={100} step={5} value={Number(inf.percent) || 0} onChange={(e) => set({ percent: e.target.value })} />
+          <div className="grid3">
+            <NumField label="Wände" value={inf.walls} onChange={(v) => set({ walls: v })} />
+            <NumField label="Linienbreite" unit="mm" value={inf.lineWidth} onChange={(v) => set({ lineWidth: v })} />
+            <NumField label="Schichthöhe" unit="mm" value={inf.layerHeight} onChange={(v) => set({ layerHeight: v })} />
+          </div>
+          <div className="grid3">
+            <NumField label="Deckschichten" value={inf.top} onChange={(v) => set({ top: v })} />
+            <NumField label="Bodenschichten" value={inf.bottom} onChange={(v) => set({ bottom: v })} />
+          </div>
+          <p className="hint">
+            Wand {fmt(t.wall)} mm · Deckschicht {fmt(t.top)} mm · Boden {fmt(t.bottom)} mm. Infill als Ersatzwerkstoff: E {fmt(f[0] * material.E)} /{' '}
+            {fmt(f[1] * material.E_z)} MPa, Rm {fmt(f[2] * Number(material.tensile || material.yield))} / {fmt(f[3] * Number(material.tensile_z || material.yield_z))} MPa (in der
+            Schicht / quer). Näherungswerte je Muster – für genaue Ergebnisse mit einem eigenen Zugstab kalibrieren.
+          </p>
+          <label className="check">
+            <input type="checkbox" checked={inf.refine !== false} onChange={(e) => set({ refine: e.target.checked })} />
+            Netz an der Oberfläche auf Wandstärke verfeinern (genauer, rechnet länger)
+          </label>
+        </>
+      )}
+    </div>
   )
 }
 

@@ -20,6 +20,89 @@ pub struct Material {
     /// Schichtaufbau (3D-Druck): andere Werte quer zu den Schichten
     #[serde(default)]
     pub layers: Option<Layers>,
+    /// Füllung (3D-Druck): volle Wände/Deckschichten außen, Infill innen
+    #[serde(default)]
+    pub infill: Option<Infill>,
+}
+
+/// Füllmuster des Slicers
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InfillPattern {
+    /// Gitter: Wände in zwei Richtungen, in Z durchgehend
+    Gitter,
+    /// Linien/Rechteck: je Schicht eine Richtung, abwechselnd gekreuzt
+    Linien,
+    /// Dreiecke: Wände in drei Richtungen, in Z durchgehend
+    Dreiecke,
+    /// Waben (Sechseck), in Z durchgehend
+    Waben,
+    /// Gyroid: räumlich, in allen Richtungen ähnlich
+    Gyroid,
+    /// Kubisch: schräge Ebenen in drei Richtungen
+    Kubisch,
+    /// Kreuz/Cross: nachgiebig (für flexible Teile gedacht)
+    Kreuz,
+}
+
+impl InfillPattern {
+    /// Näherung der Ersatzwerte als Anteil des vollen Werkstoffs, f(ρ) = k·ρⁿ + (1 − k)·ρ⁸
+    /// (der ρ⁸-Anteil sorgt für f(1) = 1, also massiv bei 100 %).
+    /// Rückgabe: (E in der Schicht, E quer, R in der Schicht, R quer) jeweils als (k, n).
+    fn factors(self) -> [(f64, f64); 4] {
+        use InfillPattern::*;
+        match self {
+            // gestreckte Wände: in der Ebene richtungsgemittelt ~ρ/3, in Z volle Wandfläche ~ρ
+            Gitter => [(0.35, 1.0), (1.0, 1.0), (0.35, 1.0), (1.0, 1.0)],
+            // nur Kreuzungspunkte verbinden die Schichten → quer ~ρ²
+            Linien => [(0.3, 1.0), (1.0, 2.0), (0.3, 1.0), (1.0, 2.0)],
+            Dreiecke => [(0.33, 1.0), (1.0, 1.0), (0.33, 1.0), (1.0, 1.0)],
+            // Waben: in der Ebene biegedominiert (Gibson/Ashby: E ≈ 1,5·ρ³, σ ≈ 0,5·ρ²)
+            Waben => [(1.5, 3.0), (1.0, 1.0), (0.5, 2.0), (1.0, 1.0)],
+            Gyroid => [(0.4, 1.8), (0.4, 1.8), (0.4, 1.5), (0.4, 1.5)],
+            Kubisch => [(0.25, 1.0), (0.25, 1.0), (0.25, 1.0), (0.25, 1.0)],
+            Kreuz => [(0.5, 2.0), (0.5, 2.0), (0.3, 1.5), (0.3, 1.5)],
+        }
+    }
+
+    /// Anteile (E_xy, E_z, R_xy, R_z) bei Füllgrad ρ (0…1)
+    pub fn fractions(self, rho: f64) -> [f64; 4] {
+        let rho = rho.clamp(0.0, 1.0);
+        self.factors().map(|(k, n)| {
+            let k = k.min(1.0);
+            k * rho.powf(n) + (1.0 - k) * rho.powi(8)
+        })
+    }
+}
+
+/// Slicer-Einstellungen für Wände, Deck-/Bodenschichten und Füllung
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Infill {
+    pub pattern: InfillPattern,
+    /// Füllgrad 0…1
+    pub density: f64,
+    /// Anzahl Wandlinien (Perimeter)
+    pub walls: u32,
+    /// Linienbreite [mm]
+    pub line_width: f64,
+    /// Schichthöhe [mm]
+    pub layer_height: f64,
+    /// Anzahl Deckschichten (oben, Fläche zeigt in Aufbaurichtung)
+    pub top_layers: u32,
+    /// Anzahl Bodenschichten (unten)
+    pub bottom_layers: u32,
+}
+
+impl Infill {
+    pub fn wall_thickness(&self) -> f64 {
+        self.walls as f64 * self.line_width
+    }
+    pub fn top_thickness(&self) -> f64 {
+        self.top_layers as f64 * self.layer_height
+    }
+    pub fn bottom_thickness(&self) -> f64 {
+        self.bottom_layers as f64 * self.layer_height
+    }
 }
 
 /// Werte quer zu den Druckschichten. Die Schichtebene steht senkrecht zur Aufbaurichtung.
@@ -85,7 +168,44 @@ impl Material {
             yield_strength: Some(235.0),
             tensile_strength: Some(360.0),
             layers: None,
+            infill: None,
         }
+    }
+
+    /// Ersatzwerkstoff für den gefüllten Kern (Infill), aus Muster und Füllgrad
+    pub fn core_material(&self) -> Option<Material> {
+        let inf = self.infill.as_ref()?;
+        let [fe, fez, fr, frz] = inf.pattern.fractions(inf.density);
+        let min = 1e-6;
+        let layers = match &self.layers {
+            Some(l) => Layers {
+                build_dir: l.build_dir,
+                e_z: (l.e_z * fez).max(min * l.e_z),
+                nu_z: l.nu_z,
+                g_z: l.g_z.map(|g| g * fez.max(min)),
+                yield_z: l.yield_z.map(|v| v * frz),
+                tensile_z: l.tensile_z.map(|v| v * frz),
+                shear_z: l.shear_z.map(|v| v * frz),
+            },
+            None => Layers {
+                build_dir: [0.0, 0.0, 1.0],
+                e_z: (self.e * fez).max(min * self.e),
+                nu_z: None,
+                g_z: None,
+                yield_z: self.yield_strength.map(|v| v * frz),
+                tensile_z: self.tensile_strength.map(|v| v * frz),
+                shear_z: None,
+            },
+        };
+        Some(Material {
+            name: format!("{} – Infill", self.name),
+            e: (self.e * fe).max(min * self.e),
+            nu: self.nu,
+            yield_strength: self.yield_strength.map(|v| v * fr),
+            tensile_strength: self.tensile_strength.map(|v| v * fr),
+            layers: Some(layers),
+            infill: None,
+        })
     }
 
     pub fn shear_modulus(&self) -> f64 {
@@ -217,6 +337,7 @@ mod tests {
             yield_strength: None,
             tensile_strength: Some(50.0),
             layers: Some(Layers { build_dir: dir, e_z: 2500.0, nu_z: None, g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
+            infill: None,
         }
     }
 
@@ -244,6 +365,19 @@ mod tests {
         let eps_dir = dir.dot(&(strain * dir));
         assert!((1.0 / eps_dir - 2500.0).abs() < 1e-6, "{}", 1.0 / eps_dir);
         assert!(m.check().is_ok());
+    }
+
+    #[test]
+    fn infill_anteile() {
+        for p in [InfillPattern::Gitter, InfillPattern::Linien, InfillPattern::Waben, InfillPattern::Gyroid, InfillPattern::Kreuz] {
+            let full = p.fractions(1.0);
+            assert!(full.iter().all(|f| (f - 1.0).abs() < 1e-12), "{p:?} bei 100 %");
+            let low = p.fractions(0.2);
+            assert!(low.iter().all(|f| *f > 0.0 && *f < 0.25), "{p:?}: {low:?}");
+        }
+        // Gitter 20 %: E in Z ≈ ρ, in der Schicht ≈ 0,35·ρ
+        let g = InfillPattern::Gitter.fractions(0.2);
+        assert!((g[1] - 0.2).abs() < 1e-3 && (g[0] - 0.07).abs() < 1e-3);
     }
 
     #[test]

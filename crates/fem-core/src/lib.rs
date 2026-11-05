@@ -6,6 +6,7 @@
 pub mod amg;
 pub mod element;
 pub mod generate;
+pub mod infill;
 pub mod geometry;
 pub mod gmsh;
 pub mod material;
@@ -15,12 +16,13 @@ pub mod pcg;
 pub mod progress;
 pub mod region;
 pub mod results;
+pub mod section;
 pub mod solver;
 pub mod sparse;
 pub mod validate;
 pub mod vtk;
 
-pub use material::Material;
+pub use material::{Infill, InfillPattern, Material};
 pub use mesh::{Mesh, Order};
 pub use model::{Axis, Fix, Group, Load, LocalFix, Model, Selection, SolverKind, Support};
 pub use region::Region;

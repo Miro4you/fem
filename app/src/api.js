@@ -103,6 +103,10 @@ export async function exportStep(path, name) {
   download(await http('/file?path=' + encodeURIComponent(path), { raw: true }), name)
 }
 
+/// Schnitt durch das aktuelle Ergebnis (Ebene durch point mit Normale normal)
+export const section = (point, normal) =>
+  isDesktop ? invoke('section', { point, normal }) : http('/section', { method: 'POST', json: { point, normal } })
+
 export const solve = (setup) => (isDesktop ? invoke('solve', { setup }) : http('/solve', { method: 'POST', json: { setup } }))
 
 /// STEP auswählen → Pfad auf dem rechnenden Rechner (im Browser: hochladen)

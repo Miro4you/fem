@@ -286,6 +286,7 @@ pub fn zugstab_gedruckt() -> Result<Vec<Check>> {
             yield_strength: None,
             tensile_strength: Some(50.0),
             layers: Some(Layers { build_dir: dir, e_z: 2600.0, nu_z: Some(0.3), g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
+            infill: None,
         };
         let model = Model::new(box_mesh([l, b, h], [10, 2, 2], Order::Quadratic)?, mat.clone())
             .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
@@ -311,6 +312,51 @@ pub fn zugstab_gedruckt() -> Result<Vec<Check>> {
     Ok(out)
 }
 
+/// 3D-Druck mit Füllung: Zugstab 10 × 10 mm, Wand 1 mm, Deck-/Bodenschicht 1 mm, 20 % Gitter-Infill.
+/// Wand und Kern arbeiten parallel: E·A = E_Wand·A_Wand + E_Kern·A_Kern (Dehnung im ungestörten Mittelteil).
+pub fn zugstab_infill(kind: crate::SolverKind) -> Result<Vec<Check>> {
+    use crate::material::{Infill, InfillPattern, Layers};
+    let (l, b, h, f) = (100.0, 10.0, 10.0, 1000.0);
+    let inf = Infill { pattern: InfillPattern::Gitter, density: 0.2, walls: 2, line_width: 0.5, layer_height: 0.2, top_layers: 5, bottom_layers: 5 };
+    let mat = Material {
+        name: "PLA (Richtwerte)".into(),
+        e: 3300.0,
+        nu: 0.35,
+        yield_strength: None,
+        tensile_strength: Some(50.0),
+        layers: Some(Layers { build_dir: [0.0, 0.0, 1.0], e_z: 2600.0, nu_z: None, g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
+        infill: Some(inf.clone()),
+    };
+    let core = mat.core_material().expect("Kern");
+    let model = Model::new(box_mesh([l, b, h], [20, 10, 10], Order::Quadratic)?, mat.clone())
+        .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
+        .group("y0", Selection::Plane { axis: Axis::Y, value: 0.0 })
+        .group("z0", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("ende", Selection::Plane { axis: Axis::X, value: l })
+        .support("x0", Fix::only(Axis::X))
+        .support("y0", Fix::only(Axis::Y))
+        .support("z0", Fix::only(Axis::Z))
+        .load(Load::Force { group: "ende".into(), force: [f, 0.0, 0.0] })
+        .solver(kind);
+    let res = solve(&model)?;
+    let m = &model.mesh;
+    let ux = |x: f64| mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[0] - x).abs() < 1e-6).map(|(_, u)| u[0]));
+    let eps = (ux(75.0) - ux(25.0)) / 50.0;
+    let a_core = (b - 2.0 * inf.wall_thickness()) * (h - inf.top_thickness() - inf.bottom_thickness());
+    let ea = mat.e * (b * h - a_core) + core.e * a_core;
+    let name = format!("3D-Druck-Zugstab mit Wand + 20 % Gitter ({})", if kind == crate::SolverKind::Iterative { "iterativ" } else { "direkt" });
+    // Auslastung im Mittelteil: Wand σ = E_Wand·ε gegen Rm, Kern σ = E_Kern·ε gegen Rm·Anteil
+    let mid = |p: &[f64; 3]| (p[0] - 50.0).abs() < 1e-6;
+    let u_wall = res.utilization.as_ref().map(|u| m.nodes.iter().zip(u).filter(|(p, _)| mid(p) && p[1] < 1e-6).map(|(_, v)| *v).fold(0.0, f64::max)).unwrap_or(0.0);
+    let core_r = core.tensile_strength.unwrap();
+    let u_core = res.utilization_infill.as_ref().map(|u| m.nodes.iter().zip(u).filter(|(p, _)| mid(p) && (p[1] - 5.0).abs() < 1e-6 && (p[2] - 5.0).abs() < 1e-6).map(|(_, v)| *v).fold(0.0, f64::max)).unwrap_or(0.0);
+    Ok(vec![
+        check(&name, "Dehnsteifigkeit E·A [N]", f / eps, ea, 1e-4),
+        check(&name, "Auslastung Wand (Rand, Mitte)", u_wall, mat.e * eps / 50.0, 1e-3),
+        check(&name, "Auslastung Infill (Kern, Mitte)", u_core, core.e * eps / core_r, 1e-3),
+    ])
+}
+
 /// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
@@ -322,6 +368,7 @@ pub fn all() -> Result<Vec<Check>> {
         v.extend(lochplatte(&step)?);
     }
     v.extend(zugstab_gedruckt()?);
+    v.extend(zugstab_infill(crate::SolverKind::Direct)?);
     v.extend(zugstab_schraeg(crate::SolverKind::Direct)?);
     v.extend(zugstab_schraeg(crate::SolverKind::Iterative)?);
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");

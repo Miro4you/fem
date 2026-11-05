@@ -5,6 +5,7 @@ use nalgebra::{DMatrix, Matrix3, Vector3};
 use rayon::prelude::*;
 
 use crate::element::{tet_nodal_stress, tet_stiffness, tri_integration_points, SurfacePoint};
+use crate::material::DMat;
 use crate::mesh::Face;
 use crate::model::{Load, LocalFix, Model, SolverKind};
 use crate::results::{principal, von_mises, Results};
@@ -25,6 +26,24 @@ pub fn solve(model: &Model) -> Result<Results> {
     let ndof = 3 * n_nodes;
     let d = model.material.d_matrix();
     let faces = mesh.boundary_faces();
+    let progress = &model.progress;
+    // 3D-Druck mit Füllung: Wandanteil je Element, Ersatzwerkstoff für den Kern
+    let zones = match (&model.material.infill, model.material.core_material()) {
+        (Some(inf), Some(core)) => {
+            progress.report("Wände und Füllung zuordnen", None);
+            let dir = model.material.layers.as_ref().map(|l| l.build_dir).unwrap_or([0.0, 0.0, 1.0]);
+            let d_core = core.d_matrix();
+            Some((crate::infill::shell_fractions(mesh, &faces, inf, dir), core, d_core))
+        }
+        _ => None,
+    };
+    // Steifigkeit je Element: Wand und Kern nach Volumenanteil gemischt (gleiche Dehnung)
+    let elem_d = |e: usize| -> DMat {
+        match &zones {
+            Some((f, _, dc)) => d * f[e] + dc * (1.0 - f[e]),
+            None => d,
+        }
+    };
 
     // --- Randbedingungen ---------------------------------------------------
     let mut prescribed: Vec<Option<f64>> = vec![None; ndof];
@@ -120,14 +139,13 @@ pub fn solve(model: &Model) -> Result<Results> {
         }
     }
 
-    let progress = &model.progress;
     progress.report("Lasten verteilen", None);
     let f_ext = load_vector(model, &faces)?;
     // im Gleichungssystem: lokale Komponenten an Knoten mit lokaler Basis
     let mut f_sys = f_ext.clone();
     frames.to_local(&mut f_sys);
     let elem_k = |e: usize| -> Result<DMatrix<f64>> {
-        let mut ke = tet_stiffness(&mesh.elem_coords(e), &d).ok_or(FemError::DegenerateElement(e))?;
+        let mut ke = tet_stiffness(&mesh.elem_coords(e), &elem_d(e)).ok_or(FemError::DegenerateElement(e))?;
         frames.transform_element(mesh.elem(e), &mut ke);
         Ok(ke)
     };
@@ -156,21 +174,52 @@ pub fn solve(model: &Model) -> Result<Results> {
 
     // --- Spannungen und Reaktionen -------------------------------------------
     progress.report("Spannungen berechnen", None);
-    let per_elem: Vec<(Vec<[f64; 6]>, Vec<f64>)> = (0..mesh.n_elems())
+    // Festigkeiten Wand (Werkstoff) und Kern (Infill): je Elementknoten (Fließen gesamt, Schicht, Bruch)
+    let zone_strength = zones.as_ref().map(|(_, core, _)| {
+        (
+            crate::results::Strength::of(&model.material, false),
+            crate::results::Strength::of(&model.material, true),
+            crate::results::Strength::of(core, false),
+            crate::results::Strength::of(core, true),
+        )
+    });
+    type ZoneUtil = Vec<[f64; 6]>;
+    let per_elem: Vec<(Vec<[f64; 6]>, Vec<f64>, Option<ZoneUtil>)> = (0..mesh.n_elems())
         .into_par_iter()
         .map(|e| {
             let coords = mesh.elem_coords(e);
             let ue: Vec<f64> = mesh.elem(e).iter().flat_map(|&n| [u[3 * n], u[3 * n + 1], u[3 * n + 2]]).collect();
-            let ke = tet_stiffness(&coords, &d).expect("bereits geprüft");
+            let de = elem_d(e);
+            let ke = tet_stiffness(&coords, &de).expect("bereits geprüft");
             let fe = ke * nalgebra::DVector::from_column_slice(&ue);
-            (tet_nodal_stress(&coords, &ue, &d), fe.as_slice().to_vec())
+            // Wand und Kern haben dieselbe Dehnung, aber eigene Spannung und Festigkeit
+            let zu = match (&zones, &zone_strength) {
+                (Some((_, _, dc)), Some((sw, swb, sc, scb))) => {
+                    let sig_w = tet_nodal_stress(&coords, &ue, &d);
+                    let sig_c = tet_nodal_stress(&coords, &ue, dc);
+                    let ev = |st: &Option<crate::results::Strength>, s: &[f64; 6]| st.as_ref().map(|t| t.eval(s)).unwrap_or((0.0, 0.0));
+                    Some(
+                        sig_w
+                            .iter()
+                            .zip(&sig_c)
+                            .map(|(w, c)| {
+                                let (uw, lw) = ev(sw, w);
+                                let (uc, lc) = ev(sc, c);
+                                [uw, lw, ev(swb, w).0, uc, lc, ev(scb, c).0]
+                            })
+                            .collect(),
+                    )
+                }
+                _ => None,
+            };
+            (tet_nodal_stress(&coords, &ue, &de), fe.as_slice().to_vec(), zu)
         })
         .collect();
 
     let mut stress = vec![[0.0; 6]; n_nodes];
     let mut count = vec![0u32; n_nodes];
     let mut f_int = vec![0.0; ndof];
-    for (e, (s, fe)) in per_elem.iter().enumerate() {
+    for (e, (s, fe, _)) in per_elem.iter().enumerate() {
         for (a, &n) in mesh.elem(e).iter().enumerate() {
             for c in 0..6 {
                 stress[n][c] += s[a][c];
@@ -211,15 +260,76 @@ pub fn solve(model: &Model) -> Result<Results> {
     let total_reaction: Vector3<f64> = (0..n_nodes).map(node_reaction).sum();
     let total_reaction: [f64; 3] = total_reaction.into();
 
-    let util = crate::results::utilization(&model.material, &stress, false);
-    let safety_break = crate::results::utilization(&model.material, &stress, true)
-        .map(|(u, _)| 1.0 / u.iter().copied().fold(0.0, f64::max).max(1e-300));
-    let (utilization, utilization_layers) = match util {
-        Some((u, l)) => (Some(u), l),
-        None => (None, None),
+    let (utilization, utilization_layers, safety_break, utilization_infill, shell_fraction) = match &zones {
+        None => {
+            let util = crate::results::utilization(&model.material, &stress, false);
+            let safety_break = crate::results::utilization(&model.material, &stress, true)
+                .map(|(u, _)| 1.0 / u.iter().copied().fold(0.0, f64::max).max(1e-300));
+            match util {
+                Some((u, l)) => (Some(u), l, safety_break, None, None),
+                None => (None, None, safety_break, None, None),
+            }
+        }
+        Some((frac, _, _)) => {
+            // Knotenwerte: Wand und Kern getrennt gemittelt (gewichtet mit ihrem Anteil im Element)
+            let mut acc = vec![[0.0f64; 8]; n_nodes]; // wΣ, Wand ges, Wand Schicht, Wand Bruch, kΣ, Kern ges, Kern Schicht, Kern Bruch
+            let mut shell = vec![0.0f64; n_nodes];
+            for (e, (_, _, zu)) in per_elem.iter().enumerate() {
+                let f = frac[e];
+                for (a, &n) in mesh.elem(e).iter().enumerate() {
+                    let z = zu.as_ref().expect("Zonen")[a];
+                    let r = &mut acc[n];
+                    r[0] += f;
+                    r[1] += f * z[0];
+                    r[2] += f * z[1];
+                    r[3] += f * z[2];
+                    r[4] += 1.0 - f;
+                    r[5] += (1.0 - f) * z[3];
+                    r[6] += (1.0 - f) * z[4];
+                    r[7] += (1.0 - f) * z[5];
+                    shell[n] += f;
+                }
+            }
+            let avg = |sum: f64, w: f64| if w > 1e-12 { sum / w } else { 0.0 };
+            // Knoten auf der Oberfläche liegen immer in der Wand bzw. Deckschicht
+            let mut on_surface = vec![false; n_nodes];
+            for f in &faces {
+                for &n in &f.nodes {
+                    on_surface[n] = true;
+                }
+            }
+            for (n, r) in acc.iter_mut().enumerate() {
+                if on_surface[n] && r[0] > 1e-12 {
+                    r[4] = 0.0;
+                }
+            }
+            let wall: Vec<f64> = acc.iter().map(|r| avg(r[1], r[0])).collect();
+            let core: Vec<f64> = acc.iter().map(|r| avg(r[5], r[4])).collect();
+            let total: Vec<f64> = wall.iter().zip(&core).map(|(a, b)| a.max(*b)).collect();
+            let layered = model.material.layers.is_some();
+            let lay = layered.then(|| acc.iter().map(|r| avg(r[2], r[0]).max(avg(r[6], r[4]))).collect());
+            let brk = acc.iter().map(|r| avg(r[3], r[0]).max(avg(r[7], r[4]))).fold(0.0, f64::max);
+            let has_brk = model.material.tensile_strength.is_some();
+            let shell: Vec<f64> = shell
+                .iter()
+                .zip(&count)
+                .enumerate()
+                .map(|(n, (s, &c))| if on_surface[n] { 1.0 } else if c > 0 { s / c as f64 } else { 0.0 })
+                .collect();
+            let has = model.material.strengths(false).is_some();
+            (
+                has.then_some(total),
+                if has { lay } else { None },
+                (has_brk && brk > 0.0).then(|| 1.0 / brk),
+                has.then_some(core),
+                Some(shell),
+            )
+        }
     };
 
     Ok(Results {
+        utilization_infill,
+        shell_fraction,
         utilization,
         utilization_layers,
         safety_break,

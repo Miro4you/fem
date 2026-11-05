@@ -45,6 +45,7 @@ export default function Viewport({
   useEffect(() => {
     const el = host.current
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer.localClippingEnabled = true
     renderer.setPixelRatio(window.devicePixelRatio)
     el.appendChild(renderer.domElement)
 
@@ -182,6 +183,8 @@ export default function Viewport({
       group: new THREE.Group(), surf: null, edges: null, wire: null, ghost: null, arrows: new THREE.Group(),
       texture: bandTexture(), labelNodes: [], overlays: new THREE.Group(), aimGroup: new THREE.Group(), aimHandle: null,
       bed: new THREE.Group(),
+      cutMesh: null,
+      clip: new THREE.Plane(new THREE.Vector3(0, 0, -1), 0),
       // Schichtlinien (3D-Druck) im Flächen-Shader
       layerUniforms: { uLayerDir: { value: new THREE.Vector3(0, 0, 1) }, uLayerStep: { value: 1 }, uLayerOn: { value: 0 } },
     }
@@ -419,6 +422,53 @@ export default function Viewport({
     }
     s.dirty = true
   }, [mesh, mode, result, surfaceTint, hoverTag])
+
+  // --- Schnitt: Oberfläche abschneiden, Schnittfläche einfärben ----------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    if (s.cutMesh) {
+      s.group.remove(s.cutMesh)
+      s.cutMesh.geometry.dispose()
+      s.cutMesh.material.dispose()
+      s.cutMesh = null
+    }
+    const c = mode === 'result' ? result?.cut : null
+    const planes = c ? [s.clip] : []
+    for (const m of [s.resultMat, s.edges?.material, s.wire?.material, s.ghost?.material]) {
+      if (m) {
+        m.clippingPlanes = planes
+        m.needsUpdate = true
+      }
+    }
+    if (c) {
+      // sichtbar bleibt die Seite gegen die Normale: (p − p0)·n ≤ 0. Normale zur Kamera hin drehen,
+      // damit die Schnittfläche zum Betrachter zeigt („Seite“ kehrt das in App über die Normale um).
+      const n = new THREE.Vector3(...c.plane.normal)
+      const toCam = s.camera.position.clone().sub(new THREE.Vector3(...c.plane.point))
+      if (toCam.dot(n) < 0) n.negate()
+      s.clip.set(n.clone().negate(), n.dot(new THREE.Vector3(...c.plane.point)))
+      const m = c.positions.length / 3
+      const pos = new Float32Array(c.positions.length)
+      const sc = result.scale || 0
+      for (let i = 0; i < c.positions.length; i++) pos[i] = c.positions[i] + sc * c.displacement[i]
+      const uv = new Float32Array(2 * m)
+      const span = result.max - result.min || 1
+      for (let i = 0; i < m; i++) {
+        let t = Math.min(Math.max((c.values[i] - result.min) / span, 0), 1)
+        if (result.reverse) t = 1 - t
+        uv[2 * i] = t * (1 - 1e-4) + 0.5e-4
+        uv[2 * i + 1] = 0.5
+      }
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+      geo.setIndex(Array.from(c.triangles))
+      geo.computeVertexNormals()
+      s.cutMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: s.texture, side: THREE.DoubleSide }))
+      s.group.add(s.cutMesh)
+    }
+    s.dirty = true
+  }, [result, mode])
 
   // --- Pfeile und Markierungen -------------------------------------------------
   useEffect(() => {

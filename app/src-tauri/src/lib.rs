@@ -359,6 +359,10 @@ pub struct ResultView {
     /// Auslastung der Schichthaftung je Anzeigeknoten (nur bei Schichtaufbau)
     utilization_layers: Option<Vec<f32>>,
     max_utilization: Option<Extreme>,
+    /// Auslastung im Infill je Anzeigeknoten (3D-Druck mit Füllung)
+    utilization_infill: Option<Vec<f32>>,
+    /// Wandanteil je Anzeigeknoten (1 = Wand, 0 = Infill)
+    shell_fraction: Option<Vec<f32>>,
     /// Am Ort der größten Auslastung maßgeblich: „Schichthaftung“ oder „in der Schicht“
     governing: Option<String>,
     reactions: Vec<[f64; 3]>,
@@ -438,10 +442,20 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         }
         let safety = res.safety_factor(&model.material);
         // maßgeblich bei Schichtaufbau: Schichthaftung oder Festigkeit in der Schicht
-        let governing = match (res.max_utilization(), &res.utilization_layers) {
-            (Some((n, u)), Some(l)) => Some(if l[n] >= u - 1e-12 { "Schichthaftung" } else { "in der Schicht" }.to_string()),
+        // maßgeblich: Infill, Schichthaftung oder Festigkeit in der Schicht
+        let governing = match (res.max_utilization(), &res.utilization_layers, &res.utilization_infill) {
+            (Some((n, u)), _, Some(c)) if c[n] >= u - 1e-12 => Some("Infill".to_string()),
+            (Some((n, u)), Some(l), _) => Some(if l[n] >= u - 1e-12 { "Schichthaftung" } else { "in der Schicht" }.to_string()),
+            (Some(_), None, Some(_)) => Some("Wand".to_string()),
             _ => None,
         };
+        if governing.as_deref() == Some("Infill") {
+            warnings.push(
+                "Maßgeblich ist das Infill im Inneren. Mehr Füllgrad, ein tragfähigeres Muster (Gitter, Dreiecke, Kubisch) \
+                 oder mehr Wände bzw. Deckschichten helfen. Mit „Schnitt“ im Ergebnis ins Bauteil schauen."
+                    .into(),
+            );
+        }
         if governing.as_deref() == Some("Schichthaftung") {
             warnings.push(
                 "Maßgeblich ist die Schichthaftung (Zug quer zu den Schichten bzw. Schub zwischen den Schichten). \
@@ -486,6 +500,8 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             utilization: res.utilization.as_ref().map(|u| disp_nodes.iter().map(|&n| u[n] as f32).collect()),
             utilization_layers: res.utilization_layers.as_ref().map(|u| disp_nodes.iter().map(|&n| u[n] as f32).collect()),
             max_utilization: res.max_utilization().map(|(n, u)| ext(n, u)),
+            utilization_infill: res.utilization_infill.as_ref().map(|u| disp_nodes.iter().map(|&n| u[n] as f32).collect()),
+            shell_fraction: res.shell_fraction.as_ref().map(|u| disp_nodes.iter().map(|&n| u[n] as f32).collect()),
             governing,
             reactions: res.reactions.iter().map(|r| r.1).collect(),
             total_load: res.total_load,
@@ -500,6 +516,53 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         s.results = Some(res);
         Ok(view)
     }
+}
+
+// --- Schnitt -----------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct SectionView {
+    positions: Vec<f32>,
+    triangles: Vec<u32>,
+    displacement: Vec<f32>,
+    /// Werte je Eckpunkt: von_mises, sigma1, sigma3, utilization, utilization_layers, utilization_infill, shell_fraction
+    fields: HashMap<String, Vec<f32>>,
+}
+
+/// Schnitt durch das aktuelle Ergebnis mit der Ebene durch `point` mit Normale `normal`
+pub fn section_impl(state: &AppState, point: [f64; 3], normal: [f64; 3]) -> Result<SectionView, String> {
+    let s = state.lock().unwrap();
+    let (Some(model), Some(res)) = (&s.model, &s.results) else {
+        return Err("Noch kein Ergebnis vorhanden".into());
+    };
+    let s1: Vec<f64> = res.principal.iter().map(|p| p[0]).collect();
+    let s3: Vec<f64> = res.principal.iter().map(|p| p[2]).collect();
+    let mut names = vec!["von_mises", "sigma1", "sigma3"];
+    let mut fields: Vec<&[f64]> = vec![&res.von_mises, &s1, &s3];
+    for (name, f) in [
+        ("utilization", &res.utilization),
+        ("utilization_layers", &res.utilization_layers),
+        ("utilization_infill", &res.utilization_infill),
+        ("shell_fraction", &res.shell_fraction),
+    ] {
+        if let Some(f) = f {
+            names.push(name);
+            fields.push(f);
+        }
+    }
+    let c = fem_core::section::cut(&model.mesh, point, normal, &fields, &res.displacement);
+    Ok(SectionView {
+        positions: c.positions.iter().map(|&v| v as f32).collect(),
+        triangles: c.triangles,
+        displacement: c.displacement.iter().map(|&v| v as f32).collect(),
+        fields: names.into_iter().zip(c.values).map(|(n, v)| (n.to_string(), v.into_iter().map(|x| x as f32).collect())).collect(),
+    })
+}
+
+#[tauri::command]
+async fn section(state: tauri::State<'_, AppState>, point: [f64; 3], normal: [f64; 3]) -> Result<SectionView, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || section_impl(&state, point, normal)).await.map_err(|e| e.to_string())?
 }
 
 /// Ergebnis als `.vtu` schreiben (Datei oder Download im Heimnetz)
@@ -619,6 +682,7 @@ pub fn run() {
             modify_geometry,
             copy_step,
             solve,
+            section,
             export_vtu,
             save_text,
             load_text,
