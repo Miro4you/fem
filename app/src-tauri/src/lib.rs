@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use fem_core::gmsh::{self, MeshOptions};
+use fem_core::gmsh::{self, MeshOptions, Refine};
 use fem_core::mesh::Face;
 use fem_core::region::{fit_cylinder, Cylinder};
 use fem_core::{Fix, Load, LocalFix, Material, Mesh, Model, Order, Region, Results, Selection, SolverKind};
@@ -13,8 +13,34 @@ use serde::{Deserialize, Serialize};
 
 pub mod server;
 
+/// Aktueller Fortschritt einer langen Rechnung (für die Anzeige)
+#[derive(Clone, Serialize)]
+pub struct ProgressView {
+    text: String,
+    fraction: Option<f64>,
+}
+
+pub type ProgressSlot = Arc<Mutex<Option<ProgressView>>>;
+
+/// Fortschritts-Empfänger, der in den Zustand der Sitzung schreibt
+fn progress_for(state: &AppState) -> (fem_core::Progress, ProgressSlot) {
+    let slot = state.lock().unwrap().progress.clone();
+    let s2 = slot.clone();
+    let p = fem_core::Progress::new(move |text, fraction| {
+        *s2.lock().unwrap() = Some(ProgressView { text: text.to_string(), fraction });
+    });
+    (p, slot)
+}
+
+pub fn progress_impl(state: &AppState) -> Option<ProgressView> {
+    let slot = state.lock().map(|s| s.progress.clone()).ok()?;
+    let v = slot.lock().ok()?.clone();
+    v
+}
+
 #[derive(Default)]
 pub struct Inner {
+    progress: ProgressSlot,
     mesh: Option<Mesh>,
     faces: Vec<Face>,
     /// Anzeigeknoten → Netzknoten
@@ -175,6 +201,11 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
 }
 
 #[tauri::command]
+fn progress(state: tauri::State<'_, AppState>) -> Option<ProgressView> {
+    progress_impl(state.inner())
+}
+
+#[tauri::command]
 fn gmsh_path() -> Option<String> {
     gmsh::find_gmsh().map(|p| p.display().to_string())
 }
@@ -185,28 +216,34 @@ async fn open_step(
     path: String,
     size: Option<f64>,
     linear: Option<bool>,
+    refine: Option<Vec<Refine>>,
 ) -> Result<MeshView, String> {
+    let refine = refine.unwrap_or_default();
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || open_step_impl(&state, &path, size, linear == Some(true)))
+    tauri::async_runtime::spawn_blocking(move || open_step_impl(&state, &path, size, linear == Some(true), &refine))
         .await
         .map_err(|e| e.to_string())?
 }
 
 /// STEP öffnen und vernetzen (auch für Tests ohne Oberfläche nutzbar).
-pub fn open_step_impl(state: &AppState, path: &str, size: Option<f64>, linear: bool) -> Result<MeshView, String> {
+pub fn open_step_impl(state: &AppState, path: &str, size: Option<f64>, linear: bool, refine: &[Refine]) -> Result<MeshView, String> {
     {
         let opts = MeshOptions {
             size,
             order: if linear { Order::Linear } else { Order::Quadratic },
+            refine: refine.to_vec(),
             ..Default::default()
         };
+        let (progress, slot) = progress_for(state);
+        progress.report(if refine.is_empty() { "Vernetzen (Gmsh)" } else { "Vernetzen mit örtlicher Verfeinerung (Gmsh)" }, None);
         let mesh = gmsh::mesh_step(&PathBuf::from(path), &opts).map_err(|e| e.to_string())?;
         let (lo, hi) = mesh.bbox();
         let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
         let faces = mesh.boundary_faces();
         let (view, disp_nodes) = build_view(&mesh, &faces, size.unwrap_or(diag / 25.0));
+        *slot.lock().unwrap() = None;
         let mut s = state.lock().unwrap();
-        *s = Inner { mesh: Some(mesh), faces, disp_nodes, model: None, results: None };
+        *s = Inner { progress: slot, mesh: Some(mesh), faces, disp_nodes, model: None, results: None };
         Ok(view)
     }
 }
@@ -228,13 +265,15 @@ pub fn modify_geometry_impl(
     base: &str,
     ops: &[fem_core::geometry::GeoOp],
     size: Option<f64>,
+    refine: &[Refine],
 ) -> Result<GeometryView, String> {
+    progress_for(state).0.report("Geometrie anpassen (OpenCASCADE)", None);
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let stem = PathBuf::from(base).file_stem().and_then(|s| s.to_str()).unwrap_or("geometrie").to_string();
     let out = std::env::temp_dir().join("projekt-fem-geo").join(format!("{stamp}")).join(format!("{stem}_geaendert.step"));
     let r = fem_core::geometry::modify_step(&PathBuf::from(base), ops, &out).map_err(|e| e.to_string())?;
     let step = out.display().to_string();
-    let mesh = open_step_impl(state, &step, size, false)?;
+    let mesh = open_step_impl(state, &step, size, false, refine)?;
     Ok(GeometryView { mesh, step, volume_before: r.volume_before, volume_after: r.volume_after })
 }
 
@@ -244,9 +283,11 @@ async fn modify_geometry(
     base: String,
     ops: Vec<fem_core::geometry::GeoOp>,
     size: Option<f64>,
+    refine: Option<Vec<Refine>>,
 ) -> Result<GeometryView, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || modify_geometry_impl(&state, &base, &ops, size))
+    let refine = refine.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || modify_geometry_impl(&state, &base, &ops, size, &refine))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -350,7 +391,8 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         if setup.supports.is_empty() {
             return Err("Mindestens ein Lager festlegen".to_string());
         }
-        let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver);
+        let (progress, slot) = progress_for(state);
+        let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver).progress(progress);
         for (i, s) in setup.supports.iter().enumerate() {
             let name = format!("Lager {}", i + 1);
             model = model.group_in(&name, Selection::Surfaces(s.surfaces.clone()), s.region.clone());
@@ -373,7 +415,9 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             model = model.group_in(&name, Selection::Surfaces(sel.clone()), region.clone()).load(load);
         }
 
-        let res = fem_core::solve(&model).map_err(|e| e.to_string())?;
+        let res = fem_core::solve(&model);
+        *slot.lock().unwrap() = None;
+        let res = res.map_err(|e| e.to_string())?;
         let m = &model.mesh;
 
         let mut warnings = Vec::new();
@@ -570,6 +614,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             gmsh_path,
+            progress,
             open_step,
             modify_geometry,
             copy_step,

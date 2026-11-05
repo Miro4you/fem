@@ -120,6 +120,8 @@ pub fn solve(model: &Model) -> Result<Results> {
         }
     }
 
+    let progress = &model.progress;
+    progress.report("Lasten verteilen", None);
     let f_ext = load_vector(model, &faces)?;
     // im Gleichungssystem: lokale Komponenten an Knoten mit lokaler Basis
     let mut f_sys = f_ext.clone();
@@ -140,17 +142,20 @@ pub fn solve(model: &Model) -> Result<Results> {
         SolverKind::Auto => neq >= AUTO_ITERATIVE_FROM,
     };
     let (u, iterations) = if iterative {
+        progress.report(&format!("Steifigkeitsmatrix aufbauen ({neq} Unbekannte)"), None);
         let sys = pcg::assemble(n_nodes, &mesh.conn, mesh.npe, &prescribed, &f_sys, elem_k)?;
         let fixed: Vec<bool> = prescribed.iter().map(Option::is_some).collect();
-        let sol = pcg::solve(sys, &mesh.nodes, &fixed, &frames, PCG_TOLERANCE, PCG_MAX_ITER)?;
+        let sol = pcg::solve(sys, &mesh.nodes, &fixed, &frames, PCG_TOLERANCE, PCG_MAX_ITER, progress)?;
         (sol.x, Some(sol.iterations))
     } else {
+        progress.report(&format!("Direkter Löser: Matrix aufbauen und zerlegen ({neq} Unbekannte)"), None);
         (solve_direct(model, &prescribed, &f_sys, &elem_k)?, None)
     };
     let mut u = u;
     frames.to_global(&mut u);
 
     // --- Spannungen und Reaktionen -------------------------------------------
+    progress.report("Spannungen berechnen", None);
     let per_elem: Vec<(Vec<[f64; 6]>, Vec<f64>)> = (0..mesh.n_elems())
         .into_par_iter()
         .map(|e| {

@@ -137,8 +137,10 @@ pub fn solve(
     frames: &NodeFrames,
     tol: f64,
     max_iter: usize,
+    progress: &crate::Progress,
 ) -> Result<Solution> {
     let System { k, b } = sys;
+    progress.report("Mehrgitter-Vorkonditionierer vorbereiten", None);
     let amg = Amg::new(k, coords, fixed, frames)?;
     let k = amg.matrix();
     let n = b.len();
@@ -166,6 +168,11 @@ pub fn solve(
         x.par_iter_mut().zip(p.par_iter()).for_each(|(x, p)| *x += alpha * p);
         r.par_iter_mut().zip(q.par_iter()).for_each(|(r, q)| *r -= alpha * q);
         let res = dot(&r, &r).sqrt() / b_norm;
+        if it % 5 == 0 {
+            // Fortschritt über das Residuum (logarithmisch bis zur Abbruchgenauigkeit)
+            let frac = (res.max(1e-300).ln() / tol.ln()).clamp(0.0, 1.0);
+            progress.report(&format!("Iteration {it}, Restfehler {res:.1e}"), Some(frac));
+        }
         if res < tol {
             return Ok(Solution { x, iterations: it, residual: res });
         }

@@ -156,3 +156,37 @@ export function regionGrid(region, cyl, offset) {
     },
   }
 }
+
+/// Netzverfeinerung für einen Wirkbereich (Gmsh-Feld): im Bereich etwa ein Viertel seiner Größe
+export function regionRefine(region, cyl, h) {
+  const clamp = (v) => Math.max(h / 10, Math.min(h, v))
+  if (region.shape === 'circle') {
+    const r = Number(region.radius)
+    return { type: 'ball', center: region.center.map(Number), radius: 1.4 * r, size: clamp(r / 3) }
+  }
+  if (region.shape === 'rect') {
+    const w = Number(region.width)
+    const hh = Number(region.height)
+    const size = clamp(Math.min(w, hh) / 4)
+    const { n, u, v } = planeBasis(region.normal.map(Number), region.u?.map(Number))
+    const c = region.center.map(Number)
+    const lo = [Infinity, Infinity, Infinity]
+    const hi = [-Infinity, -Infinity, -Infinity]
+    for (const a of [-0.6, 0.6]) for (const b of [-0.6, 0.6]) for (const t of [-2, 2]) {
+      const p = add(add(c, scale(u, a * w)), add(scale(v, b * hh), scale(n, t * size)))
+      for (let k = 0; k < 3; k++) (lo[k] = Math.min(lo[k], p[k])), (hi[k] = Math.max(hi[k], p[k]))
+    }
+    return { type: 'box', min: lo, max: hi, size }
+  }
+  // Wellen-/Bohrungsabschnitt
+  const a = unit(region.axis.map(Number))
+  const s0 = Number(region.start)
+  const s1 = Number(region.end)
+  const R = cyl?.radius ?? h
+  const len = Math.abs(s1 - s0)
+  const size = clamp(Math.min(len / 4, (2 * Math.PI * R) / 24))
+  return {
+    type: 'cylinder', center: add(region.origin.map(Number), scale(a, Math.min(s0, s1) - size)), axis: scale(a, len + 2 * size),
+    radius: R + 2 * size, size,
+  }
+}

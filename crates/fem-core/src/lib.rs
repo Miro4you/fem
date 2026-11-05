@@ -12,6 +12,7 @@ pub mod material;
 pub mod mesh;
 pub mod model;
 pub mod pcg;
+pub mod progress;
 pub mod region;
 pub mod results;
 pub mod solver;
@@ -23,6 +24,7 @@ pub use material::Material;
 pub use mesh::{Mesh, Order};
 pub use model::{Axis, Fix, Group, Load, LocalFix, Model, Selection, SolverKind, Support};
 pub use region::Region;
+pub use progress::Progress;
 pub use results::Results;
 pub use solver::solve;
 

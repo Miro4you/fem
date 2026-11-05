@@ -172,11 +172,13 @@ pub struct Model {
     pub supports: Vec<Support>,
     pub loads: Vec<Load>,
     pub solver: SolverKind,
+    /// Fortschrittsmeldungen (Oberfläche)
+    pub progress: crate::Progress,
 }
 
 impl Model {
     pub fn new(mesh: Mesh, material: Material) -> Self {
-        Model { mesh, material, groups: vec![], supports: vec![], loads: vec![], solver: SolverKind::Auto }
+        Model { mesh, material, groups: vec![], supports: vec![], loads: vec![], solver: SolverKind::Auto, progress: Default::default() }
     }
 
     pub fn group(mut self, name: &str, sel: Selection) -> Self {
@@ -212,6 +214,11 @@ impl Model {
 
     pub fn load(mut self, load: Load) -> Self {
         self.loads.push(load);
+        self
+    }
+
+    pub fn progress(mut self, p: crate::Progress) -> Self {
+        self.progress = p;
         self
     }
 

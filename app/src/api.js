@@ -81,12 +81,17 @@ function toBase64(buf) {
 
 export const gmshPath = () => (isDesktop ? invoke('gmsh_path') : http('/gmsh'))
 
-export const openStep = (path, size, linear = false) =>
-  isDesktop ? invoke('open_step', { path, size, linear }) : http('/open_step', { method: 'POST', json: { path, size, linear } })
+export const openStep = (path, size, linear = false, refine = []) =>
+  isDesktop ? invoke('open_step', { path, size, linear, refine }) : http('/open_step', { method: 'POST', json: { path, size, linear, refine } })
+
+/// Fortschritt der laufenden Rechnung ({ text, fraction } oder null)
+export const progress = () => (isDesktop ? invoke('progress') : http('/progress'))
 
 /// Geometrie ändern: Änderungen auf die Original-STEP anwenden, neu vernetzen
-export const modifyGeometry = (base, ops, size) =>
-  isDesktop ? invoke('modify_geometry', { base, ops, size }) : http('/modify_geometry', { method: 'POST', json: { base, ops, size } })
+export const modifyGeometry = (base, ops, size, refine = []) =>
+  isDesktop
+    ? invoke('modify_geometry', { base, ops, size, refine })
+    : http('/modify_geometry', { method: 'POST', json: { base, ops, size, refine } })
 
 /// geänderte STEP-Datei speichern
 export async function exportStep(path, name) {

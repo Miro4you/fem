@@ -9,7 +9,7 @@ import Legend from './components/Legend.jsx'
 import * as api from './api.js'
 import { MATERIALS, MATERIAL_GROUPS, materialFromPreset, materialPayload } from './materials.js'
 import { fmt, fmtVec } from './format.js'
-import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES } from './region.js'
+import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES, regionRefine } from './region.js'
 import { GEO_OPS, opFromSurface, newSketchOp, opPayload, opProblem, remapSurfaces, axisLabel } from './geoops.js'
 
 const SUPPORT_COLOR = '#5b8def'
@@ -86,6 +86,11 @@ export default function App() {
   const [quantity, setQuantity] = useState('von_mises')
   const [deform, setDeform] = useState('auto')
   const [showMesh, setShowMesh] = useState(false)
+  // Netz in Wirkbereichen verfeinern; Schlüssel der Verfeinerung beim letzten Vernetzen
+  const [refineRegions, setRefineRegions] = useState(true)
+  const [meshRefineKey, setMeshRefineKey] = useState('[]')
+  // Fortschritt der laufenden Rechnung (vom Rechenkern)
+  const [progressInfo, setProgressInfo] = useState(null)
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
   const [probe, setProbe] = useState(null)
@@ -107,6 +112,46 @@ export default function App() {
   }, [material, supports, loads])
 
   const surfaceInfo = useMemo(() => new Map((mesh?.surfaces ?? []).map((s) => [s.tag, s])), [mesh])
+
+  // Während einer Rechnung den Fortschritt abfragen
+  useEffect(() => {
+    if (!busy) {
+      setProgressInfo(null)
+      return
+    }
+    let stop = false
+    const tick = async () => {
+      try {
+        const p = await api.progress()
+        if (!stop) setProgressInfo(p)
+      } catch {
+        /* ältere Gegenstelle ohne Fortschritt */
+      }
+      if (!stop) setTimeout(tick, 400)
+    }
+    tick()
+    return () => {
+      stop = true
+    }
+  }, [busy])
+
+  // Netzverfeinerungen für die aktuellen Wirkbereiche (Lasten und Lager)
+  function currentRefine(size) {
+    const h = Number(size) || mesh?.mesh_size || 5
+    const out = []
+    if (refineRegions) {
+      for (const it of [...supports, ...loads]) {
+        const r = regionNumbers(it.region)
+        if (!r) continue
+        try {
+          out.push(regionRefine(r, selectionCylinder(it.surfaces, surfaceInfo), h))
+        } catch {
+          /* unvollständiger Bereich */
+        }
+      }
+    }
+    return out
+  }
   const diag = useMemo(() => {
     if (!mesh) return 1
     const [lo, hi] = mesh.bbox
@@ -115,11 +160,13 @@ export default function App() {
 
   // --- Geometrie ---------------------------------------------------------------
   // base = false: geänderte Geometrie neu vernetzen (Original und Änderungen bleiben)
-  async function loadGeometry(path, size, keepSetup = false, base = true) {
+  async function loadGeometry(path, size, keepSetup = false, base = true, refineOverride = null) {
     setBusy('Vernetze Geometrie …')
     setError(null)
     try {
-      const m = await api.openStep(path, size ? Number(size) : null)
+      const ref = refineOverride ?? (keepSetup ? currentRefine(size) : [])
+      const m = await api.openStep(path, size ? Number(size) : null, false, ref)
+      setMeshRefineKey(JSON.stringify(ref))
       setMesh(m)
       setMeshSize(String(Number(m.mesh_size.toPrecision(3))))
       setResult(null)
@@ -170,7 +217,7 @@ export default function App() {
       const d = await api.loadProject()
       if (!d) return
       if (d.format !== 'projekt-fem') throw new Error('Keine Projekt-FEM-Datei')
-      const m = await loadGeometry(d.step, d.meshSize, true)
+      const m = await loadGeometry(d.step, d.meshSize, true, true, [])
       if (!m) return
       const ops = d.geoOps ?? []
       setGeoOps(ops)
@@ -437,8 +484,10 @@ export default function App() {
     setDrawing(null)
     setGeoPick(false)
     try {
-      const g = act.length ? await api.modifyGeometry(stepPath, payload, Number(meshSize) || null) : null
-      const m = g ? g.mesh : await api.openStep(stepPath, Number(meshSize) || null)
+      const ref = currentRefine(meshSize)
+      const g = act.length ? await api.modifyGeometry(stepPath, payload, Number(meshSize) || null, ref) : null
+      const m = g ? g.mesh : await api.openStep(stepPath, Number(meshSize) || null, false, ref)
+      setMeshRefineKey(JSON.stringify(ref))
       // Lager und Lasten auf die neuen Flächennummern umstellen
       const map = remapSurfaces(mesh.surfaces, m.surfaces)
       const warn = []
@@ -685,7 +734,7 @@ export default function App() {
                       </div>
                     </label>
                     <button
-                      className={'btn' + (Number(meshSize) !== Number(mesh.mesh_size.toPrecision(3)) ? ' primary' : '')}
+                      className={'btn' + (Number(meshSize) !== Number(mesh.mesh_size.toPrecision(3)) || JSON.stringify(currentRefine(meshSize)) !== meshRefineKey ? ' primary' : '')}
                       onClick={() => loadGeometry(geoStep ?? stepPath, meshSize, true, !geoStep)}
                     >
                       <Grid3x3 size={15} /> Neu vernetzen
@@ -699,6 +748,13 @@ export default function App() {
                   <label className="check">
                     <input type="checkbox" checked={showMesh} onChange={(e) => setShowMesh(e.target.checked)} /> Netz anzeigen
                   </label>
+                  <label className="check">
+                    <input type="checkbox" checked={refineRegions} onChange={(e) => setRefineRegions(e.target.checked)} /> Netz in Wirkbereichen
+                    automatisch verfeinern
+                  </label>
+                  {JSON.stringify(currentRefine(meshSize)) !== meshRefineKey && (
+                    <p className="hint warn-text">Wirkbereiche oder Füllung geändert – „Neu vernetzen“, damit das Netz dort passend fein wird.</p>
+                  )}
                 </Section>
               )}
 
@@ -1072,7 +1128,15 @@ export default function App() {
           {busy && (
             <div className="busy">
               <Loader2 size={22} className="spin" />
-              {busy}
+              <div className="busy-text">
+                <div>{busy}</div>
+                {progressInfo && <div className="busy-detail">{progressInfo.text}</div>}
+                {progressInfo?.fraction != null && (
+                  <div className="progress-bar">
+                    <div style={{ width: `${Math.round(100 * progressInfo.fraction)}%` }} />
+                  </div>
+                )}
+              </div>
             </div>
           )}
           {error && (

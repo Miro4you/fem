@@ -19,7 +19,8 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use crate::{modify_geometry_impl, open_step_impl, solve_impl, write_vtu_impl, AppState, Setup};
+use crate::{modify_geometry_impl, open_step_impl, progress_impl, solve_impl, write_vtu_impl, AppState, Setup};
+use fem_core::gmsh::Refine;
 
 pub const DEFAULT_PORT: u16 = 8790;
 /// Höchstens so viele gleichzeitige Browser-Sitzungen (älteste fliegt raus)
@@ -150,6 +151,7 @@ impl Running {
 fn router(shared: Shared) -> Router {
     let api = Router::new()
         .route("/gmsh", get(api_gmsh))
+        .route("/progress", get(api_progress))
         .route("/upload", post(api_upload))
         .route("/file", get(api_file))
         .route("/open_step", post(api_open_step))
@@ -205,6 +207,10 @@ async fn check_key(
     next.run(req).await
 }
 
+async fn api_progress(State(s): State<Shared>, headers: HeaderMap) -> Json<Option<crate::ProgressView>> {
+    Json(progress_impl(&s.session(&headers)))
+}
+
 async fn api_gmsh() -> Json<Option<String>> {
     Json(fem_core::gmsh::find_gmsh().map(|p| p.display().to_string()))
 }
@@ -258,6 +264,8 @@ struct OpenStep {
     path: String,
     size: Option<f64>,
     linear: Option<bool>,
+    #[serde(default)]
+    refine: Vec<Refine>,
 }
 
 async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<OpenStep>) -> ApiResult<Response> {
@@ -265,7 +273,7 @@ async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Jso
         return Err(bad("Nur STEP-Dateien (.step, .stp)"));
     }
     let state = s.session(&headers);
-    let view = tokio::task::spawn_blocking(move || open_step_impl(&state, &a.path, a.size, a.linear == Some(true)))
+    let view = tokio::task::spawn_blocking(move || open_step_impl(&state, &a.path, a.size, a.linear == Some(true), &a.refine))
         .await
         .map_err(bad)?
         .map_err(bad)?;
@@ -277,6 +285,8 @@ struct ModifyArgs {
     base: String,
     ops: Vec<fem_core::geometry::GeoOp>,
     size: Option<f64>,
+    #[serde(default)]
+    refine: Vec<Refine>,
 }
 
 async fn api_modify_geometry(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<ModifyArgs>) -> ApiResult<Response> {
@@ -284,7 +294,7 @@ async fn api_modify_geometry(State(s): State<Shared>, headers: HeaderMap, Json(a
         return Err(bad("Nur STEP-Dateien (.step, .stp)"));
     }
     let state = s.session(&headers);
-    let view = tokio::task::spawn_blocking(move || modify_geometry_impl(&state, &a.base, &a.ops, a.size))
+    let view = tokio::task::spawn_blocking(move || modify_geometry_impl(&state, &a.base, &a.ops, a.size, &a.refine))
         .await
         .map_err(bad)?
         .map_err(bad)?;
