@@ -202,6 +202,38 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
     (view, disp_nodes)
 }
 
+// --- Eigene Werkstoffe (Datei im Konfigurationsordner) ----------------------------------
+
+fn user_materials_path() -> Result<PathBuf, String> {
+    Ok(server::config_dir().ok_or("Kein Konfigurationsordner gefunden")?.join("werkstoffe.json"))
+}
+
+pub fn user_materials_load() -> Result<serde_json::Value, String> {
+    match std::fs::read_to_string(user_materials_path()?) {
+        Ok(t) => serde_json::from_str(&t).map_err(|e| e.to_string()),
+        Err(_) => Ok(serde_json::json!([])),
+    }
+}
+
+pub fn user_materials_save(v: &serde_json::Value) -> Result<(), String> {
+    if !v.is_array() {
+        return Err("Werkstoffliste erwartet".into());
+    }
+    let p = user_materials_path()?;
+    std::fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(p, serde_json::to_string_pretty(v).unwrap()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_user_materials() -> Result<serde_json::Value, String> {
+    user_materials_load()
+}
+
+#[tauri::command]
+fn save_user_materials(list: serde_json::Value) -> Result<(), String> {
+    user_materials_save(&list)
+}
+
 #[tauri::command]
 fn progress(state: tauri::State<'_, AppState>) -> Option<ProgressView> {
     progress_impl(state.inner())
@@ -354,6 +386,8 @@ pub struct ResultView {
     max_sigma1: Extreme,
     min_sigma3: Extreme,
     safety: Option<f64>,
+    /// gefülltes Volumen [mm³] (für die Masse; mit Infill Wand + Kern × Füllgrad)
+    solid_volume: f64,
     /// Sicherheit gegen Bruch (Rm)
     safety_break: Option<f64>,
     /// Auslastung je Anzeigeknoten (1 = Festigkeitsgrenze), bei Schichtaufbau richtungsabhängig
@@ -504,6 +538,7 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             min_sigma3: ext(s3n, s3),
             safety,
             safety_break: res.safety_break,
+            solid_volume: res.solid_volume,
             utilization: res.utilization.as_ref().map(|u| disp_nodes.iter().map(|&n| u[n] as f32).collect()),
             utilization_layers: res.utilization_layers.as_ref().map(|u| disp_nodes.iter().map(|&n| u[n] as f32).collect()),
             max_utilization: res.max_utilization().map(|(n, u)| ext(n, u)),
@@ -781,6 +816,14 @@ fn save_text(path: String, content: String) -> Result<(), String> {
     std::fs::write(path, content).map_err(|e| e.to_string())
 }
 
+/// Binärdatei schreiben (Inhalt Base64, z. B. PDF-Bericht)
+#[tauri::command]
+fn save_bytes(path: String, data: String) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+    std::fs::write(path, bytes).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn load_text(path: String) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| e.to_string())
@@ -809,6 +852,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             gmsh_path,
             progress,
+            load_user_materials,
+            save_user_materials,
             open_step,
             modify_geometry,
             copy_step,
@@ -820,6 +865,7 @@ pub fn run() {
             topo_stl,
             export_vtu,
             save_text,
+            save_bytes,
             load_text,
             server_status,
             server_start,

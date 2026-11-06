@@ -345,7 +345,19 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         }
     };
 
+    // gefülltes Volumen (für die Masse)
+    let solid_volume: f64 = (0..mesh.n_elems())
+        .map(|e| {
+            let v = crate::element::tet_volume(&mesh.elem_coords(e)[..4]).abs();
+            match (&zones, &model.material.infill) {
+                (Some((f, _, _)), Some(inf)) => v * (f[e] + (1.0 - f[e]) * inf.density),
+                _ => v,
+            }
+        })
+        .sum();
+
     Ok(Results {
+        solid_volume,
         utilization_infill,
         shell_fraction,
         utilization,

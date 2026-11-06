@@ -124,6 +124,23 @@ export async function exportTopoStl(threshold, name) {
   download(await http('/topo_stl?threshold=' + threshold, { raw: true }), name)
 }
 
+/// eigene Werkstoffe (Datei auf dem rechnenden Rechner)
+export const loadUserMaterials = () => (isDesktop ? invoke('load_user_materials') : http('/materials'))
+export const saveUserMaterials = (list) =>
+  isDesktop ? invoke('save_user_materials', { list }) : http('/materials', { method: 'POST', json: list })
+
+/// Datei (Blob) speichern: Desktop mit Dialog, Browser als Download
+export async function saveBlob(blob, name, filterName, ext) {
+  if (isDesktop) {
+    const p = await save({ defaultPath: name, filters: [{ name: filterName, extensions: [ext] }] })
+    if (!p) return
+    const buf = new Uint8Array(await blob.arrayBuffer())
+    await invoke('save_bytes', { path: p, data: toBase64(buf) })
+    return
+  }
+  download(blob, name)
+}
+
 export const solve = (setup) => (isDesktop ? invoke('solve', { setup }) : http('/solve', { method: 'POST', json: { setup } }))
 
 /// STEP auswählen → Pfad auf dem rechnenden Rechner (im Browser: hochladen)

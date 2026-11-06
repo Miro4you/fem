@@ -32,6 +32,8 @@ pub struct Results {
     pub utilization_infill: Option<Vec<f64>>,
     /// 3D-Druck mit Füllung: Wandanteil je Knoten (1 = volle Wand/Deckschicht, 0 = Infill)
     pub shell_fraction: Option<Vec<f64>>,
+    /// tatsächlich mit Material gefülltes Volumen [mm³] (mit Infill: Wand + Kern × Füllgrad)
+    pub solid_volume: f64,
 }
 
 /// Auslastung je Knoten: (gesamt, Schichthaftung). Gesamt = max(σv / R_xy, Schichthaftung).

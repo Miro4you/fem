@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { CadControls } from './CadControls.js'
 import { Box, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react'
@@ -34,6 +34,7 @@ export default function Viewport({
   onAim,
   layers,
   topoShape,
+  ref,
 }) {
   const host = useRef(null)
   const ctx = useRef(null)
@@ -41,6 +42,50 @@ export default function Viewport({
   cb.current = { onPick, onProbe, pickable, mode, drawing, planeNormal, onDraw, aim, onAim }
   const [hoverTag, setHoverTag] = useState(null)
   const [labels, setLabels] = useState([])
+
+  // Bild des aktuellen Zustands (für den Bericht), weißer Hintergrund
+  useImperativeHandle(ref, () => ({
+    snapshot(width = 1400) {
+      const s = ctx.current
+      s.renderer.render(s.scene, s.camera)
+      const src = s.renderer.domElement
+      const h = Math.round((width * src.height) / src.width)
+      const c = document.createElement('canvas')
+      c.width = width
+      c.height = h
+      const g = c.getContext('2d')
+      g.fillStyle = '#ffffff'
+      g.fillRect(0, 0, width, h)
+      g.drawImage(src, 0, 0, width, h)
+      // auf den Inhalt zuschneiden (nicht-weiße Pixel) mit etwas Rand
+      const px = g.getImageData(0, 0, width, h).data
+      let x0 = width, y0 = h, x1 = 0, y1 = 0
+      for (let yy = 0; yy < h; yy += 2)
+        for (let xx = 0; xx < width; xx += 2) {
+          const i = 4 * (yy * width + xx)
+          if (px[i] < 245 || px[i + 1] < 245 || px[i + 2] < 245) {
+            if (xx < x0) x0 = xx
+            if (xx > x1) x1 = xx
+            if (yy < y0) y0 = yy
+            if (yy > y1) y1 = yy
+          }
+        }
+      if (x1 <= x0 || y1 <= y0) return { data: c.toDataURL('image/jpeg', 0.9), width, height: h }
+      const pad = Math.round(0.04 * width)
+      x0 = Math.max(0, x0 - pad)
+      y0 = Math.max(0, y0 - pad)
+      x1 = Math.min(width, x1 + pad)
+      y1 = Math.min(h, y1 + pad)
+      const out = document.createElement('canvas')
+      out.width = x1 - x0
+      out.height = y1 - y0
+      const g2 = out.getContext('2d')
+      g2.fillStyle = '#ffffff'
+      g2.fillRect(0, 0, out.width, out.height)
+      g2.drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height)
+      return { data: out.toDataURL('image/jpeg', 0.9), width: out.width, height: out.height }
+    },
+  }))
 
   // --- Grundaufbau (einmalig) ---------------------------------------------
   useEffect(() => {

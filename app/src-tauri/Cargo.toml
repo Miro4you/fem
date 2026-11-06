@@ -24,3 +24,4 @@ tower-http = { version = "0.6", features = ["compression-gzip"] }
 rust-embed = "8"
 mime_guess = "2"
 getrandom = "0.3"
+base64 = "0.22"

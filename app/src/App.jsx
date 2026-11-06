@@ -9,8 +9,10 @@ import Legend from './components/Legend.jsx'
 import * as api from './api.js'
 import {
   MATERIALS, MATERIAL_GROUPS, materialFromPreset, materialPayload, INFILL_PATTERNS, DEFAULT_INFILL, infillFractions, shellThickness,
+  presetFromMaterial,
 } from './materials.js'
 import { fmt, fmtVec } from './format.js'
+import { buildReport } from './report.js'
 import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES, regionRefine } from './region.js'
 import { GEO_OPS, opFromSurface, newSketchOp, opPayload, opProblem, remapSurfaces, axisLabel } from './geoops.js'
 
@@ -92,6 +94,9 @@ export default function App() {
   const [geoWarnings, setGeoWarnings] = useState([])
   // Ergebnis zum Vergleichen (z. B. Original vor den Geometrieänderungen)
   const [reference, setReference] = useState(null)
+  // eigene Werkstoffe und Festigkeitsnachweis
+  const [userMaterials, setUserMaterials] = useState([])
+  const [proof, setProof] = useState({ sF: '1.5', sB: '2', uMax: '' })
   // Leichtbau-Vorschlag: { view, threshold, show, surface }
   const [topo, setTopo] = useState(null)
   const [result, setResult] = useState(null)
@@ -120,7 +125,32 @@ export default function App() {
 
   useEffect(() => {
     api.gmshPath().then(setGmsh).catch(() => setGmsh(null))
+    api.loadUserMaterials().then((l) => setUserMaterials(Array.isArray(l) ? l : [])).catch(() => {})
   }, [])
+
+  async function saveUserMaterial() {
+    const name = window.prompt('Name für den eigenen Werkstoff:', material.name.startsWith('Benutzerdefiniert') ? '' : material.name + ' (eigen)')
+    if (!name) return
+    const list = [...userMaterials.filter((m) => m.name !== name), presetFromMaterial(material, name)]
+    try {
+      await api.saveUserMaterials(list)
+      setUserMaterials(list)
+      setMaterial({ ...material, name })
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  async function deleteUserMaterial(name) {
+    if (!window.confirm(`Eigenen Werkstoff „${name}“ löschen?`)) return
+    const list = userMaterials.filter((m) => m.name !== name)
+    try {
+      await api.saveUserMaterials(list)
+      setUserMaterials(list)
+    } catch (e) {
+      setError(String(e))
+    }
+  }
 
   // jede Änderung am Modell macht ein vorhandenes Ergebnis veraltet
   useEffect(() => {
@@ -228,7 +258,7 @@ export default function App() {
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
     if (!stepPath) return
-    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, geoOps }
+    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, geoOps, proof }
     try {
       await api.saveProject(stepPath, data)
     } catch (e) {
@@ -261,6 +291,7 @@ export default function App() {
         }
       }
       setMaterial({ ...materialFromPreset(MATERIALS[0]), ...d.material, infill: { ...DEFAULT_INFILL, ...(d.material?.infill ?? {}) } })
+      if (d.proof) setProof(d.proof)
       setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
       setLoads(d.loads.map((l) => ({ ...newLoad(), ...l, id: nextId++ })))
       setActive(null)
@@ -768,6 +799,147 @@ export default function App() {
   }, [display, quantity, probe])
 
   const mode = view === 'result' && display ? 'result' : 'setup'
+  // aktueller Stand für asynchrone Abläufe (Bericht)
+  const displayRef = useRef(null)
+  displayRef.current = display
+  const viewRef = useRef(null)
+
+  // --- PDF-Bericht ----------------------------------------------------------------------
+  async function onReport() {
+    if (!result) return
+    const prev = { view, quantity }
+    const wait = () => new Promise((r) => setTimeout(r, 400))
+    setBusy('Bericht erstellen …')
+    setActive(null)
+    setDrawing(null)
+    setAim(null)
+    try {
+      const images = []
+      setView('setup')
+      await wait()
+      images.push({ title: 'Modell mit Lagern und Lasten', ...viewRef.current.snapshot() })
+      setView('result')
+      const qs = ['von_mises', 'disp']
+      if (result.utilization) qs.push('safety')
+      if (result.utilization_layers) qs.push('safety_layers')
+      if (result.utilization_infill) qs.push('safety_infill')
+      for (const q of qs) {
+        setQuantity(q)
+        await wait()
+        await wait()
+        const d = displayRef.current
+        const Q = QUANTITIES[q]
+        images.push({
+          title: `${Q.label} (${Q.hint})`,
+          ...viewRef.current.snapshot(),
+          legend: d && { min: d.min, max: d.max, reverse: d.reverse, unit: Q.unit, label: Q.label + (d.scale ? ` – Verformung ${fmt(d.scale)}-fach überhöht` : '') },
+        })
+      }
+      setQuantity(prev.quantity)
+      setView(prev.view)
+      const blob = buildReport(reportData(images))
+      const name = (stepPath ?? 'bauteil').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') + '_bericht.pdf'
+      await api.saveBlob(blob, name, 'PDF-Bericht', 'pdf')
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function reportData(images) {
+    const file = (stepPath ?? 'Bauteil').split(/[\\/]/).pop()
+    const [lo, hi] = mesh.bbox
+    const rho = Number(material.rho)
+    const mass = rho > 0 ? (result.solid_volume / 1000) * rho : null
+    const kindText = { fixed: 'fest eingespannt', frictionless: 'reibungsfreie Auflage', axes: 'Richtungen gesperrt', cylindrical: 'zylindrische Lagerung' }
+    const regionText = (r) => (r ? ` – nur im Bereich ${SHAPES[r.shape] ?? r.shape}` : '')
+    const supportsRows = supports.map((x, i) => {
+      let t = kindText[x.kind] ?? x.kind
+      if (x.kind === 'axes') t += ' (' + ['x', 'y', 'z'].filter((a) => x.axes[a]).join(', ') + ')'
+      if (x.kind === 'cylindrical') {
+        const c = { radial: true, axial: true, tangential: false, ...x.cyl }
+        t += ` (${c.radial ? 'radial fest' : 'radial frei'}, ${c.axial ? 'axial fest' : 'axial frei'}, ${c.tangential ? 'Drehung gesperrt' : 'drehbar'})`
+      }
+      return [`Lager ${i + 1}`, `${t}, ${x.surfaces.length} Fläche(n)${regionText(x.region)}`]
+    })
+    const loadsRows = loads.map((l, i) => {
+      let t
+      if (l.kind === 'pressure') t = `Druck ${fmt(Number(l.pressure))} MPa`
+      else if (l.kind === 'moment') t = `Moment (${fmtVec(l.moment.map(Number))}) N·m`
+      else t = `${l.kind === 'bearing' ? 'Lagerlast' : 'Kraft'} (${fmtVec(l.force.map(Number))}) N, Betrag ${fmt(Math.hypot(...l.force.map(Number)))} N`
+      return [`Last ${i + 1}`, `${t}, ${l.surfaces.length} Fläche(n)${regionText(l.region)}`]
+    })
+    const mat = [
+      ['Werkstoff', material.name],
+      ['E-Modul / ν', `${fmt(Number(material.E))} MPa / ${fmt(Number(material.nu))}`],
+      ['Re bzw. Rp0,2 / Rm', `${material.yield !== '' && material.yield != null ? fmt(Number(material.yield)) + ' MPa' : '–'} / ${material.tensile !== '' && material.tensile != null ? fmt(Number(material.tensile)) + ' MPa' : '–'}`],
+    ]
+    if (rho > 0) mat.push(['Dichte', `${fmt(rho)} g/cm³`])
+    if (material.layered) {
+      mat.push(['3D-Druck: quer zu den Schichten', `E ${fmt(Number(material.E_z))} MPa, Re/Rp ${material.yield_z !== '' ? fmt(Number(material.yield_z)) : '–'}, Rm ${material.tensile_z !== '' ? fmt(Number(material.tensile_z)) : '–'} MPa`])
+      mat.push(['Aufbaurichtung', dirLabel(material.buildDir ?? [0, 0, 1])])
+      const inf = material.infill
+      if (inf?.on) {
+        const t = shellThickness(inf)
+        mat.push(['Füllung', `${INFILL_PATTERNS[inf.pattern].label}, ${fmt(Number(inf.percent))} %`])
+        mat.push(['Wände / Deck / Boden', `${inf.walls} × ${fmt(Number(inf.lineWidth))} mm = ${fmt(t.wall)} mm / ${fmt(t.top)} mm / ${fmt(t.bottom)} mm`])
+      }
+    }
+    const meshLines = [
+      ['Datei', file],
+      ['Abmessungen', fmtVec(hi.map((v, k) => v - lo[k])) + ' mm'],
+      ['Volumen', `${fmt(mesh.volume / 1000)} cm³` + (Math.abs(result.solid_volume - mesh.volume) > 1e-6 * mesh.volume ? ` (gefüllt ${fmt(result.solid_volume / 1000)} cm³)` : '')],
+      ...(mass != null ? [['Masse', mass >= 1000 ? `${fmt(mass / 1000)} kg` : `${fmt(mass)} g`]] : []),
+      ['Netz', `${mesh.elements.toLocaleString('de-DE')} Elemente TET10, ${mesh.nodes.toLocaleString('de-DE')} Knoten, Elementgröße ${fmt(mesh.mesh_size)} mm`],
+      ['Gleichungen', `${result.equations.toLocaleString('de-DE')} Unbekannte, ${result.iterations != null ? `iterativ (${result.iterations} Iterationen)` : 'direkt'}, ${fmt(result.seconds)} s`],
+    ]
+    const act = geoOps.filter((o) => o.enabled)
+    if (act.length && geoStep) meshLines.push(['Geometrie geändert', act.map((o) => GEO_OPS[o.op]).join(', ')])
+    const res = [
+      ['max. Vergleichsspannung (von Mises)', `${fmt(result.max_von_mises.value)} MPa bei (${fmtVec(result.max_von_mises.at)}) mm`],
+      ['max. Verschiebung', `${fmt(result.max_displacement.value)} mm bei (${fmtVec(result.max_displacement.at)}) mm`],
+      ['größte / kleinste Hauptspannung', `${fmt(result.max_sigma1.value)} / ${fmt(result.min_sigma3.value)} MPa`],
+    ]
+    if (result.safety != null) res.push(['Sicherheit', `S = ${fmt(result.safety)}${result.governing ? ` (maßgeblich: ${result.governing})` : ''}`])
+    if (result.safety_break != null) res.push(['Sicherheit gegen Bruch', `S = ${fmt(result.safety_break)}`])
+    result.reactions.forEach((r, i) => res.push([`Lagerkraft Lager ${i + 1}`, `(${fmtVec(clean(r, Math.hypot(...result.total_load) || 1))}) N`]))
+    const ref = Math.hypot(...result.total_load) || 1
+    res.push(['Summe Lasten / Lager', `(${fmtVec(clean(result.total_load, ref))}) N / (${fmtVec(clean(result.total_reaction, ref))}) N`])
+    const pr = proofRows(result, proof).map(([lab, have, need, a]) => [
+      lab,
+      lab === 'Verformung' ? `${fmt(have)} mm` : `S = ${fmt(have)}`,
+      lab === 'Verformung' ? `<= ${fmt(need)} mm` : `>= ${fmt(need)}`,
+      `${(100 * a).toFixed(0)} %${a <= 1 ? ' ok' : ' NICHT ERFÜLLT'}`,
+    ])
+    const prow = proofRows(result, proof)
+    const verdict = prow.length
+      ? { ok: prow.every((r) => r[3] <= 1), text: prow.every((r) => r[3] <= 1) ? 'Festigkeitsnachweis erfüllt' : 'Festigkeitsnachweis NICHT erfüllt' }
+      : result.safety != null
+        ? { ok: result.safety >= 1, text: `Sicherheit S = ${fmt(result.safety)}` }
+        : null
+    return {
+      title: `Festigkeitsberechnung ${file.replace(/\.(step|stp)$/i, '')}`,
+      file,
+      date: new Date().toLocaleDateString('de-DE'),
+      verdict,
+      meshLines,
+      materialLines: mat,
+      supports: supportsRows,
+      loads: loadsRows,
+      resultLines: res,
+      proofRows: pr,
+      warnings: result.warnings,
+      images,
+      notes: [
+        'Linear-elastische Rechnung mit kleinen Verformungen; oberhalb der Streckgrenze bzw. Festigkeit sind die Werte nicht realistisch.',
+        'Spannungsspitzen an starren Lagern und scharfen Innenecken sind Singularitäten und wachsen mit feinerem Netz – dort nicht bewerten.',
+        'Spannungen sind über die angrenzenden Elemente gemittelt (Knotenwerte). Für belastbare Werte eine Netzstudie (Parameterstudie Netzgröße) durchführen.',
+        ...(material.layered ? ['3D-Druck: Werkstoffwerte sind Richtwerte bzw. Eingaben; Infill als Ersatzwerkstoff (Näherung). Kalibrierung mit eigenem Zugstab empfohlen.'] : []),
+        'Rechenkern geprüft an Lehrbuchfällen (Zugstab, Kragbalken, Lochplatte, Torsion, Gelenkbalken, 3D-Druck), siehe „projekt-fem validieren“.',
+      ],
+    }
+  }
   const fileName = stepPath?.split(/[\\/]/).pop()
 
   return (
@@ -871,9 +1043,9 @@ export default function App() {
               {mesh && (
                 <Section n={3} title="Werkstoff" done>
                   <select
-                    value={MATERIALS.some((m) => m.name === material.name) ? material.name : ''}
+                    value={[...MATERIALS, ...userMaterials].some((m) => m.name === material.name) ? material.name : ''}
                     onChange={(e) => {
-                      const m = MATERIALS.find((x) => x.name === e.target.value)
+                      const m = [...userMaterials, ...MATERIALS].find((x) => x.name === e.target.value)
                       setMaterial(m ? { ...materialFromPreset(m, material.buildDir), infill: material.infill ?? { ...DEFAULT_INFILL } } : { ...material, name: 'Benutzerdefiniert' })
                     }}
                   >
@@ -886,9 +1058,29 @@ export default function App() {
                         ))}
                       </optgroup>
                     ))}
+                    {userMaterials.length > 0 && (
+                      <optgroup label="Eigene Werkstoffe">
+                        {userMaterials.map((m) => (
+                          <option key={m.name} value={m.name}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                     <option value="">Benutzerdefiniert</option>
                   </select>
                   <MaterialFields material={material} setMaterial={setMaterial} />
+                  <div className="row mat-actions">
+                    <button className="link" onClick={saveUserMaterial}>
+                      <Save size={13} /> Als eigenen Werkstoff speichern
+                    </button>
+                    {userMaterials.some((m) => m.name === material.name) && (
+                      <button className="link" onClick={() => deleteUserMaterial(material.name)}>
+                        <Trash2 size={13} /> löschen
+                      </button>
+                    )}
+                  </div>
+                  <ProofFields proof={proof} setProof={setProof} />
                   <Calibration material={material} setMaterial={setMaterial} />
                   <label className="check">
                     <input type="checkbox" checked={!!material.layered} onChange={(e) => setMaterial({ ...material, layered: e.target.checked, name: material.layered === e.target.checked ? material.name : 'Benutzerdefiniert' })} />
@@ -1140,8 +1332,10 @@ export default function App() {
                 setShowMesh={setShowMesh}
                 stale={resultStale}
                 onExport={onExportVtu}
+                onReport={onReport}
                 cut={cut}
                 setCut={setCut}
+                proof={proof}
                 reference={reference}
                 current={summary(result, mesh, geoStep ? 'Geändert' : 'Aktuell')}
                 onPin={() => setReference(summary(result, mesh, geoStep ? 'Geändert' : 'Vorher'))}
@@ -1163,6 +1357,7 @@ export default function App() {
             </div>
           )}
           <Viewport
+            ref={viewRef}
             mesh={mesh}
             mode={mode}
             surfaceTint={surfaceTint}
@@ -1340,7 +1535,9 @@ function Compare({ reference, current, onUnpin }) {
   )
 }
 
-function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, reference, current, onPin, onUnpin, cut, setCut }) {
+function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, onReport, reference, current, onPin, onUnpin, cut, setCut, proof }) {
+  const rho = Number(material.rho)
+  const massG = rho > 0 ? (result.solid_volume / 1000) * rho : null
   const sf = result.safety
   const sfClass = sf == null ? '' : sf >= 1.5 ? 'good' : sf >= 1 ? 'ok' : 'bad'
   const balance = Math.hypot(...result.total_load.map((v, k) => v + result.total_reaction[k]))
@@ -1381,7 +1578,9 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
           </div>
         </div>
       )}
+      <ProofCard result={result} proof={proof} />
       <div className="card">
+        {massG != null && <Stat label="Masse" value={massG >= 1000 ? `${fmt(massG / 1000)} kg` : `${fmt(massG)} g`} />}
         <Stat label="max. Vergleichsspannung" value={`${fmt(result.max_von_mises.value)} MPa`} />
         <Stat label="max. Verschiebung" value={`${fmt(result.max_displacement.value)} mm`} />
         <Stat label="größte Hauptspannung σ1" value={`${fmt(result.max_sigma1.value)} MPa`} />
@@ -1454,6 +1653,9 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
         {result.equations.toLocaleString('de-DE')} Unbekannte, gerechnet in {fmt(result.seconds)} s
         {result.iterations != null && ` (iterativer Löser, ${result.iterations} Iterationen)`}
       </p>
+      <button className="btn wide primary" onClick={onReport} disabled={stale}>
+        <Download size={15} /> Bericht als PDF
+      </button>
       <button className="btn wide" onClick={onExport}>
         <Download size={15} /> Ergebnis für ParaView exportieren (.vtu)
       </button>
@@ -1509,6 +1711,7 @@ function MaterialFields({ material: m, setMaterial }) {
         <div className="grid3">
           <NumField label="E-Modul" unit="MPa" value={m.E} onChange={set('E')} />
           <NumField label="ν" value={m.nu} onChange={set('nu')} />
+          <NumField label="Dichte" unit="g/cm³" value={m.rho ?? ''} onChange={set('rho')} />
         </div>
         <div className="grid3">
           <NumField label="Re / Rp0,2" unit="MPa" value={m.yield ?? ''} onChange={set('yield')} />
@@ -1536,12 +1739,77 @@ function MaterialFields({ material: m, setMaterial }) {
       </div>
       <div className="grid3">
         <NumField label="ν" value={m.nu} onChange={set('nu')} />
+        <NumField label="Dichte" unit="g/cm³" value={m.rho ?? ''} onChange={set('rho')} />
       </div>
       <p className="hint">
         Re/Rp leer lassen, wenn es keine ausgeprägte Streckgrenze gibt (Kunststoffe) – dann wird mit Rm gerechnet. Richtwerte gelten für
         100 % Füllung; bei weniger Füllung bzw. wenigen Wandlinien sind die Werte deutlich kleiner.
       </p>
     </>
+  )
+}
+
+// Festigkeitsnachweis: erforderliche Sicherheiten, zulässige Verformung
+function ProofFields({ proof, setProof }) {
+  const set = (k) => (v) => setProof({ ...proof, [k]: v })
+  return (
+    <div className="print-orient">
+      <span className="mat-head">Festigkeitsnachweis – erforderlich:</span>
+      <div className="grid3">
+        <NumField label="Sicherheit Fließen" value={proof.sF} onChange={set('sF')} />
+        <NumField label="Sicherheit Bruch" value={proof.sB} onChange={set('sB')} />
+        <NumField label="Verformung max." unit="mm" value={proof.uMax} onChange={set('uMax')} />
+      </div>
+      <p className="hint">Typisch: Stahl statisch 1,5 / 2,0; Kunststoff- und Druckteile eher 2–3. Leer = nicht prüfen.</p>
+    </div>
+  )
+}
+
+function proofRows(result, proof) {
+  const rows = []
+  const sF = Number(proof.sF)
+  const sB = Number(proof.sB)
+  const uMax = Number(proof.uMax)
+  if (sF > 0 && result.safety != null) rows.push(['Fließen / Festigkeit', result.safety, sF, sF / result.safety])
+  if (sB > 0 && result.safety_break != null) rows.push(['Bruch (Rm)', result.safety_break, sB, sB / result.safety_break])
+  if (uMax > 0) rows.push(['Verformung', result.max_displacement.value, uMax, result.max_displacement.value / uMax])
+  return rows
+}
+
+function ProofCard({ result, proof }) {
+  const rows = proofRows(result, proof)
+  if (!rows.length) return null
+  const ok = rows.every((r) => r[3] <= 1)
+  return (
+    <div className={'proof ' + (ok ? 'good' : 'bad')}>
+      <div className="item-head">
+        {ok ? <Check size={15} /> : <TriangleAlert size={15} />}
+        <strong>Festigkeitsnachweis {ok ? 'erfüllt' : 'nicht erfüllt'}</strong>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th />
+            <th>vorhanden</th>
+            <th>erforderlich</th>
+            <th>Ausnutzung</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([lab, have, need, a]) => (
+            <tr key={lab}>
+              <td>{lab}</td>
+              <td>{lab === 'Verformung' ? `${fmt(have)} mm` : `S = ${fmt(have)}`}</td>
+              <td>{lab === 'Verformung' ? `≤ ${fmt(need)} mm` : `≥ ${fmt(need)}`}</td>
+              <td className={a <= 1 ? 'good' : 'bad'}>{(100 * a).toFixed(0)} %</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {result.warnings.some((w) => w.includes('direkt an einem Lager')) && (
+        <p className="hint">Achtung: Die höchste Spannung liegt an einem Lager (Singularität) – dort ist der Nachweis nicht aussagekräftig.</p>
+      )}
+    </div>
   )
 }
 

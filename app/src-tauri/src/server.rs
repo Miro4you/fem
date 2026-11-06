@@ -44,12 +44,17 @@ pub struct ServerConfig {
     pub autostart: bool,
 }
 
-fn config_path() -> Option<PathBuf> {
+/// Konfigurationsordner von Projekt-FEM (~/.config/projekt-fem)
+pub fn config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))?;
-    Some(base.join("projekt-fem").join("server.json"))
+    Some(base.join("projekt-fem"))
+}
+
+fn config_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("server.json"))
 }
 
 impl ServerConfig {
@@ -154,6 +159,7 @@ impl Running {
 fn router(shared: Shared) -> Router {
     let api = Router::new()
         .route("/gmsh", get(api_gmsh))
+        .route("/materials", get(api_materials_get).post(api_materials_set))
         .route("/progress", get(api_progress))
         .route("/upload", post(api_upload))
         .route("/file", get(api_file))
@@ -217,6 +223,14 @@ async fn check_key(
 
 async fn api_progress(State(s): State<Shared>, headers: HeaderMap) -> Json<Option<crate::ProgressView>> {
     Json(progress_impl(&s.session(&headers)))
+}
+
+async fn api_materials_get() -> ApiResult<Json<serde_json::Value>> {
+    crate::user_materials_load().map(Json).map_err(bad)
+}
+
+async fn api_materials_set(Json(v): Json<serde_json::Value>) -> ApiResult<Json<bool>> {
+    crate::user_materials_save(&v).map(|_| Json(true)).map_err(bad)
 }
 
 async fn api_gmsh() -> Json<Option<String>> {
