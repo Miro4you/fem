@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FolderOpen, Save, FileUp, Play, Plus, Trash2, MousePointerClick, Anchor, ArrowDownToLine,
   TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine, Wifi, Copy, Move3d,
-  Spline, SquarePlus, SquareMinus, CircleDot, Wrench, RotateCcw, Cable,
+  Spline, SquarePlus, SquareMinus, CircleDot, Wrench, RotateCcw, Cable, Pause, Video,
 } from 'lucide-react'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
@@ -148,6 +148,8 @@ export default function App() {
   const [view, setView] = useState('setup')
   const [quantity, setQuantity] = useState('von_mises')
   const [deform, setDeform] = useState('auto')
+  // Verformungsanimation (Laststeigerung 0 → 100 % → 0) und Videoaufnahme
+  const [anim, setAnim] = useState({ on: false, speed: 1, recording: false })
   const [showMesh, setShowMesh] = useState(false)
   // Netz in Wirkbereichen verfeinern; Schlüssel der Verfeinerung beim letzten Vernetzen
   const [refineRegions, setRefineRegions] = useState(true)
@@ -1207,8 +1209,38 @@ export default function App() {
     const auto = umax > 0 ? (0.05 * diag) / umax : 0
     const scale = deform === 'off' ? 0 : deform === 'true' ? 1 : auto
     const cutView = cutData && cutValues && cutPlane ? { ...cutData, values: cutValues, plane: cutPlane } : null
-    return { values, min, max, imin, imax, reverse, displacement: result.displacement, scale, auto, cut: cutView }
-  }, [result, mesh, quantity, deform, diag, cutData, cutPlane, showModes, modes])
+    // lastproportionale Größen wachsen in der Animation mit (Sicherheit nicht)
+    const rampColors = ['von_mises', 'disp', 'sigma1', 'sigma3', 'usage'].includes(quantity)
+    return {
+      values, min, max, imin, imax, reverse, displacement: result.displacement, scale, auto, cut: cutView,
+      animate: anim.on || anim.recording ? 'ramp' : false, animSpeed: anim.speed, rampColors,
+    }
+  }, [result, mesh, quantity, deform, diag, cutData, cutPlane, showModes, modes, anim])
+
+  // Video der Verformung (zwei Durchläufe) mit Farbskala und Kennwerten
+  async function onVideo() {
+    if (!result || !viewRef.current) return
+    const q = QUANTITIES[quantity]
+    const d = display
+    setAnim((a) => ({ ...a, recording: true }))
+    setError(null)
+    try {
+      await new Promise((r) => setTimeout(r, 100))
+      const seconds = 2 / (0.35 * anim.speed)
+      const lines = [
+        `${material.name} · σv max ${fmt(result.max_von_mises.value)} MPa · u max ${fmt(result.max_displacement.value)} mm${result.safety != null ? ` · S = ${fmt(result.safety)}` : ''}`,
+        deform === 'auto' ? `Verformung ${fmt(d.auto)}-fach überhöht` : deform === 'true' ? 'Verformung maßstäblich' : '',
+      ]
+      const legend = d && q ? { title: `${q.label}${q.unit ? ` [${q.unit}]` : ''}`, min: fmt(d.min), max: fmt(d.max), reverse: d.reverse } : null
+      const { blob, ext } = await viewRef.current.record({ seconds, title: (stepPath ?? 'Bauteil').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, ''), lines, legend })
+      const name = (stepPath ?? 'ergebnis').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') + '-verformung.' + ext
+      await api.saveBlob(blob, name, 'Video', ext)
+    } catch (e) {
+      setError(String(e.message ?? e))
+    } finally {
+      setAnim((a) => ({ ...a, recording: false }))
+    }
+  }
 
   const markers = useMemo(() => {
     if (!display || display.modal) return []
@@ -1944,6 +1976,9 @@ export default function App() {
                 stale={resultStale}
                 onExport={onExportVtu}
                 onReport={onReport}
+                anim={anim}
+                setAnim={setAnim}
+                onVideo={onVideo}
                 onMathpad={onExportMathpad}
                 cut={cut}
                 setCut={setCut}
@@ -2159,7 +2194,7 @@ function Compare({ reference, current, onUnpin }) {
   )
 }
 
-function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, onReport, onMathpad, reference, current, onPin, onUnpin, cut, setCut, proof }) {
+function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, onReport, onMathpad, reference, current, onPin, onUnpin, cut, setCut, proof, anim, setAnim, onVideo }) {
   const rho = Number(material.rho)
   const massG = rho > 0 ? (result.solid_volume / 1000) * rho : null
   const sf = result.safety
@@ -2236,6 +2271,21 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
             Überhöht{display?.auto ? ` ×${fmt(display.auto)}` : ''}
           </button>
         </div>
+      </div>
+      <div className="anim-row">
+        <button className={'btn small' + (anim.on ? ' on' : '')} onClick={() => setAnim({ ...anim, on: !anim.on })} title="Last von 0 auf 100 % steigern und zurück">
+          {anim.on ? <Pause size={13} /> : <Play size={13} />} {anim.on ? 'Anhalten' : 'Animation'}
+        </button>
+        <div className="segmented small">
+          {[[0.5, '½×'], [1, '1×'], [2, '2×']].map(([v, l]) => (
+            <button key={v} className={anim.speed === v ? 'on' : ''} onClick={() => setAnim({ ...anim, speed: v })}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <button className="btn small" disabled={anim.recording} onClick={onVideo} title="Video der Verformung mit Farbskala speichern">
+          {anim.recording ? <Loader2 size={13} className="spin" /> : <Video size={13} />} {anim.recording ? 'Nimmt auf …' : 'Video'}
+        </button>
       </div>
       <label className="check">
         <input type="checkbox" checked={showMesh} onChange={(e) => setShowMesh(e.target.checked)} /> Netz anzeigen

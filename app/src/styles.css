@@ -243,6 +243,8 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .share-url { display: flex; align-items: center; gap: 6px; }
 .share-url code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 7px; }
 .cad-panel { width: 470px; }
+.anim-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.anim-row .btn.on { border-color: var(--accent); color: var(--accent); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .cad-panel .row input { flex: 1; min-width: 0; }
 .cad-section { display: flex; align-items: baseline; gap: 4px; margin-top: 4px; }

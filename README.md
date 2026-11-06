@@ -19,7 +19,7 @@ Bedienung auch im Browser über das Heimnetz.
 | **Geometrie & Netz** | STEP-Import, automatische Vernetzung (Gmsh, quadratische Tetraeder TET10), feiner an Bohrungen/Radien und in Lastbereichen, Netzgröße per Schieberegler |
 | **Lager** | fest, reibungsfrei/Symmetrie (auch schräge Flächen), Richtungen einzeln, zylindrisch (Bolzen/Gelenk) |
 | **Lasten** | Kraft (Komponenten oder Betrag + Richtung, im Bild ziehbar), Druck, Moment, Lagerlast (Bolzen/Welle), Strömung/Wind – jeweils auf ganzer Fläche oder nur in einem gezeichneten **Wirkbereich** (Kreis, Rechteck, Wellenabschnitt) |
-| **Ergebnisse** | Vergleichsspannung, Verschiebung, Hauptspannungen, Sicherheit, Materialausnutzung, Schnittansicht, Messpunkt, Lagerkräfte mit Gleichgewichtskontrolle, Warnungen (Singularität, Fließen, große Verformung) |
+| **Ergebnisse** | Vergleichsspannung, Verschiebung, Hauptspannungen, Sicherheit, Materialausnutzung, Schnittansicht, Messpunkt, **Verformungsanimation** (Last 0 → 100 %) und **Video-Export** mit Farbskala, Lagerkräfte mit Gleichgewichtskontrolle, Warnungen (Singularität, Fließen, große Verformung) |
 | **Nachweis & Bericht** | Werkstoffdatenbank (Stahl, Alu, Kunststoffe, Druckwerkstoffe, eigene), Masse, Festigkeitsnachweis mit erforderlichen Sicherheiten, PDF-Bericht, MathPad-Rechenblatt, ParaView-Export |
 | **3D-Druck** | Schichtaufbau mit Werten in und quer zu den Schichten, Aufbaurichtung frei optimieren (≈ 400 Richtungen) inkl. Überhänge, Wände + Infill (Gyroid, Gitter, Waben …), Kalibrierung mit eigenem Zugstab |
 | **Schweißnähte** | Spalte an Blechecken automatisch finden, Stumpf-/Kehlnaht, Nahtkraft und Nachweis nach EN 1993-1-8 (vereinfacht) |
@@ -80,6 +80,10 @@ Heimnetz-Freigabe einschalten, Adresse und Schlüssel stehen im Dialog „CAD“
 
 STEP öffnen → automatisch vernetzen → Werkstoff wählen → Lager und Lasten per Klick auf CAD-Flächen → Rechnen →
 farbige Ergebnisse mit Verformung, Maximum-Markierung, Messpunkt per Klick, Warnungen und Gleichgewichtskontrolle.
+**Animation** (unter „Verformung“): Die Last steigt von 0 auf 100 % und wieder zurück, Verformung und Farben wachsen
+mit (½×, 1×, 2× Geschwindigkeit). **Video** speichert zwei Durchläufe als WebM bzw. MP4 mit Bauteilname, Werkstoff,
+Kennwerten, Überhöhung und Farbskala – zum Zeigen und Weitergeben. (In der Linux-Desktop-App kann die Aufnahme je nach
+WebKit-Version fehlen; dann über die Heimnetz-Ansicht in Chrome/Firefox aufnehmen.)
 Projekte speichern/laden (`.fem.json`, im Browser mit eingebetteter STEP-Datei), Fortschrittsanzeige bei großen Netzen.
 
 **Wirkbereich:** Lasten und Lager können statt auf der ganzen Fläche nur auf einem Teil wirken. Den Bereich zieht man

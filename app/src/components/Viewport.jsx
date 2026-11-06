@@ -2,7 +2,7 @@ import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { CadControls } from './CadControls.js'
 import { Box, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react'
-import { bandTexture, BANDS } from '../colormap.js'
+import { bandTexture, BANDS, cssBandColor } from '../colormap.js'
 import { regionGrid } from '../region.js'
 
 const BASE = new THREE.Color('#b9c0c8')
@@ -45,6 +45,77 @@ export default function Viewport({
 
   // Bild des aktuellen Zustands (für den Bericht), weißer Hintergrund
   useImperativeHandle(ref, () => ({
+    /// Video der laufenden Ansicht (Animation) mit Farbskala und Kennwerten; → { blob, ext }
+    record({ seconds = 6, title = '', lines = [], legend = null } = {}) {
+      const s = ctx.current
+      const src = s.renderer.domElement
+      const scale = Math.min(1, 1920 / src.width)
+      const W = Math.round((src.width * scale) / 2) * 2
+      const H = Math.round((src.height * scale) / 2) * 2
+      const c = document.createElement('canvas')
+      c.width = W
+      c.height = H
+      const g = c.getContext('2d')
+      const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4']
+      const type = typeof MediaRecorder !== 'undefined' ? types.find((t) => MediaRecorder.isTypeSupported(t)) : null
+      if (!type || !c.captureStream) return Promise.reject(new Error('Video-Aufnahme wird von dieser Oberfläche nicht unterstützt – Projekt-FEM im Browser (Chrome/Firefox) über die Heimnetz-Freigabe öffnen'))
+      const bg = getComputedStyle(host.current).backgroundColor
+      const u = W / 1400
+      const draw = () => {
+        s.renderer.render(s.scene, s.camera)
+        g.fillStyle = bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#16181d'
+        g.fillRect(0, 0, W, H)
+        g.drawImage(src, 0, 0, W, H)
+        g.fillStyle = '#e6e6e6'
+        g.font = `600 ${Math.round(22 * u)}px system-ui, sans-serif`
+        g.fillText(title, 24 * u, 40 * u)
+        g.font = `${Math.round(16 * u)}px system-ui, sans-serif`
+        g.fillStyle = '#b8bcc6'
+        const ll = [...lines, s.animK != null ? `Last ${Math.round(100 * s.animK)} %` : '']
+        ll.forEach((t, i) => g.fillText(t, 24 * u, (70 + 24 * i) * u))
+        if (legend) {
+          const x = W - 70 * u
+          const top = 70 * u
+          const bh = 26 * u
+          g.font = `600 ${Math.round(15 * u)}px system-ui, sans-serif`
+          g.fillStyle = '#e6e6e6'
+          g.textAlign = 'right'
+          g.fillText(legend.title, W - 24 * u, 40 * u)
+          for (let i = 0; i < BANDS; i++) {
+            g.fillStyle = cssBandColor(legend.reverse ? i : BANDS - 1 - i)
+            g.fillRect(x, top + i * bh, 22 * u, bh)
+          }
+          g.font = `${Math.round(14 * u)}px system-ui, sans-serif`
+          g.fillStyle = '#e6e6e6'
+          g.fillText(legend.max, x - 8 * u, top + 12 * u)
+          g.fillText(legend.min, x - 8 * u, top + BANDS * bh)
+          g.textAlign = 'left'
+        }
+        g.font = `${Math.round(13 * u)}px system-ui, sans-serif`
+        g.fillStyle = '#7d8290'
+        g.fillText('Projekt-FEM', 24 * u, H - 20 * u)
+      }
+      return new Promise((resolve, reject) => {
+        const rec = new MediaRecorder(c.captureStream(30), { mimeType: type, videoBitsPerSecond: 6e6 })
+        const chunks = []
+        rec.ondataavailable = (e) => e.data.size && chunks.push(e.data)
+        rec.onerror = (e) => reject(e.error ?? new Error('Aufnahme fehlgeschlagen'))
+        rec.onstop = () => resolve({ blob: new Blob(chunks, { type }), ext: type.includes('mp4') ? 'mp4' : 'webm' })
+        let raf = 0
+        const t0 = performance.now()
+        const tick = () => {
+          draw()
+          if (performance.now() - t0 < seconds * 1000) raf = requestAnimationFrame(tick)
+          else {
+            cancelAnimationFrame(raf)
+            rec.stop()
+          }
+        }
+        rec.start(250)
+        tick()
+      })
+    },
+
     snapshot(width = 1400) {
       const s = ctx.current
       s.renderer.render(s.scene, s.camera)
@@ -401,22 +472,30 @@ export default function Viewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesh])
 
-  // --- Animation (Schwing-/Knickform): Verformung periodisch ---------------------------------
+  // --- Animation: Schwing-/Knickform periodisch, statisches Ergebnis als Laststeigerung 0 → 100 % → 0 -----
   useEffect(() => {
     const s = ctx.current
     if (!(mode === 'result' && result?.animate && s.surf)) return
     let raf = 0
     const t0 = performance.now()
+    const ramp = result.animate === 'ramp'
+    const f = ramp ? 0.35 * (result.animSpeed ?? 1) : 0.8
     const tick = () => {
-      const k = Math.sin(((performance.now() - t0) / 1000) * 2 * Math.PI * 0.8)
+      const ph = ((performance.now() - t0) / 1000) * 2 * Math.PI * f
+      const k = ramp ? (1 - Math.cos(ph)) / 2 : Math.sin(ph)
       deform(s, result.scale * k, result.displacement)
+      // Spannung/Verformung wachsen mit der Last: Farben mitführen
+      if (ramp && result.rampColors) paintResult(s, result, k)
+      s.animK = ramp ? k : null
       s.dirty = true
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => {
       cancelAnimationFrame(raf)
+      s.animK = null
       deform(s, result.scale, result.displacement)
+      if (ramp && result.rampColors) paintResult(s, result, 1)
       s.dirty = true
     }
   }, [result, mode, mesh])
@@ -464,15 +543,7 @@ export default function Viewport({
     if (!s.surf) return
     if (mode === 'result' && result) {
       s.surf.material = s.resultMat
-      const uv = s.surf.geometry.attributes.uv.array
-      const span = result.max - result.min || 1
-      for (let v = 0; v < s.vertNode.length; v++) {
-        let t = Math.min(Math.max((result.values[s.vertNode[v]] - result.min) / span, 0), 1)
-        if (result.reverse) t = 1 - t
-        uv[2 * v] = t * (1 - 1e-4) + 0.5e-4
-        uv[2 * v + 1] = 0.5
-      }
-      s.surf.geometry.attributes.uv.needsUpdate = true
+      paintResult(s, result, 1)
     } else {
       s.surf.material = s.setupMat
       const col = s.surf.geometry.attributes.color.array
@@ -758,6 +829,19 @@ export default function Viewport({
 }
 
 // Oberfläche und Kanten mit Verformung (scale · disp) versetzen
+// Ergebnisfarben (Texturkoordinate je Ecke); k = Lastanteil (Animation), Werte wachsen linear mit der Last
+function paintResult(s, result, k) {
+  const uv = s.surf.geometry.attributes.uv.array
+  const span = result.max - result.min || 1
+  for (let v = 0; v < s.vertNode.length; v++) {
+    let t = Math.min(Math.max((k * result.values[s.vertNode[v]] - result.min) / span, 0), 1)
+    if (result.reverse) t = 1 - t
+    uv[2 * v] = t * (1 - 1e-4) + 0.5e-4
+    uv[2 * v + 1] = 0.5
+  }
+  s.surf.geometry.attributes.uv.needsUpdate = true
+}
+
 function deform(s, scale, disp) {
   const pos = s.surf.geometry.attributes.position.array
   for (let v = 0; v < s.vertNode.length; v++) {

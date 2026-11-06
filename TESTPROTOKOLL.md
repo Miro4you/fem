@@ -29,6 +29,15 @@ Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung 
 | 1.2 | Drehen/Verschieben/Zoomen im Bild | wie zuletzt (CAD-artig) | [ ] |
 | 1.3 | Projekt speichern und wieder öffnen | alles wieder da (auch Infill, Nachweis, Geometrieänderungen) | [ ] |
 
+## 1a. Verformungsanimation und Video
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 1a.1 | Hebel rechnen, im Ergebnis unter „Verformung“ **Animation** | Bauteil verformt sich langsam hin und zurück, Farben wachsen mit der Last | [ ] |
+| 1a.2 | Geschwindigkeit ½× / 2×, Darstellung auf Verschiebung bzw. Sicherheit umstellen | läuft weiter; bei Sicherheit bleiben die Farben fest | [ ] |
+| 1a.3 | **Video** | nach ~6 s Datei `Hebel-verformung.webm` (Mac: `.mp4`), mit Titel, Kennwerten, Farbskala, „Last … %“ | [ ] |
+| 1a.4 | Video in der Linux-Desktop-App | geht oder klare Meldung (dann im Browser über die Heimnetz-Ansicht) | [ ] |
+
 ## 2. Fortschrittsanzeige
 
 | | Schritt | Erwartet | OK / Anmerkung |
