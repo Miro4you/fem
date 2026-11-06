@@ -11,6 +11,7 @@ use fem_core::region::{fit_cylinder, Cylinder};
 use fem_core::{Fix, Load, LocalFix, Material, Mesh, Model, Order, Region, Results, Selection, SolverKind};
 use serde::{Deserialize, Serialize};
 
+pub mod cad;
 pub mod server;
 
 /// Aktueller Fortschritt einer langen Rechnung (für die Anzeige)
@@ -232,6 +233,19 @@ fn load_user_materials() -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn save_user_materials(list: serde_json::Value) -> Result<(), String> {
     user_materials_save(&list)
+}
+
+/// Datei aus der Befehlszeile (`projekt-fem-app --open teil.step`, z. B. vom CAD-Add-in gestartet)
+#[tauri::command]
+fn startup_file() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1)).cloned()
+}
+
+/// Ergebniswerte für „Ergebnis holen“ im CAD hinterlegen
+#[tauri::command]
+fn cad_set_summary(name: String, summary: serde_json::Value) {
+    cad::set_summary(&name, summary);
 }
 
 #[tauri::command]
@@ -887,7 +901,17 @@ pub fn run() {
         .manage(AppState::default())
         .manage(ServerHandle::default())
         .setup(|app| {
-            use tauri::Manager;
+            use tauri::{Emitter, Manager};
+            // CAD-Schnittstelle: eingehende Teile an die Oberfläche melden, lokalen Empfang starten
+            let h = app.handle().clone();
+            cad::on_incoming(move |inc| {
+                let _ = h.emit("cad-open", inc.clone());
+            });
+            tauri::async_runtime::spawn(async {
+                if let Err(e) = cad::start_local().await {
+                    eprintln!("{e}");
+                }
+            });
             if server::ServerConfig::load().autostart {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -903,6 +927,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             gmsh_path,
             progress,
+            startup_file,
+            cad_set_summary,
             load_user_materials,
             save_user_materials,
             open_step,

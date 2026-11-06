@@ -60,10 +60,15 @@ export function opProblem(o) {
   return null
 }
 
-function kind(s) {
-  if (s.normal) return 'p' + s.normal.map((v) => v.toFixed(3)).join(',')
-  if (s.cylinder) return 'c' + s.cylinder.radius.toFixed(3)
-  return 'f'
+// gleiche Flächenart: Ebene mit gleicher Normale bzw. Zylinder mit gleichem Radius und paralleler Achse
+function sameKind(a, b) {
+  if (a.normal && b.normal) return dot(a.normal, b.normal) > 0.999
+  if (a.cylinder && b.cylinder) {
+    const ra = a.cylinder.radius
+    const rb = b.cylinder.radius
+    return Math.abs(ra - rb) <= 0.01 * Math.max(ra, rb) && Math.abs(dot(unit(a.cylinder.axis), unit(b.cylinder.axis))) > 0.999
+  }
+  return !a.normal && !a.cylinder && !b.normal && !b.cylinder
 }
 
 /// Flächen nach einer Geometrieänderung wiederfinden: gleiche Art (Ebene mit gleicher Normale bzw.
@@ -74,7 +79,7 @@ export function remapSurfaces(oldSurfs, newSurfs) {
     let best = null
     let bestD = Infinity
     for (const b of newSurfs) {
-      if (kind(b) !== kind(a)) continue
+      if (!sameKind(a, b)) continue
       const d = norm(sub(b.center, a.center))
       if (d < bestD) (best = b), (bestD = d)
     }

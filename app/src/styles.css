@@ -343,3 +343,5 @@ input.cell { height: 26px; padding: 0 5px; font-size: 12px; font-variant-numeric
 .frame-legend-bar { display: flex; height: 10px; margin: 6px 0 3px; }
 .frame-legend-bar span { flex: 1; }
 .frame-legend-range { display: flex; justify-content: space-between; font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.toast.notice-toast { border-color: var(--good); color: var(--good); }

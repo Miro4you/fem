@@ -159,6 +159,9 @@ impl Running {
 fn router(shared: Shared) -> Router {
     let api = Router::new()
         .route("/gmsh", get(api_gmsh))
+        .route("/cad/open", post(crate::cad::http_open))
+        .route("/cad/summary", get(crate::cad::http_summary).post(crate::cad::http_set_summary))
+        .route("/cad/inbox", get(crate::cad::http_inbox))
         .route("/materials", get(api_materials_get).post(api_materials_set))
         .route("/progress", get(api_progress))
         .route("/upload", post(api_upload))
@@ -451,6 +454,9 @@ pub fn run_headless(port: Option<u16>) {
     rt.block_on(async {
         match start(&cfg).await {
             Ok(_running) => {
+                if let Err(e) = crate::cad::start_local().await {
+                    eprintln!("{e}");
+                }
                 println!("Projekt-FEM läuft im Heimnetz. Im Browser öffnen:");
                 for u in info(&cfg).urls {
                     println!("  {u}");

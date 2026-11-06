@@ -113,6 +113,9 @@ export default function App() {
   const [analysis, setAnalysis] = useState('static')
   const [modeCount, setModeCount] = useState('6')
   const [modes, setModes] = useState(null) // { kind, values, shapes, seconds, sel, animate }
+  // CAD-Schnittstelle: Hinweis über eingegangene Teile, automatisch neu rechnen
+  const [notice, setNotice] = useState(null)
+  const [cadAuto, setCadAuto] = useState(true)
   // Stabwerk (unabhängig von der STEP-Geometrie)
   const [frame, setFrameRaw] = useState(() => newFrame())
   const [frameResults, setFrameResults] = useState(null)
@@ -781,6 +784,7 @@ export default function App() {
     try {
       const r = await api.solve(buildSetup(mat))
       setResult(r)
+      reportCad(r, mat)
       setResultStale(false)
       setView('result')
       setProbe(null)
@@ -832,6 +836,93 @@ export default function App() {
       setBusy(null)
     }
   }
+
+  // Ergebniswerte für „Ergebnis holen“ im CAD (Eigenschaften des Teils)
+  function reportCad(r, mat = material, sups = supports, path = stepPath) {
+    if (!path) return
+    const name = path.split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '')
+    const rho = Number(mat.rho)
+    const rows = proofRows(r, proof)
+    const num = (v) => (v == null || !Number.isFinite(v) ? null : Number(v.toPrecision(4)))
+    api
+      .cadSetSummary(name, {
+        FEM_Sicherheit: num(r.safety),
+        FEM_Sicherheit_Bruch: num(r.safety_break),
+        FEM_SigmaV_MPa: num(r.max_von_mises.value),
+        FEM_Verformung_mm: num(r.max_displacement.value),
+        FEM_Masse_g: rho > 0 ? num((r.solid_volume / 1000) * rho) : null,
+        FEM_Nachweis: rows.length ? (rows.every((x) => x[3] <= 1) ? 'erfüllt' : 'nicht erfüllt') : null,
+        FEM_Massgeblich: r.governing ?? null,
+        FEM_Werkstoff: mat.name,
+        FEM_Lager: sups.length,
+        FEM_Datum: new Date().toLocaleString('de-DE'),
+      })
+      .catch(() => {})
+  }
+
+  // Teil aus dem CAD: gleiches Teil → neue Version mit denselben Lagern/Lasten, sonst neu öffnen
+  async function handleIncoming(inc) {
+    const cur = stepPath ? stepPath.split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') : null
+    const same = mesh && cur === inc.name
+    if (!same) {
+      await loadGeometry(inc.path, null)
+      setNotice(`${inc.source}: „${inc.name}“ geöffnet – Lager und Lasten festlegen`)
+      return
+    }
+    setBusy(`${inc.source}: neue Version von „${inc.name}“ übernehmen …`)
+    try {
+      const ref = currentRefine(meshSize)
+      const m = await api.openStep(inc.path, Number(meshSize) || null, false, ref)
+      const map = remapSurfaces(mesh.surfaces, m.surfaces)
+      let lost = 0
+      const re = (items) =>
+        items.map((x) => {
+          lost += x.surfaces.filter((t) => map.get(t) == null).length
+          return { ...x, surfaces: [...new Set(x.surfaces.map((t) => map.get(t)).filter((t) => t != null))] }
+        })
+      const sups = re(supports)
+      const lds = re(loads)
+      setSupports(sups)
+      setLoads(lds)
+      setMesh(m)
+      setStepPath(inc.path)
+      setMeshRefineKey(JSON.stringify(ref))
+      setGeoOps([])
+      setGeoStep(null)
+      setGeoApplied('[]')
+      setTopo(null)
+      setProbe(null)
+      if (result && cadAuto && !lost) {
+        if (!reference) setReference(summary(result, mesh, 'vorige Version'))
+        setBusy(`„${inc.name}“ neu rechnen …`)
+        const r = await api.solve(buildSetup(material, sups, lds))
+        setResult(r)
+        setResultStale(false)
+        reportCad(r, material, sups, inc.path)
+        setView('result')
+      } else if (result) setResultStale(true)
+      setNotice(
+        `${inc.source}: neue Version von „${inc.name}“ übernommen` +
+          (lost ? ` – ${lost} Lager-/Lastfläche(n) nicht wiedergefunden, bitte prüfen` : result && cadAuto ? ' und neu gerechnet' : ''),
+      )
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const incomingRef = useRef(null)
+  incomingRef.current = handleIncoming
+  useEffect(() => api.onCadOpen((inc) => incomingRef.current?.(inc)), [])
+  useEffect(() => {
+    api.startupFile().then((p) => p && loadGeometry(p, null)).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(null), 8000)
+    return () => clearTimeout(t)
+  }, [notice])
 
   async function onModes() {
     setBusy(analysis === 'modal' ? 'Eigenfrequenzen berechnen …' : 'Knicklasten berechnen …')
@@ -1568,6 +1659,9 @@ export default function App() {
                     <Play size={16} /> {analysis === 'static' ? 'Rechnen' : analysis === 'modal' ? 'Eigenfrequenzen rechnen' : 'Knicklasten rechnen'}
                   </button>
                   {analysis === 'buckling' && <p className="hint">Knicklast = Lastfaktor × aufgebrachte Lasten (lineares Beulen/Knicken, ohne Imperfektionen).</p>}
+                  <label className="check">
+                    <input type="checkbox" checked={cadAuto} onChange={(e) => setCadAuto(e.target.checked)} /> Neue Version aus dem CAD automatisch neu rechnen
+                  </label>
                   {problems.length > 0 && (
                     <ul className="todo">
                       {problems.map((p) => (
@@ -1787,6 +1881,15 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+          {notice && (
+            <div className="toast notice-toast">
+              <Check size={16} />
+              <span>{notice}</span>
+              <button className="icon-btn" onClick={() => setNotice(null)}>
+                <X size={14} />
+              </button>
             </div>
           )}
           {error && (

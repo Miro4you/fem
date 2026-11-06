@@ -159,6 +159,46 @@ export async function openJson(filterName, ext) {
   return f ? JSON.parse(await f.text()) : null
 }
 
+// --- CAD-Schnittstelle (Add-ins schicken Teile, holen Ergebnisse) ---------------------------------
+export const startupFile = () => (isDesktop ? invoke('startup_file') : Promise.resolve(null))
+export const cadSetSummary = (name, summary) =>
+  isDesktop ? invoke('cad_set_summary', { name, summary }) : http('/cad/summary?name=' + encodeURIComponent(name), { method: 'POST', json: summary })
+/// Rückruf bei eingehendem Teil; gibt eine Abmeldefunktion zurück
+export function onCadOpen(cb) {
+  if (isDesktop) {
+    let off = null
+    let stop = false
+    import('@tauri-apps/api/event').then(({ listen }) =>
+      listen('cad-open', (e) => cb(e.payload)).then((f) => (stop ? f() : (off = f))),
+    )
+    return () => {
+      stop = true
+      off?.()
+    }
+  }
+  // Browser: regelmäßig beim rechnenden Rechner nachfragen
+  let after = null
+  let stop = false
+  const tick = async () => {
+    try {
+      const list = await http('/cad/inbox?after=' + (after ?? 0))
+      if (after === null) after = list.length ? list[list.length - 1].seq : 0
+      else
+        for (const inc of list) {
+          after = Math.max(after, inc.seq)
+          cb(inc)
+        }
+    } catch {
+      /* Server noch nicht bereit */
+    }
+    if (!stop) setTimeout(tick, 3000)
+  }
+  tick()
+  return () => {
+    stop = true
+  }
+}
+
 export const solve = (setup) => (isDesktop ? invoke('solve', { setup }) : http('/solve', { method: 'POST', json: { setup } }))
 
 /// STEP auswählen → Pfad auf dem rechnenden Rechner (im Browser: hochladen)
