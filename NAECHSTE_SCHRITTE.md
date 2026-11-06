@@ -73,6 +73,12 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
   Gleiches Teil → Lager/Lasten übertragen, automatisch neu rechnen, Vergleich. In den echten CAD-Programmen
   noch ungetestet (Felix). Später: Onshape-Konfigurationen/Variablen, Baugruppen aus dem CAD, DXF → Stabwerk
   (AutoCAD), farbiges Ergebnis zurück ins CAD
+- ✅ SolidCraft live (Steuerkanal): mitlaufen, neu rechnen, Ergebnis als Parameter/Eigenschaft, Parameterstudie über
+  SolidCraft-Parameter. Gegen Nachbau getestet, echtes SolidCraft steht aus. Später: Knopf in SolidCraft, sobald
+  dort Plugins laufen; ggf. SolidCraft-Projekt vorstellen (Showcase/Discord)
+- ✅ Schweißnähte (Bleche mit Spalt, getrennte Teile): Kopplung über den Spalt, Spaltsuche, Nahtkraft/Linienkraft/τw,
+  Nachweis EN 1993-1-8 vereinfacht. Offen: unterbrochene Nähte/Punktschweißen, Kehlnähte an T-Stößen ohne Spalt,
+  Ermüdung (Kerbfälle)
 - **Neu: Baugruppen** – mehrere Körper aus einer STEP-Datei: Werkstoff je Körper, Verbindungen (verklebt/
   verschraubt/Kontakt), Körper ein-/ausblenden, Kräfte zwischen den Körpern auswerten
 - Mac: läuft laut Felix (installiert) – Rückmeldung abwarten

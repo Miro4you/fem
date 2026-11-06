@@ -141,6 +141,13 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .item { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); }
 .item.active.support { border-color: var(--support); box-shadow: 0 0 0 1px var(--support); }
 .item.active.load { border-color: var(--load); box-shadow: 0 0 0 1px var(--load); }
+.item.active.weld { border-color: #c2410c; box-shadow: 0 0 0 1px #c2410c; }
+.weld-picks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.gap-list { display: flex; flex-direction: column; gap: 4px; }
+.gap-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
+.gap-row em { color: var(--muted); font-style: normal; }
+.weld-table td, .weld-table th { white-space: nowrap; }
 .item-head { display: flex; align-items: center; gap: 6px; }
 
 .solve { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }

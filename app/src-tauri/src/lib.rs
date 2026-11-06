@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod cad;
 pub mod onshape;
+pub mod solidcraft;
 pub mod server;
 
 /// Aktueller Fortschritt einer langen Rechnung (für die Anzeige)
@@ -249,6 +250,65 @@ fn cad_set_summary(name: String, summary: serde_json::Value) {
     cad::set_summary(&name, summary);
 }
 
+// --- SolidCraft (Live-Verbindung) ---
+
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn solidcraft_status() -> Result<solidcraft::Status, String> {
+    blocking(|| Ok(solidcraft::status())).await
+}
+
+#[tauri::command]
+async fn solidcraft_live(on: bool) -> Result<solidcraft::Status, String> {
+    blocking(move || Ok(solidcraft::set_live(on))).await
+}
+
+#[tauri::command]
+fn solidcraft_auto(on: bool) {
+    solidcraft::set_auto_result(on)
+}
+
+#[tauri::command]
+async fn solidcraft_fetch() -> Result<cad::Incoming, String> {
+    blocking(solidcraft::fetch_now).await
+}
+
+#[tauri::command]
+async fn solidcraft_result(name: Option<String>) -> Result<String, String> {
+    blocking(move || solidcraft::write_result(name.as_deref())).await
+}
+
+#[tauri::command]
+async fn solidcraft_params() -> Result<Vec<solidcraft::Param>, String> {
+    blocking(solidcraft::params).await
+}
+
+#[tauri::command]
+fn solidcraft_pause(on: bool) {
+    solidcraft::pause(on)
+}
+
+#[tauri::command]
+async fn solidcraft_study(name: String, expression: String) -> Result<String, String> {
+    blocking(move || solidcraft::study_value(&name, &expression)).await
+}
+
+/// Spalte zwischen einander zugewandten ebenen Flächen (Schweißnaht-Vorschläge)
+pub fn find_gaps_impl(state: &AppState, max_gap: f64) -> Result<Vec<fem_core::weld::GapCandidate>, String> {
+    let s = state.lock().unwrap();
+    let mesh = s.mesh.as_ref().ok_or("Zuerst eine Geometrie öffnen")?;
+    Ok(fem_core::weld::find_gaps(mesh, &s.faces, max_gap.clamp(0.001, 50.0)))
+}
+
+#[tauri::command]
+async fn find_gaps(state: tauri::State<'_, AppState>, max_gap: f64) -> Result<Vec<fem_core::weld::GapCandidate>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || find_gaps_impl(&state, max_gap)).await.map_err(|e| e.to_string())?
+}
+
 /// Angaben für den Dialog „CAD“: Schlüssel für die Lesezeichen, lokaler Port, Onshape eingerichtet?
 #[tauri::command]
 fn cad_info() -> serde_json::Value {
@@ -385,6 +445,19 @@ struct SupportDef {
     local: Option<LocalFix>,
 }
 
+/// Schweißnaht: Fläche A wird über den Spalt an Fläche B gekoppelt
+#[derive(Deserialize)]
+struct WeldDef {
+    a: Vec<i32>,
+    b: Vec<i32>,
+    /// a-Maß [mm]; leer = durchgeschweißte Stumpfnaht
+    #[serde(default)]
+    throat: Option<f64>,
+    /// größter Spalt [mm]; leer = automatisch
+    #[serde(default)]
+    max_gap: Option<f64>,
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum LoadDef {
@@ -401,6 +474,9 @@ pub struct Setup {
     material: Material,
     supports: Vec<SupportDef>,
     loads: Vec<LoadDef>,
+    /// Schweißnähte (Bleche mit Spalt an den Ecken, getrennte Teile)
+    #[serde(default)]
+    welds: Vec<WeldDef>,
     /// Gleichungslöser, Standard: automatisch nach Modellgröße
     #[serde(default)]
     solver: SolverKind,
@@ -447,6 +523,8 @@ pub struct ResultView {
     iterations: Option<usize>,
     seconds: f64,
     warnings: Vec<String>,
+    /// Schweißnähte: übertragene Kraft, Linienkraft, Nahtspannung
+    welds: Vec<fem_core::weld::WeldResult>,
 }
 
 #[tauri::command]
@@ -494,6 +572,12 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
             };
             model = model.group_in(&name, Selection::Surfaces(sel.clone()), region.clone()).load(load);
         }
+        for (i, w) in setup.welds.iter().enumerate() {
+            let name = format!("Naht {}", i + 1);
+            let (ga, gb) = (format!("{name} A"), format!("{name} B"));
+            model = model.group(&ga, Selection::Surfaces(w.a.clone())).group(&gb, Selection::Surfaces(w.b.clone()));
+            model.welds.push(fem_core::weld::Weld { name, a: ga, b: gb, max_gap: w.max_gap, throat: w.throat.filter(|t| *t > 0.0) });
+        }
     Ok((model, faces, disp_nodes, slot))
 }
 
@@ -503,7 +587,13 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         let (model, faces, disp_nodes, slot) = build_model(state, &setup)?;
         let res = fem_core::solve(&model);
         *slot.lock().unwrap() = None;
-        let res = res.map_err(|e| e.to_string())?;
+        let res = res.map_err(|e| match e {
+            fem_core::FemError::Underconstrained if setup.welds.is_empty() => format!(
+                "{e}. Bei Blechen mit Spalt an den Ecken oder mehreren getrennten Teilen: Schweißnähte anlegen \
+                 (Modell → Schweißnähte → „Spalte suchen“)."
+            ),
+            e => e.to_string(),
+        })?;
         let m = &model.mesh;
 
         let mut warnings = Vec::new();
@@ -553,6 +643,15 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
                 ));
             }
         }
+        for w in &res.welds {
+            if w.unmatched > 0 {
+                warnings.push(format!(
+                    "{}: {} Knoten der Fläche A haben keine Gegenfläche im Spalt (bis {:.2} mm) – dort ist nicht geschweißt. \
+                     Bei Bedarf „Spalt bis“ vergrößern.",
+                    w.name, w.unmatched, w.gap_max
+                ));
+            }
+        }
         let (lo, hi) = m.bbox();
         let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
         let (_, umax) = res.max_displacement();
@@ -593,6 +692,7 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             iterations: res.iterations,
             seconds: t0.elapsed().as_secs_f64(),
             warnings,
+            welds: res.welds.clone(),
         };
         let mut s = state.lock().unwrap();
         s.model = Some(model);
@@ -952,6 +1052,15 @@ pub fn run() {
             startup_file,
             cad_set_summary,
             cad_info,
+            find_gaps,
+            solidcraft_status,
+            solidcraft_live,
+            solidcraft_auto,
+            solidcraft_fetch,
+            solidcraft_result,
+            solidcraft_params,
+            solidcraft_pause,
+            solidcraft_study,
             onshape_set_keys,
             onshape_import,
             load_user_materials,

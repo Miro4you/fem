@@ -1,5 +1,8 @@
 # CAD-Schnittstelle: Knöpfe im CAD
 
+Programme: **SolidCraft** (live), **Onshape**, **Autodesk Fusion**, **SolidWorks**, **Siemens NX**, **Solid Edge** – und jedes
+andere CAD über STEP.
+
 Zwei Knöpfe direkt im CAD-Programm:
 
 - **In Projekt-FEM rechnen** – schickt das aktive Teil als STEP an Projekt-FEM.
@@ -39,6 +42,33 @@ schluessel = abcd…
 
 (Windows: `C:\Users\<Name>\projekt-fem-cad.txt`, Mac: `/Users/<Name>/projekt-fem-cad.txt`.)
 Alle Add-ins lesen dieselbe Datei.
+
+## SolidCraft – live
+
+[SolidCraft](https://github.com/tangency-labs/solidcraft) (quelloffenes CAD in Rust) hat einen Steuerkanal, über den
+Projekt-FEM direkt mit dem offenen Design arbeitet – ohne Add-in und ohne Export von Hand:
+
+1. SolidCraft auf dem Rechner starten, auf dem Projekt-FEM rechnet. (Der Steuerkanal ist ab Werk an:
+   SolidCraft-Einstellungen › Assistent › „Let AI agents connect (control channel / MCP)“.)
+2. In Projekt-FEM oben **„CAD“** → Abschnitt **SolidCraft** → **„Live mitlaufen“** anhaken.
+   Projekt-FEM übernimmt das offene Design sofort.
+3. Lager und Lasten festlegen, rechnen.
+4. In SolidCraft weiterkonstruieren: Nach jeder Änderung (Maß, Feature, Parameter) holt Projekt-FEM nach gut einer
+   Sekunde Ruhe die neue Geometrie, überträgt Lager/Lasten/Schweißnähte, rechnet neu und zeigt den Vergleich.
+5. **„Ergebnis → SolidCraft“** trägt die Werte als **Parameter** `FEM_Sicherheit`, `FEM_SigmaV_MPa`,
+   `FEM_Verformung_mm` (mit Einheit mm), `FEM_Masse_g`, `FEM_Nachweis` … ins Design ein (Parameter-Fenster in SolidCraft,
+   in Ausdrücken verwendbar) und zusätzlich alles als Design-Eigenschaft `io.github.miro4you.projekt-fem`.
+   Mit „Ergebnis nach jeder Rechnung in SolidCraft eintragen“ geschieht das automatisch (Achtung: jeder Eintrag ist
+   in SolidCraft ein Rückgängig-Schritt).
+6. **Parameterstudie über SolidCraft-Parameter:** Reiter **Studie** → Parameter „SolidCraft: Wanddicke“ (alle
+   Parameter des Designs stehen zur Wahl) → Werte → Studie starten. SolidCraft baut die Geometrie je Wert neu auf,
+   Projekt-FEM rechnet; danach wird der alte Wert wieder eingesetzt. Ergebnis als Kurve und CSV.
+
+„Jetzt holen“ übernimmt das Design einmalig, ohne mitzulaufen. Der Teilname ist der Name des Designs.
+
+Grenze: SolidCraft muss auf demselben Rechner laufen wie der rechnende Teil von Projekt-FEM (der Steuerkanal ist nur
+lokal erreichbar). Einen Knopf direkt in SolidCraft gibt es noch nicht – SolidCraft plant Plugins
+(`docs/plugins.md` dort); sobald die laufen, kann „In Projekt-FEM rechnen“ auch in SolidCraft selbst sitzen.
 
 ## Onshape
 
@@ -101,8 +131,6 @@ Teile-Attribute (Datei → Eigenschaften → Attribute), Zahlen als Zahl, Texte 
 
 ## Solid Edge – `solidedge/ProjektFEM_senden.vbs`, `solidedge/ProjektFEM_holen.vbs`
 
-(Ich bin davon ausgegangen, dass mit „SolidCraft“ Solid Edge gemeint war – sonst kurz Bescheid sagen.)
-
 Solid Edge muss laufen, ein Teil (`.par`/`.psm`) aktiv sein. Dann `ProjektFEM_senden.vbs` per Doppelklick starten –
 oder als Knopf: Schnellzugriffsleiste anpassen → Makros → Skript auswählen. Falls dein Solid Edge `.vbs` dort nicht
 annimmt: Verknüpfung auf den Desktop oder in die Taskleiste legen.
@@ -130,6 +158,7 @@ Stabwerk (Rahmen/Fachwerke aus einer Linienzeichnung) vorgemerkt.
 | | Stand |
 |---|---|
 | Projekt-FEM-Seite (Empfang, neue Version erkennen, Lager/Lasten übertragen, neu rechnen, Ergebnis bereitstellen) | getestet |
+| SolidCraft | gegen einen Nachbau des SolidCraft-Steuerkanals getestet (nach dessen Dokumentation: Schlüsseldatei, Mitlaufen, neue Version nach Maßänderung, Ergebnis als Parameter + Eigenschaft, Parameterstudie mit Rücksetzen). **Mit echtem SolidCraft noch nicht** (Programm konnte hier nicht gestartet werden) |
 | Onshape | gegen eine nachgebaute Onshape-API getestet (holen, neue Version, Ergebnis in die Beschreibung, falsche Schlüssel). **Mit echtem Onshape noch nicht** |
 | Fusion-Add-in, NX-Journale | Ablauf mit Platzhaltern statt Fusion/NX gegen Projekt-FEM getestet (senden, holen, Heimnetz, Fehler). **Im echten Programm noch nicht** |
 | SolidWorks-Makro, Solid-Edge-Skripte, „Senden an“ (Windows) | **ungetestet** (hier kein Windows) |

@@ -175,6 +175,8 @@ pub struct Model {
     pub groups: Vec<Group>,
     pub supports: Vec<Support>,
     pub loads: Vec<Load>,
+    /// Schweißnähte (Kopplung über einen Spalt)
+    pub welds: Vec<crate::weld::Weld>,
     pub solver: SolverKind,
     /// Fortschrittsmeldungen (Oberfläche)
     pub progress: crate::Progress,
@@ -182,7 +184,16 @@ pub struct Model {
 
 impl Model {
     pub fn new(mesh: Mesh, material: Material) -> Self {
-        Model { mesh, material, groups: vec![], supports: vec![], loads: vec![], solver: SolverKind::Auto, progress: Default::default() }
+        Model {
+            mesh,
+            material,
+            groups: vec![],
+            supports: vec![],
+            loads: vec![],
+            welds: vec![],
+            solver: SolverKind::Auto,
+            progress: Default::default(),
+        }
     }
 
     pub fn group(mut self, name: &str, sel: Selection) -> Self {

@@ -34,6 +34,8 @@ pub struct Results {
     pub shell_fraction: Option<Vec<f64>>,
     /// tatsächlich mit Material gefülltes Volumen [mm³] (mit Infill: Wand + Kern × Füllgrad)
     pub solid_volume: f64,
+    /// Schweißnähte: übertragene Kräfte und Nahtspannungen
+    pub welds: Vec<crate::weld::WeldResult>,
 }
 
 /// Auslastung je Knoten: (gesamt, Schichthaftung). Gesamt = max(σv / R_xy, Schichthaftung).

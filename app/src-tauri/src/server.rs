@@ -184,6 +184,15 @@ fn router(shared: Shared) -> Router {
         .route("/modify_geometry", post(api_modify_geometry))
         .route("/solve", post(api_solve))
         .route("/section", post(api_section))
+        .route("/find_gaps", post(api_find_gaps))
+        .route("/solidcraft/status", get(sc_status))
+        .route("/solidcraft/live", post(sc_live))
+        .route("/solidcraft/auto", post(sc_auto))
+        .route("/solidcraft/fetch", post(sc_fetch))
+        .route("/solidcraft/result", post(sc_result))
+        .route("/solidcraft/params", get(sc_params))
+        .route("/solidcraft/pause", post(sc_pause))
+        .route("/solidcraft/study", post(sc_study))
         .route("/orientation_scan", post(api_orientation_scan))
         .route("/topopt", post(api_topopt))
         .route("/modes", post(api_modes))
@@ -358,6 +367,75 @@ async fn api_solve(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<So
 struct SectionArgs {
     point: [f64; 3],
     normal: [f64; 3],
+}
+
+// --- SolidCraft ---
+
+#[derive(Deserialize)]
+struct OnArgs {
+    on: bool,
+}
+
+#[derive(Deserialize)]
+struct ScResultArgs {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ScStudyArgs {
+    name: String,
+    expression: String,
+}
+
+async fn sc_blocking<T: Serialize + Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> ApiResult<Response> {
+    let v = tokio::task::spawn_blocking(f).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(v).into_response())
+}
+
+async fn sc_status() -> ApiResult<Response> {
+    sc_blocking(|| Ok(crate::solidcraft::status())).await
+}
+
+async fn sc_live(Json(a): Json<OnArgs>) -> ApiResult<Response> {
+    sc_blocking(move || Ok(crate::solidcraft::set_live(a.on))).await
+}
+
+async fn sc_auto(Json(a): Json<OnArgs>) -> Json<bool> {
+    crate::solidcraft::set_auto_result(a.on);
+    Json(true)
+}
+
+async fn sc_fetch() -> ApiResult<Response> {
+    sc_blocking(crate::solidcraft::fetch_now).await
+}
+
+async fn sc_result(Json(a): Json<ScResultArgs>) -> ApiResult<Response> {
+    sc_blocking(move || crate::solidcraft::write_result(a.name.as_deref())).await
+}
+
+async fn sc_params() -> ApiResult<Response> {
+    sc_blocking(crate::solidcraft::params).await
+}
+
+async fn sc_pause(Json(a): Json<OnArgs>) -> Json<bool> {
+    crate::solidcraft::pause(a.on);
+    Json(true)
+}
+
+async fn sc_study(Json(a): Json<ScStudyArgs>) -> ApiResult<Response> {
+    sc_blocking(move || crate::solidcraft::study_value(&a.name, &a.expression)).await
+}
+
+#[derive(Deserialize)]
+struct GapArgs {
+    max_gap: f64,
+}
+
+async fn api_find_gaps(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<GapArgs>) -> ApiResult<Response> {
+    let state = s.session(&headers);
+    let v = tokio::task::spawn_blocking(move || crate::find_gaps_impl(&state, a.max_gap)).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(v).into_response())
 }
 
 async fn api_section(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<SectionArgs>) -> ApiResult<Response> {

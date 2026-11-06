@@ -87,12 +87,21 @@ export function buildReport(data) {
   table(data.loads.length ? data.loads : [['–', 'keine']])
   heading('5  Ergebnisse')
   table(data.resultLines)
+  let sec = 6
   if (data.proofRows.length) {
-    heading('6  Festigkeitsnachweis')
+    heading(`${sec++}  Festigkeitsnachweis`)
     table(
       [['Nachweis', 'vorhanden', 'erforderlich', 'Ausnutzung'], ...data.proofRows],
       [CW * 0.34, CW * 0.22, CW * 0.22, CW * 0.22],
     )
+  }
+  if (data.weldRows?.length) {
+    heading(`${sec++}  Schweißnähte`)
+    table(
+      [['Naht', 'Kraft', 'Länge / a', 'τw max', 'Ausnutzung'], ...data.weldRows],
+      [CW * 0.16, CW * 0.2, CW * 0.22, CW * 0.2, CW * 0.22],
+    )
+    if (data.weldNote) text(data.weldNote, 8.5)
   }
   if (data.warnings.length) {
     heading('Hinweise')

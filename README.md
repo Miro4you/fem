@@ -130,13 +130,31 @@ Sicherheit: Zugriff nur mit dem Schlüssel im Link (bleibt gleich, bis man einen
 ins Internet freigeben. Falls der Link nicht erreichbar ist: Firewall des Rechners für Port 8790 öffnen
 (macOS fragt beim ersten Start nach).
 
-## CAD-Schnittstelle (Onshape, Fusion, SolidWorks, NX, Solid Edge)
+## Schweißnähte (Bleche)
+
+Gekantete Bleche mit geschlossenen Ecken haben im CAD einen kleinen Spalt (z. B. 0,1–1 mm) – ohne Naht sind die
+Bleche dort lose. Im Reiter Modell unter **„Schweißnähte“**:
+
+- **„Spalte suchen“** findet einander gegenüberliegende ebene Flächen mit Spalt bis zur angegebenen Weite
+  (z. B. die vier Ecken eines Blechkastens) → einzeln oder alle als Naht übernehmen.
+- Oder von Hand: **Naht hinzufügen** → Fläche A (meist die schmale Stirnfläche) und Fläche B anklicken.
+- **Stumpfnaht durchgeschweißt** (a = Blechdicke) oder **Kehlnaht** mit a-Maß; „Spalt bis“ leer = automatisch.
+
+Rechnerisch wird jeder Knoten von Fläche A mit dem nächsten Punkt von Fläche B gekoppelt (sehr steife Verbindung über
+den Spalt). Ergebnis je Naht: übertragene Kraft, Linienkraft entlang der Naht, Nahtspannung τw = größte Linienkraft / a
+und der Nachweis nach dem vereinfachten Verfahren EN 1993-1-8 (4.5.3.3): τw ≤ f_vw,d = Rm / (√3·β_w·γ_M2), β_w nach
+Stahlsorte (S235: 0,8, S355: 0,9 …), γ_M2 = 1,25. Auch Teile aus mehreren getrennten Körpern lassen sich so verbinden.
+Gilt für Statik, Eigenfrequenzen, Knicken und Leichtbau. Beispiel: `examples/geometrie/blechkasten.step`.
+
+## CAD-Schnittstelle (SolidCraft, Onshape, Fusion, SolidWorks, NX, Solid Edge)
 
 Knöpfe direkt im CAD: **„In Projekt-FEM rechnen“** schickt das aktive Teil als STEP an Projekt-FEM,
 **„Ergebnis holen“** trägt Sicherheit, Vergleichsspannung, Verformung, Masse und Nachweis als Eigenschaften ins Teil ein.
 Kommt dasselbe Teil (gleicher Name) in einer neuen Version, überträgt Projekt-FEM Lager und Lasten auf die neue
 Geometrie, rechnet automatisch neu und zeigt den Vergleich zur vorigen Version.
 
+- **SolidCraft:** live – Projekt-FEM folgt dem offenen Design, rechnet nach jeder Änderung neu, schreibt das Ergebnis
+  als Parameter zurück und rechnet Parameterstudien über SolidCraft-Parameter (Abschnitt SolidCraft im Dialog „CAD“).
 - **Onshape:** API-Schlüssel in Projekt-FEM unter **„CAD“** eintragen, zwei Lesezeichen („→ Projekt-FEM“,
   „FEM-Ergebnis → Onshape“) in die Lesezeichenleiste ziehen. Das Ergebnis landet in der Beschreibung der Teile.
 - **Fusion, SolidWorks, NX, Solid Edge:** Add-ins/Makros im Ordner [`cad-addins`](cad-addins/README.md) mit Anleitung.

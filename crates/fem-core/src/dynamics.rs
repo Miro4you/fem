@@ -138,6 +138,25 @@ fn reduce(
         tk.extend(a);
         tb.extend(b);
     }
+    // Schweißnähte: Kopplungen nur in der Steifigkeit (keine Masse, keine geometrische Steifigkeit)
+    if !model.welds.is_empty() {
+        let p = crate::weld::prepare(model, &mesh.boundary_faces())?;
+        for (nodes, ke) in crate::solver::tie_elements(Some(&p), &c.frames) {
+            let dofs: Vec<usize> = nodes.iter().flat_map(|&n| [3 * n, 3 * n + 1, 3 * n + 2]).collect();
+            for (a, &ga) in dofs.iter().enumerate() {
+                let r = eq[ga];
+                if r == usize::MAX {
+                    continue;
+                }
+                for (b, &gb) in dofs.iter().enumerate() {
+                    let cc = eq[gb];
+                    if cc != usize::MAX && ke[(a, b)] != 0.0 {
+                        tk.push((r as u32, cc as u32, ke[(a, b)]));
+                    }
+                }
+            }
+        }
+    }
     let lower: Vec<Triplet<usize, usize, f64>> =
         tk.iter().filter(|t| t.0 >= t.1).map(|t| Triplet::new(t.0 as usize, t.1 as usize, t.2)).collect();
     let kmat = SparseColMat::<usize, f64>::try_new_from_triplets(neq, neq, &lower)

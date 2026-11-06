@@ -145,6 +145,9 @@ export async function saveBlob(blob, name, filterName, ext) {
 export const modes = (setup, kind, count, density) =>
   isDesktop ? invoke('modes', { setup, kind, count, density }) : http('/modes', { method: 'POST', json: { setup, kind, count, density } })
 
+/// Schweißnaht-Vorschläge: einander zugewandte ebene Flächen mit Spalt ≤ maxGap [mm]
+export const findGaps = (maxGap) => (isDesktop ? invoke('find_gaps', { maxGap }) : http('/find_gaps', { method: 'POST', json: { max_gap: maxGap } }))
+
 /// Stabwerk rechnen
 export const frameSolve = (frame) => (isDesktop ? invoke('frame_solve', { frame }) : http('/frame_solve', { method: 'POST', json: frame }))
 
@@ -170,6 +173,18 @@ export const onshapeSetKeys = (access, secret) =>
   isDesktop ? invoke('onshape_set_keys', { access, secret }) : http('/onshape/keys', { method: 'POST', json: { access, secret } })
 /// Onshape-Teilestudio holen (Adresse aus dem Browser); das Teil kommt wie aus einem Add-in an
 export const onshapeImport = (url) => (isDesktop ? invoke('onshape_import', { url }) : http('/onshape/import', { method: 'POST', json: { url } }))
+// --- SolidCraft (Live-Verbindung über seinen Steuerkanal, läuft auf dem rechnenden Rechner) ---
+const sc = (cmd, args, path, method = 'POST', json) =>
+  isDesktop ? invoke(cmd, args) : http('/solidcraft/' + path, method === 'GET' ? {} : { method, json: json ?? args ?? {} })
+export const scStatus = () => sc('solidcraft_status', undefined, 'status', 'GET')
+export const scLive = (on) => sc('solidcraft_live', { on }, 'live')
+export const scAuto = (on) => sc('solidcraft_auto', { on }, 'auto')
+export const scFetch = () => sc('solidcraft_fetch', undefined, 'fetch')
+export const scResult = (name = null) => sc('solidcraft_result', { name }, 'result')
+export const scParams = () => sc('solidcraft_params', undefined, 'params', 'GET')
+export const scPause = (on) => sc('solidcraft_pause', { on }, 'pause')
+export const scStudy = (name, expression) => sc('solidcraft_study', { name, expression }, 'study')
+
 export const startupFile = () => (isDesktop ? invoke('startup_file') : Promise.resolve(null))
 export const cadSetSummary = (name, summary) =>
   isDesktop ? invoke('cad_set_summary', { name, summary }) : http('/cad/summary?name=' + encodeURIComponent(name), { method: 'POST', json: summary })

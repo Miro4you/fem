@@ -428,6 +428,43 @@ pub fn stabwerk() -> Result<Vec<Check>> {
     Ok(v)
 }
 
+/// Geschweißter Zugstab: zwei Hälften 50 mm mit 0,2 mm Spalt, verschiedene Netze, Stumpfnaht.
+/// Die Naht muss die ganze Kraft übertragen, der Stab dehnt sich wie aus einem Stück: Δl = F·l/(E·A).
+pub fn zugstab_geschweisst(kind: crate::SolverKind) -> Result<Vec<Check>> {
+    let (l, b, f, gap) = (50.0, 10.0, 1000.0, 0.2);
+    let mat = Material::steel();
+    let mut mesh = box_mesh([l, b, b], [5, 2, 2], Order::Quadratic)?;
+    let second = box_mesh([l, b, b], [7, 3, 3], Order::Quadratic)?;
+    let off = mesh.nodes.len();
+    mesh.nodes.extend(second.nodes.iter().map(|p| [p[0] + l + gap, p[1], p[2]]));
+    mesh.conn.extend(second.conn.iter().map(|n| n + off));
+    let end = 2.0 * l + gap;
+    let mut model = Model::new(mesh, mat.clone())
+        .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
+        .group("y0", Selection::Plane { axis: Axis::Y, value: 0.0 })
+        .group("z0", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("ende", Selection::Plane { axis: Axis::X, value: end })
+        .group("naht_a", Selection::Plane { axis: Axis::X, value: l })
+        .group("naht_b", Selection::Plane { axis: Axis::X, value: l + gap })
+        .support("x0", Fix::only(Axis::X))
+        .support("y0", Fix::only(Axis::Y))
+        .support("z0", Fix::only(Axis::Z))
+        .load(Load::Force { group: "ende".into(), force: [f, 0.0, 0.0] })
+        .solver(kind);
+    model.welds.push(crate::weld::Weld { name: "Naht".into(), a: "naht_a".into(), b: "naht_b".into(), max_gap: None, throat: None });
+    let res = solve(&model)?;
+    let m = &model.mesh;
+    let tol = m.tolerance();
+    let dl = mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[0] - end).abs() <= tol).map(|(_, u)| u[0]));
+    let w = &res.welds[0];
+    let name = format!("Zugstab geschweißt, 0,2 mm Spalt ({})", if kind == crate::SolverKind::Iterative { "iterativ" } else { "direkt" });
+    Ok(vec![
+        check(&name, "Δl [mm]", dl, f * 2.0 * l / (mat.e * b * b), 5e-3),
+        check(&name, "Nahtkraft [N]", w.force[0], f, 1e-3),
+        check(&name, "Nahtspannung (a = Blechdicke) [MPa]", w.stress_mean, f / (b * b), 1e-3),
+    ])
+}
+
 /// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
@@ -444,6 +481,8 @@ pub fn all() -> Result<Vec<Check>> {
     v.extend(stabwerk()?);
     v.extend(zugstab_schraeg(crate::SolverKind::Direct)?);
     v.extend(zugstab_schraeg(crate::SolverKind::Iterative)?);
+    v.extend(zugstab_geschweisst(crate::SolverKind::Direct)?);
+    v.extend(zugstab_geschweisst(crate::SolverKind::Iterative)?);
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");
     if crate::gmsh::find_gmsh().is_some() && step.exists() {
         v.extend(balken_gelenk(&step)?);

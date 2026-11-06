@@ -65,6 +65,14 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
 
     // --- Randbedingungen ---------------------------------------------------
     let Constraints { prescribed, support_nodes, frames } = constraints(model, &faces)?;
+    // Schweißnähte: Kopplungen als Zusatzelemente (in den Knotenbasen)
+    let welds = if model.welds.is_empty() {
+        None
+    } else {
+        progress.report("Schweißnähte koppeln", None);
+        Some(crate::weld::prepare(model, &faces)?)
+    };
+    let extra = tie_elements(welds.as_ref(), &frames);
 
     progress.report("Lasten verteilen", None);
     let f_ext = load_vector(model, &faces)?;
@@ -88,13 +96,13 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
     };
     let (u, iterations) = if iterative {
         progress.report(&format!("Steifigkeitsmatrix aufbauen ({neq} Unbekannte)"), None);
-        let sys = pcg::assemble(n_nodes, &mesh.conn, mesh.npe, &prescribed, &f_sys, elem_k)?;
+        let sys = pcg::assemble(n_nodes, &mesh.conn, mesh.npe, &prescribed, &f_sys, elem_k, &extra)?;
         let fixed: Vec<bool> = prescribed.iter().map(Option::is_some).collect();
         let sol = pcg::solve(sys, &mesh.nodes, &fixed, &frames, opts.tolerance.unwrap_or(PCG_TOLERANCE), PCG_MAX_ITER, progress)?;
         (sol.x, Some(sol.iterations))
     } else {
         progress.report(&format!("Direkter Löser: Matrix aufbauen und zerlegen ({neq} Unbekannte)"), None);
-        (solve_direct(model, &prescribed, &f_sys, &elem_k)?, None)
+        (solve_direct(model, &prescribed, &f_sys, &elem_k, &extra)?, None)
     };
     let mut u = u;
     frames.to_global(&mut u);
@@ -160,6 +168,19 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
     for (s, &c) in stress.iter_mut().zip(&count) {
         if c > 0 {
             s.iter_mut().for_each(|v| *v /= c as f64);
+        }
+    }
+    // Kräfte der Schweißnaht-Kopplungen gehören zu den inneren Kräften (Lagerkräfte an Nahtknoten)
+    if let Some(p) = &welds {
+        for t in &p.ties {
+            let k = t.stiffness();
+            let ut: Vec<f64> = t.nodes.iter().flat_map(|&n| [u[3 * n], u[3 * n + 1], u[3 * n + 2]]).collect();
+            let ft = k * nalgebra::DVector::from_column_slice(&ut);
+            for (a, &n) in t.nodes.iter().enumerate() {
+                for c in 0..3 {
+                    f_int[3 * n + c] += ft[3 * a + c];
+                }
+            }
         }
     }
 
@@ -265,7 +286,9 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         })
         .sum();
 
+    let welds = welds.map(|p| crate::weld::evaluate(model, &p, &u)).unwrap_or_default();
     Ok(Results {
+        welds,
         solid_volume,
         utilization_infill,
         shell_fraction,
@@ -290,6 +313,7 @@ fn solve_direct(
     prescribed: &[Option<f64>],
     f_ext: &[f64],
     elem_k: &(dyn Fn(usize) -> Result<DMatrix<f64>> + Sync),
+    extra: &[(Vec<usize>, DMatrix<f64>)],
 ) -> Result<Vec<f64>> {
     let mesh = &model.mesh;
     let ndof = prescribed.len();
@@ -307,11 +331,13 @@ fn solve_direct(
 
     // --- Assemblierung (parallel je Element) -------------------------------
     let npe = mesh.npe;
-    let per_elem: Vec<Result<(Vec<Triplet<usize, usize, f64>>, Vec<(usize, f64)>)>> = (0..mesh.n_elems())
+    let n_elem = mesh.n_elems();
+    let per_elem: Vec<Result<(Vec<Triplet<usize, usize, f64>>, Vec<(usize, f64)>)>> = (0..n_elem + extra.len())
         .into_par_iter()
         .map(|e| {
-            let ke = elem_k(e)?;
-            let dofs: Vec<usize> = mesh.elem(e).iter().flat_map(|&n| [3 * n, 3 * n + 1, 3 * n + 2]).collect();
+            let (ke, nodes): (DMatrix<f64>, &[usize]) =
+                if e < n_elem { (elem_k(e)?, mesh.elem(e)) } else { (extra[e - n_elem].1.clone(), &extra[e - n_elem].0) };
+            let dofs: Vec<usize> = nodes.iter().flat_map(|&n| [3 * n, 3 * n + 1, 3 * n + 2]).collect();
             let mut trip = Vec::with_capacity(npe * npe * 5);
             let mut rhs = Vec::new();
             for (a, &ga) in dofs.iter().enumerate() {
@@ -366,6 +392,22 @@ fn solve_direct(
         }
     }
     Ok(u)
+}
+
+/// Kopplungen der Schweißnähte als Zusatzelemente (Knoten, Steifigkeit in den Knotenbasen)
+pub(crate) fn tie_elements(welds: Option<&crate::weld::Prepared>, frames: &NodeFrames) -> Vec<(Vec<usize>, DMatrix<f64>)> {
+    welds
+        .map(|p| {
+            p.ties
+                .iter()
+                .map(|t| {
+                    let mut k = t.stiffness();
+                    frames.transform_element(&t.nodes, &mut k);
+                    (t.nodes.clone(), k)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Lagerbedingungen: vorgegebene Freiheitsgrade (lokal an Knoten mit eigener Basis), Knoten je Lager, Knotenbasen

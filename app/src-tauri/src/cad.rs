@@ -123,6 +123,7 @@ pub fn set_summary(name: &str, v: serde_json::Value) {
         let _ = std::fs::write(p, serde_json::to_string_pretty(&v).unwrap_or_default());
     }
     store().lock().unwrap().summaries.insert(clean_name(name), v);
+    crate::solidcraft::on_summary(name);
 }
 
 pub fn summary(name: &str) -> Option<serde_json::Value> {

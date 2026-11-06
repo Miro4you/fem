@@ -25,6 +25,7 @@ pub mod sparse;
 pub mod topopt;
 pub mod validate;
 pub mod vtk;
+pub mod weld;
 
 pub use material::{Infill, InfillPattern, Material};
 pub use mesh::{Mesh, Order};

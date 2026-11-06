@@ -25,6 +25,9 @@ const MOMENT_COLOR = '#9b4dca'
 // Flächen, auf denen nur ein Teilbereich wirkt, blasser einfärben
 const SUPPORT_PALE = '#b3c6ee'
 const LOAD_PALE = '#f1cfa9'
+// Schweißnähte: Fläche A (wird angekoppelt) und Gegenfläche B
+const WELD_A = '#c2410c'
+const WELD_B = '#e9a23b'
 
 const QUANTITIES = {
   von_mises: { label: 'Vergleichsspannung', unit: 'MPa', hint: 'von Mises' },
@@ -52,6 +55,7 @@ const dirName = (d) => {
 }
 
 let nextId = 1
+const newWeld = () => ({ id: nextId++, a: [], b: [], kind: 'butt', throat: '3', maxGap: '' })
 const newSupport = () => ({
   id: nextId++, kind: 'fixed', axes: { x: true, y: true, z: true }, cyl: { radial: true, axial: true, tangential: false },
   surfaces: [], region: null,
@@ -87,6 +91,8 @@ export default function App() {
   // Ergebnisse des Vergleichs der Aufbaurichtungen
   const [orientations, setOrientations] = useState(null)
   const [supports, setSupports] = useState([])
+  const [welds, setWelds] = useState([])
+  const [gaps, setGaps] = useState({ max: '1', list: null })
   const [loads, setLoads] = useState([])
   const [active, setActive] = useState(null)
   // Bereich zeichnen: { type: 'support' | 'load', id, shape }
@@ -192,7 +198,7 @@ export default function App() {
   useEffect(() => {
     if (result) setResultStale(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [material, supports, loads])
+  }, [material, supports, loads, welds])
 
   const surfaceInfo = useMemo(() => new Map((mesh?.surfaces ?? []).map((s) => [s.tag, s])), [mesh])
 
@@ -273,6 +279,8 @@ export default function App() {
       if (!keepSetup) {
         setSupports([])
         setLoads([])
+        setWelds([])
+        setGaps((g) => ({ ...g, list: null }))
         setActive(null)
         setDrawing(null)
         setGeoOps([])
@@ -294,7 +302,7 @@ export default function App() {
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
     if (!stepPath) return
-    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, geoOps, proof }
+    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof }
     try {
       await api.saveProject(stepPath, data)
     } catch (e) {
@@ -330,6 +338,7 @@ export default function App() {
       if (d.proof) setProof(d.proof)
       setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
       setLoads(d.loads.map((l) => ({ ...newLoad(), ...l, id: nextId++ })))
+      setWelds((d.welds ?? []).map((w) => ({ ...newWeld(), ...w, id: nextId++ })))
       setActive(null)
     } catch (e) {
       setError(String(e))
@@ -375,6 +384,18 @@ export default function App() {
         return
       }
       if (!active) return
+      if (active.type === 'weldA' || active.type === 'weldB') {
+        const k = active.type === 'weldA' ? 'a' : 'b'
+        const other = k === 'a' ? 'b' : 'a'
+        setWelds((ws) =>
+          ws.map((w) =>
+            w.id !== active.id
+              ? w
+              : { ...w, [k]: w[k].includes(tag) ? w[k].filter((t) => t !== tag) : [...w[k], tag], [other]: w[other].filter((t) => t !== tag) },
+          ),
+        )
+        return
+      }
       const toggle = (items) =>
         items.map((it) =>
           it.id !== active.id
@@ -397,10 +418,26 @@ export default function App() {
         if (l.surfaces.includes(tag)) return l.region ? LOAD_PALE : active?.id === l.id ? LOAD_ACTIVE : LOAD_COLOR
       for (const s of supports)
         if (s.surfaces.includes(tag)) return s.region ? SUPPORT_PALE : active?.id === s.id ? SUPPORT_ACTIVE : SUPPORT_COLOR
+      for (const w of welds) {
+        if (w.a.includes(tag)) return WELD_A
+        if (w.b.includes(tag)) return WELD_B
+      }
       return null
     },
-    [supports, loads, active, view, geoOps, mesh],
+    [supports, loads, welds, active, view, geoOps, mesh],
   )
+
+  // --- Schweißnähte -----------------------------------------------------------------
+  async function onFindGaps() {
+    const max = Number(String(gaps.max).replace(',', '.'))
+    if (!(max > 0)) return setError('Größten Spalt in mm angeben, z. B. 1')
+    try {
+      const list = await api.findGaps(max)
+      setGaps({ ...gaps, list })
+    } catch (e) {
+      setError(String(e))
+    }
+  }
 
   // --- Wirkbereiche ------------------------------------------------------------------
   const updateItem = (type, id, patch) => {
@@ -610,9 +647,39 @@ export default function App() {
   const [study, setStudy] = useState({ param: 'mesh', values: '4; 3; 2; 1.5' })
   const [studyRows, setStudyRows] = useState(null)
 
-  // Wählbare Parameter: Netzgröße, Füllgrad, je Geometrieänderung ein Maß
+  // SolidCraft-Parameter, wenn das offene Teil das SolidCraft-Design ist (Live-Verbindung)
+  const [scStudyInfo, setScStudyInfo] = useState(null)
+  useEffect(() => {
+    if (view !== 'study' || !stepPath) return
+    let stop = false
+    ;(async () => {
+      try {
+        const st = await api.scStatus()
+        const stem = stepPath.split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '')
+        const same = st.name && (stem === st.name || stem === st.name.replace(/[^\p{L}\p{N} ._()-]/gu, '_'))
+        if (!st.connected || !same) {
+          if (!stop) setScStudyInfo(null)
+          return
+        }
+        const params = await api.scParams()
+        if (!stop) setScStudyInfo({ name: st.name, params })
+      } catch {
+        if (!stop) setScStudyInfo(null)
+      }
+    })()
+    return () => {
+      stop = true
+    }
+  }, [view, stepPath])
+
+  // Wählbare Parameter: Netzgröße, Füllgrad, je Geometrieänderung ein Maß, SolidCraft-Parameter
   const studyParams = useMemo(() => {
     const out = [{ key: 'mesh', label: 'Netzgröße (Konvergenzstudie)', unit: 'mm' }]
+    for (const p of scStudyInfo?.params ?? []) {
+      const v = p.value
+      const values = Number.isFinite(v) && v !== 0 ? [0.6, 0.8, 1, 1.2, 1.4].map((f) => Number((f * v).toPrecision(3))).join('; ').replace(/\./g, ',') : ''
+      out.push({ key: `sc:${p.name}`, label: `SolidCraft: ${p.name}`, unit: p.unit || '', values })
+    }
     if (material.layered && material.infill?.on) out.push({ key: 'infill', label: 'Füllgrad', unit: '%' })
     geoOps.forEach((o, i) => {
       if (!o.enabled) return
@@ -625,7 +692,7 @@ export default function App() {
       if ((o.op === 'add' || o.op === 'cut') && o.sketch?.shape === 'rect') out.push({ key: `geo:${o.id}:width`, label: `${n}: Skizze Breite`, unit: 'mm' })
     })
     return out
-  }, [material, geoOps])
+  }, [material, geoOps, scStudyInfo])
 
   async function runStudy() {
     const values = study.values.split(/[;\s]+/).map((v) => Number(v.replace(',', '.'))).filter((v) => Number.isFinite(v))
@@ -636,15 +703,19 @@ export default function App() {
     const origSurfaces = mesh.surfaces
     const refine = currentRefine(meshSize)
     const active = geoOps.filter((o) => o.enabled && !opProblem(o))
+    const scParam = param.startsWith('sc:') ? scStudyInfo?.params.find((p) => p.name === param.slice(3)) : null
+    let scTouched = false
     setError(null)
     setActive(null)
     setDrawing(null)
     try {
+      if (scParam) await api.scPause(true)
       for (const [i, v] of values.entries()) {
         setBusy(`Studie ${meta.label} = ${fmt(v)} ${meta.unit} (${i + 1}/${values.length}) …`)
         let mat = material
         let sups = supports
         let lds = loads
+        let wls = welds
         let m = mesh
         if (param === 'mesh') {
           m = active.length
@@ -652,6 +723,18 @@ export default function App() {
             : await api.openStep(stepPath, v, false, currentRefine(v))
         } else if (param === 'infill') {
           mat = { ...material, infill: { ...material.infill, percent: v } }
+        } else if (scParam) {
+          // Maß in SolidCraft setzen, Geometrie holen, Lager/Lasten/Nähte übertragen
+          scTouched = true
+          const path = await api.scStudy(scParam.name, scParam.unit ? `${v} ${scParam.unit}` : String(v))
+          m = await api.openStep(path, Number(meshSize) || null, false, refine)
+          const map = remapSurfaces(origSurfaces, m.surfaces)
+          const mapTags = (ts) => [...new Set(ts.map((t) => map.get(t)).filter((t) => t != null))]
+          const lost = [...supports, ...loads].some((x) => x.surfaces.some((t) => map.get(t) == null))
+          if (lost) throw new Error(`Bei ${scParam.name} = ${fmt(v)} ${scParam.unit} sind Lager- oder Lastflächen nicht mehr wiederzufinden – Studie abgebrochen`)
+          sups = supports.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
+          lds = loads.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
+          wls = welds.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) }))
         } else if (param.startsWith('geo:')) {
           const [, id, field] = param.split(':')
           const ops = active.map((o) => {
@@ -665,10 +748,12 @@ export default function App() {
           m = g.mesh
           const map = remapSurfaces(origSurfaces, m.surfaces)
           const re = (items) => items.map((x) => ({ ...x, surfaces: [...new Set(x.surfaces.map((t) => map.get(t)).filter((t) => t != null))] }))
+          const mapTags = (ts) => [...new Set(ts.map((t) => map.get(t)).filter((t) => t != null))]
           sups = re(supports)
           lds = re(loads)
+          wls = welds.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) }))
         }
-        const r = await api.solve(buildSetup(mat, sups, lds))
+        const r = await api.solve(buildSetup(mat, sups, lds, wls))
         const rho = Number(material.rho)
         rows.push({
           value: v, vm: r.max_von_mises.value, u: r.max_displacement.value, safety: r.safety, safetyBreak: r.safety_break,
@@ -677,7 +762,12 @@ export default function App() {
         setStudyRows({ param: meta, rows: [...rows] })
       }
       // Ausgangszustand wiederherstellen (Netz und Ergebnis)
-      if (param === 'mesh' || param.startsWith('geo:')) {
+      if (scTouched) {
+        scTouched = false
+        setBusy(`SolidCraft: ${scParam.name} zurück auf ${scParam.expression} …`)
+        await api.scStudy(scParam.name, scParam.expression)
+      }
+      if (param === 'mesh' || param.startsWith('geo:') || scParam) {
         setBusy('Ausgangszustand wiederherstellen …')
         const m = active.length
           ? (await api.modifyGeometry(stepPath, active.map(opPayload), Number(meshSize) || null, refine)).mesh
@@ -692,6 +782,11 @@ export default function App() {
     } catch (e) {
       setError(String(e))
     } finally {
+      // SolidCraft: Maß zurücksetzen (auch nach Fehler) und wieder mitlaufen
+      if (scParam) {
+        if (scTouched) await api.scStudy(scParam.name, scParam.expression).catch(() => {})
+        await api.scPause(false).catch(() => {})
+      }
       setBusy(null)
     }
   }
@@ -742,6 +837,10 @@ export default function App() {
       if (f.error) p.push(`Lager ${i + 1}: ${f.error}`)
     })
     if (!loads.length && analysis !== 'modal') p.push('Mindestens eine Last anlegen')
+    welds.forEach((w, i) => {
+      if (!w.a.length || !w.b.length) p.push(`Naht ${i + 1}: Fläche A und Fläche B wählen`)
+      if (w.kind === 'fillet' && !(Number(String(w.throat).replace(',', '.')) > 0)) p.push(`Naht ${i + 1}: a-Maß angeben`)
+    })
     if (analysis === 'modal' && !(Number(material.rho) > 0)) p.push('Für Eigenfrequenzen die Dichte des Werkstoffs angeben')
     loads.forEach((l, i) => {
       if (!l.surfaces.length) p.push(`Last ${i + 1}: Flächen wählen`)
@@ -754,11 +853,15 @@ export default function App() {
       })
     return p
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mesh, supports, loads, surfaceInfo, drawing, analysis, material.rho])
+  }, [mesh, supports, loads, welds, surfaceInfo, drawing, analysis, material.rho])
 
-  function buildSetup(mat, sups = supports, lds = loads) {
+  function buildSetup(mat, sups = supports, lds = loads, wls = welds) {
+    const num = (v) => Number(String(v).replace(',', '.'))
     return {
         material: materialPayload(mat),
+        welds: wls
+          .filter((w) => w.a.length && w.b.length)
+          .map((w) => ({ a: w.a, b: w.b, throat: w.kind === 'fillet' ? num(w.throat) : null, max_gap: num(w.maxGap) > 0 ? num(w.maxGap) : null })),
         supports: sups.map((s) => {
           const f = supportFix(s)
           return { surfaces: s.surfaces, fix: f.fix, local: f.local ?? null, region: regionNumbers(s.region) }
@@ -882,8 +985,16 @@ export default function App() {
         })
       const sups = re(supports)
       const lds = re(loads)
+      const wls = welds.map((w) => {
+        const m2 = (ts) => {
+          lost += ts.filter((t) => map.get(t) == null).length
+          return [...new Set(ts.map((t) => map.get(t)).filter((t) => t != null))]
+        }
+        return { ...w, a: m2(w.a), b: m2(w.b) }
+      })
       setSupports(sups)
       setLoads(lds)
+      setWelds(wls)
       setMesh(m)
       setStepPath(inc.path)
       setMeshRefineKey(JSON.stringify(ref))
@@ -895,7 +1006,7 @@ export default function App() {
       if (result && cadAuto && !lost) {
         if (!reference) setReference(summary(result, mesh, 'vorige Version'))
         setBusy(`„${inc.name}“ neu rechnen …`)
-        const r = await api.solve(buildSetup(material, sups, lds))
+        const r = await api.solve(buildSetup(material, sups, lds, wls))
         setResult(r)
         setResultStale(false)
         reportCad(r, material, sups, inc.path)
@@ -903,7 +1014,7 @@ export default function App() {
       } else if (result) setResultStale(true)
       setNotice(
         `${inc.source}: neue Version von „${inc.name}“ übernommen` +
-          (lost ? ` – ${lost} Lager-/Lastfläche(n) nicht wiedergefunden, bitte prüfen` : result && cadAuto ? ' und neu gerechnet' : ''),
+          (lost ? ` – ${lost} Lager-/Last-/Nahtfläche(n) nicht wiedergefunden, bitte prüfen` : result && cadAuto ? ' und neu gerechnet' : ''),
       )
     } catch (e) {
       setError(String(e))
@@ -1251,6 +1362,16 @@ export default function App() {
       loads: loadsRows,
       resultLines: res,
       proofRows: pr,
+      weldRows: weldRows(result, material).map((w) => [
+        w.label,
+        `${fmt(w.force)} N`,
+        `${fmt(w.length)} / ${fmt(w.throat)} mm`,
+        `${fmt(w.stress_max)} MPa`,
+        w.util == null ? '–' : `${(100 * w.util).toFixed(0)} %${w.util <= 1 ? ' ok' : ' NICHT ERFÜLLT'}`,
+      ]),
+      weldNote: (result.welds ?? []).length
+        ? 'τw = größte Linienkraft entlang der Naht / a-Maß; zulässig f_vw,d = Rm / (√3·β_w·γ_M2), vereinfachtes Verfahren EN 1993-1-8 (4.5.3.3). Stumpfnaht durchgeschweißt: a = Blechdicke.'
+        : null,
       warnings: result.warnings,
       images,
       notes: [
@@ -1646,6 +1767,18 @@ export default function App() {
               )}
 
               {mesh && (
+                <WeldSection
+                  welds={welds}
+                  setWelds={setWelds}
+                  gaps={gaps}
+                  setGaps={setGaps}
+                  active={active}
+                  setActive={(a) => { setDrawing(null); setActive(a) }}
+                  onFind={onFindGaps}
+                />
+              )}
+
+              {mesh && (
                 <div className="solve">
                   <div className="row analysis-row">
                     <div className="segmented small">
@@ -2013,6 +2146,7 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
         </div>
       )}
       <ProofCard result={result} proof={proof} />
+      <WeldCard result={result} material={material} />
       <div className="card">
         {massG != null && <Stat label="Masse" value={massG >= 1000 ? `${fmt(massG / 1000)} kg` : `${fmt(massG)} g`} />}
         <Stat label="max. Vergleichsspannung" value={`${fmt(result.max_von_mises.value)} MPa`} />
@@ -2103,6 +2237,94 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
 // Rundungsrauschen (z. B. 3e-9 N bei 1500 N Last, iterativer Löser ~1e-7) als 0 anzeigen
 function clean(v, ref) {
   return v.map((x) => (Math.abs(x) < 1e-6 * ref ? 0 : x))
+}
+
+// Schweißnähte: Spalte suchen, Nähte anlegen (Fläche A wird über den Spalt an Fläche B gekoppelt)
+function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind }) {
+  const upd = (id, patch) => setWelds(welds.map((w) => (w.id === id ? { ...w, ...patch } : w)))
+  const has = (c) => welds.some((w) => (w.a.includes(c.a) && w.b.includes(c.b)) || (w.a.includes(c.b) && w.b.includes(c.a)))
+  const take = (cands) => {
+    const add = cands.filter((c) => !has(c)).map((c) => ({ ...newWeld(), a: [c.a], b: [c.b] }))
+    setWelds([...welds, ...add])
+  }
+  const open = gaps.list?.filter((c) => !has(c)) ?? []
+  return (
+    <Section n={6} title="Schweißnähte (optional)" done={welds.length > 0 && welds.every((w) => w.a.length && w.b.length)}>
+      <p className="hint">
+        Für gekantete Bleche mit Spalt an den Ecken (werden später geschweißt) oder getrennte Teile: Fläche A – meist die schmale
+        Stirnfläche – wird über den Spalt fest mit Fläche B verbunden.
+      </p>
+      <div className="row">
+        <label className="field">
+          <span>Spalt bis</span>
+          <div className="input-unit">
+            <input value={gaps.max} onChange={(e) => setGaps({ ...gaps, max: e.target.value })} />
+            <em>mm</em>
+          </div>
+        </label>
+        <button className="btn" onClick={onFind}>
+          <Spline size={14} /> Spalte suchen
+        </button>
+      </div>
+      {gaps.list && (
+        <div className="gap-list">
+          {gaps.list.length === 0 && <p className="hint">Keine einander gegenüberliegenden ebenen Flächen mit so kleinem Spalt gefunden.</p>}
+          {open.map((c) => (
+            <div key={`${c.a}-${c.b}`} className="gap-row">
+              <span>
+                Spalt {fmt(c.gap)} mm · {fmt(c.area)} mm² <em>(Fläche {c.a} ↔ {c.b})</em>
+              </span>
+              <button className="btn small" onClick={() => take([c])}>
+                <Plus size={13} /> Naht
+              </button>
+            </div>
+          ))}
+          {open.length > 1 && (
+            <button className="btn wide" onClick={() => take(open)}>
+              <Plus size={14} /> Alle {open.length} als Naht übernehmen
+            </button>
+          )}
+        </div>
+      )}
+      {welds.map((w, i) => {
+        const pickA = active?.id === w.id && active.type === 'weldA'
+        const pickB = active?.id === w.id && active.type === 'weldB'
+        return (
+          <div key={w.id} className={'item' + (pickA || pickB ? ' active weld' : '')}>
+            <div className="item-head">
+              <Spline size={14} color={WELD_A} />
+              <strong>Naht {i + 1}</strong>
+              <span className="spacer" />
+              <button className="icon-btn" title="Löschen" onClick={() => { setWelds(welds.filter((x) => x.id !== w.id)); if (pickA || pickB) setActive(null) }}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <select value={w.kind} onChange={(e) => upd(w.id, { kind: e.target.value })}>
+              <option value="butt">Stumpfnaht, durchgeschweißt (a = Blechdicke)</option>
+              <option value="fillet">Kehlnaht mit a-Maß</option>
+            </select>
+            <div className="grid2">
+              {w.kind === 'fillet' && <NumField label="a-Maß" unit="mm" value={w.throat} onChange={(v) => upd(w.id, { throat: v })} />}
+              <NumField label="Spalt bis (leer = auto)" unit="mm" value={w.maxGap} onChange={(v) => upd(w.id, { maxGap: v })} />
+            </div>
+            <div className="weld-picks">
+              <button className={'btn pick' + (pickA ? ' on' : '')} onClick={() => setActive(pickA ? null : { type: 'weldA', id: w.id })}>
+                <span className="swatch" style={{ background: WELD_A }} /> {pickA ? 'Fertig' : 'Fläche A'}
+                <span className="count">{w.a.length}</span>
+              </button>
+              <button className={'btn pick' + (pickB ? ' on' : '')} onClick={() => setActive(pickB ? null : { type: 'weldB', id: w.id })}>
+                <span className="swatch" style={{ background: WELD_B }} /> {pickB ? 'Fertig' : 'Fläche B'}
+                <span className="count">{w.b.length}</span>
+              </button>
+            </div>
+          </div>
+        )
+      })}
+      <button className="btn wide" onClick={() => { const w = newWeld(); setWelds([...welds, w]); setActive({ type: 'weldA', id: w.id }) }}>
+        <Plus size={15} /> Naht hinzufügen
+      </button>
+    </Section>
+  )
 }
 
 function Section({ n, title, done, children }) {
@@ -2269,12 +2491,13 @@ function StudyPanel({ study, setStudy, params, rows, canRun, onRun, onCsv }) {
           Rechnet dasselbe Modell für mehrere Werte eines Parameters. Die Netzstudie zeigt, ob eine Spannung belastbar ist: Bleibt sie bei feinerem
           Netz gleich, passt es; wächst sie immer weiter, ist es eine Singularität (Lagerkante, scharfe Ecke). Geometriemaße erscheinen hier, sobald im
           Reiter Geometrie eine Änderung angelegt ist.
+         Läuft Projekt-FEM live mit SolidCraft, stehen hier auch alle Parameter des SolidCraft-Designs zur Wahl (SolidCraft rechnet die Geometrie je Wert neu).
         </p>
         <label className="field">
           <span>Parameter</span>
           <select
             value={param.key}
-            onChange={(e) => setStudy({ param: e.target.value, values: defaults[e.target.value] ?? study.values })}
+            onChange={(e) => setStudy({ param: e.target.value, values: defaults[e.target.value] ?? (params.find((p) => p.key === e.target.value)?.values || study.values) })}
           >
             {params.map((p) => (
               <option key={p.key} value={p.key}>
@@ -2406,6 +2629,73 @@ function proofRows(result, proof) {
   if (sB > 0 && result.safety_break != null) rows.push(['Bruch (Rm)', result.safety_break, sB, sB / result.safety_break])
   if (uMax > 0) rows.push(['Verformung', result.max_displacement.value, uMax, result.max_displacement.value / uMax])
   return rows
+}
+
+// Schweißnaht-Nachweis, vereinfachtes Verfahren EN 1993-1-8 (4.5.3.3): Linienkraft / a ≤ f_vw,d = f_u / (√3 · β_w · γ_M2)
+const GAMMA_M2 = 1.25
+function betaW(name = '') {
+  const n = name.toUpperCase()
+  if (/S\s*4[26]0/.test(n)) return 1.0
+  if (/S\s*355/.test(n)) return 0.9
+  if (/S\s*275/.test(n)) return 0.85
+  if (/1\.4[0-9]{3}|EDELSTAHL|V2A|V4A/.test(n)) return 1.0
+  return 0.8
+}
+function weldRows(result, material) {
+  const fu = Number(material.tensile)
+  const bw = betaW(material.name)
+  const fvw = fu > 0 ? fu / (Math.sqrt(3) * bw * GAMMA_M2) : null
+  return (result.welds ?? []).map((w, i) => ({
+    ...w,
+    label: `Naht ${i + 1}`,
+    force: Math.hypot(...w.force),
+    fvw,
+    util: fvw ? w.stress_max / fvw : null,
+    bw,
+  }))
+}
+
+function WeldCard({ result, material }) {
+  const rows = weldRows(result, material)
+  if (!rows.length) return null
+  const ok = rows.every((r) => r.util == null || r.util <= 1)
+  const fvw = rows[0].fvw
+  return (
+    <div className={'proof ' + (ok ? 'good' : 'bad')}>
+      <div className="item-head">
+        <Spline size={15} />
+        <strong>Schweißnähte{fvw ? (ok ? ' – Nachweis erfüllt' : ' – Nachweis NICHT erfüllt') : ''}</strong>
+      </div>
+      <table className="weld-table">
+        <thead>
+          <tr>
+            <th />
+            <th>Kraft</th>
+            <th>l / a</th>
+            <th>τw max</th>
+            {fvw && <th>Ausn.</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} title={`übertragen: senkrecht ${fmt(r.force_normal)} N, längs ${fmt(r.force_shear)} N · Linienkraft Mittel ${fmt(r.line_force_mean)} N/mm, größte ${fmt(r.line_force_max)} N/mm · Spalt ${fmt(r.gap_min)}–${fmt(r.gap_max)} mm`}>
+              <td>{r.label}</td>
+              <td>{fmt(r.force)} N</td>
+              <td>
+                {fmt(r.length)} / {fmt(r.throat)} mm
+              </td>
+              <td>{fmt(r.stress_max)} MPa</td>
+              {fvw && <td className={r.util <= 1 ? 'good' : 'bad'}>{(100 * r.util).toFixed(0)} %</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="hint">
+        τw = größte Linienkraft entlang der Naht / a-Maß{fvw ? ` · zulässig f_vw,d = Rm / (√3·β_w·γ_M2) = ${fmt(fvw)} MPa (β_w = ${rows[0].bw}, γ_M2 = ${GAMMA_M2})` : ' · für den Nachweis Rm beim Werkstoff angeben'}. Vereinfachtes Verfahren EN 1993-1-8, Nahtenden
+        und Kerben nicht gesondert bewertet.
+      </p>
+    </div>
+  )
 }
 
 function ProofCard({ result, proof }) {
@@ -3113,6 +3403,79 @@ const bookmarkletCode = (base, key, path) =>
   `javascript:void(window.open('${base}/${path}?k=${key}&url='+encodeURIComponent(location.href),'projekt-fem','width=600,height=420'))`
 
 // CAD-Verbindung: Add-ins, Onshape-Schlüssel und -Lesezeichen
+// SolidCraft: live mitlaufen, holen, Ergebnis zurück (Steuerkanal auf dem rechnenden Rechner)
+function SolidCraftLink({ onError }) {
+  const [st, setSt] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [msg, setMsg] = useState(null)
+  useEffect(() => {
+    let stop = false
+    const tick = async () => {
+      try {
+        const s = await api.scStatus()
+        if (!stop) setSt(s)
+      } catch {
+        /* ältere Gegenstelle */
+      }
+      if (!stop) setTimeout(tick, 2000)
+    }
+    tick()
+    return () => {
+      stop = true
+    }
+  }, [])
+  const run = async (label, f) => {
+    setBusy(label)
+    setMsg(null)
+    try {
+      const r = await f()
+      return r
+    } catch (e) {
+      setMsg(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  if (!st) return null
+  const time = st.last_sync ? new Date(st.last_sync).toLocaleTimeString('de-DE') : null
+  return (
+    <>
+      <div className="cad-section">
+        <strong>SolidCraft</strong>
+        <span className={st.connected ? 'ok-text' : 'warn-text'}>
+          {st.connected ? (st.live ? ' verbunden, läuft mit' : ' gefunden') : ' nicht erreichbar'}
+        </span>
+      </div>
+      <p className="hint">
+        Projekt-FEM folgt dem offenen SolidCraft-Design: Nach jeder Änderung (Maß, Feature) wird die neue Version übernommen und neu
+        gerechnet. SolidCraft muss auf dem rechnenden Rechner laufen (Einstellungen › Assistent › „Let AI agents connect“ an, Standard).
+      </p>
+      <label className="check">
+        <input type="checkbox" checked={st.live} disabled={!!busy} onChange={(e) => { const on = e.target.checked; setSt({ ...st, live: on }); run('', async () => setSt(await api.scLive(on))) }} />
+        Live mitlaufen{st.name ? ` – „${st.name}“` : ''}
+        {time ? ` (zuletzt ${time})` : ''}
+      </label>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={st.auto_result}
+          onChange={(e) => run('', async () => { await api.scAuto(e.target.checked); setSt({ ...st, auto_result: e.target.checked }) })}
+        />
+        Ergebnis nach jeder Rechnung in SolidCraft eintragen
+      </label>
+      <div className="row">
+        <button className="btn" disabled={!st.connected || !!busy} onClick={() => run('holen', async () => { const inc = await api.scFetch(); setMsg(`„${inc.name}“ geholt – wird geöffnet`) })}>
+          {busy === 'holen' ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Jetzt holen
+        </button>
+        <button className="btn" disabled={!st.connected || !!busy} onClick={() => run('ergebnis', async () => setMsg('In SolidCraft eingetragen (Parameter FEM_…): ' + (await api.scResult())))}>
+          {busy === 'ergebnis' ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Ergebnis → SolidCraft
+        </button>
+      </div>
+      {(msg || (st.message && st.live)) && <p className="hint cad-msg">{msg ?? st.message}</p>}
+    </>
+  )
+}
+
 function CadButton({ onError }) {
   const [open, setOpen] = useState(false)
   const [info, setInfo] = useState(null)
@@ -3171,7 +3534,7 @@ function CadButton({ onError }) {
   }
   return (
     <div className="share">
-      <button className="btn ghost" onClick={() => setOpen(!open)} title="Verbindung zu Onshape, Fusion 360, SolidWorks, NX, Solid Edge">
+      <button className="btn ghost" onClick={() => setOpen(!open)} title="Verbindung zu SolidCraft, Onshape, Fusion 360, SolidWorks, NX, Solid Edge">
         <Cable size={15} /> CAD
       </button>
       {open && (
@@ -3205,6 +3568,7 @@ function CadButton({ onError }) {
               </div>
             </>
           )}
+          <SolidCraftLink onError={onError} />
           <div className="cad-section">
             <strong>Onshape</strong>
             {info && (

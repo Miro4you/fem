@@ -1,7 +1,7 @@
 # Testprotokoll Projekt-FEM
 
-Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 50 von 50 Lehrbuchprüfungen bestanden
-(`./target/release/projekt-fem validieren`), 37 automatische Tests grün.
+Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 56 von 56 Lehrbuchprüfungen bestanden
+(`./target/release/projekt-fem validieren`), 42 automatische Tests grün.
 
 **So ausfüllen:** Jeden Punkt durchgehen, `[ ]` → `[x]` wenn es passt, sonst Anmerkung dahinter schreiben
 (was du gemacht hast, was passiert ist, gern mit Screenshot). Die Datei kannst du mir einfach zurückschicken.
@@ -15,7 +15,7 @@ Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung 
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 0.1 | Im Ordner `FEM`: `git pull` | neuester Stand (`git log --oneline -1` → „CAD-Knöpfe …“) | [ ] |
+| 0.1 | Im Ordner `FEM`: `git pull` | neuester Stand (`git log --oneline -1` → „Schweißnähte und SolidCraft …“) | [ ] |
 | 0.2 | `cd app && npm install` (**neu nötig**: PDF-Bibliothek jsPDF) | ohne Fehler | [ ] |
 | 0.3 | `npx tauri build --no-bundle` | baut durch, `target/release/projekt-fem-app` | [ ] |
 | 0.4 | App starten | Fenster öffnet, oben 5 Reiter: Modell · Geometrie · Studie · Stabwerk · Ergebnis; rechts „CAD“, „Heimnetz“ | [ ] |
@@ -151,7 +151,12 @@ Mach die Punkte für die CAD-Programme, die du hast; den Rest einfach übersprin
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 15.1 | Oben **„CAD“** öffnen | Dialog mit Erklärung, Onshape-Schlüsselfeldern | [ ] |
+| 15.1 | Oben **„CAD“** öffnen | Dialog mit Erklärung, Abschnitte SolidCraft und Onshape | [ ] |
+| 15.1a | **SolidCraft** starten (gleicher Rechner), ein Teil konstruieren; in Projekt-FEM „CAD“ → SolidCraft | „gefunden“ | [ ] |
+| 15.1b | „Live mitlaufen“ anhaken | Design wird geöffnet („SolidCraft: „…“ geöffnet“) | [ ] |
+| 15.1c | Lager + Last setzen, rechnen. In SolidCraft ein Maß ändern | nach ~1–2 s: „neue Version … übernommen und neu gerechnet“, Vergleich | [ ] |
+| 15.1d | „Ergebnis → SolidCraft“ | in SolidCraft im Parameter-Fenster FEM_Sicherheit, FEM_SigmaV_MPa, FEM_Verformung_mm … | [ ] |
+| 15.1e | Reiter Studie → Parameter „SolidCraft: <dein Maß>“, z. B. 3 Werte → Studie starten | Kurve/Tabelle; danach hat das Maß in SolidCraft wieder den alten Wert | [ ] |
 | 15.2 | **Onshape:** API-Schlüssel anlegen (dev-portal.onshape.com → API keys, lesen + schreiben), in „CAD“ eintragen | „API-Schlüssel hinterlegt“, zwei Lesezeichen erscheinen | [ ] |
 | 15.3 | Lesezeichen „→ Projekt-FEM“ in die Lesezeichenleiste ziehen, in Onshape ein Teilestudio öffnen, Lesezeichen klicken | kleines Fenster „… an Projekt-FEM geschickt“, Projekt-FEM öffnet „Dokument - Teilestudio“ | [ ] |
 | 15.4 | Lager + Last setzen, rechnen. In Onshape etwas ändern (z. B. Radius), Lesezeichen wieder klicken | Hinweis „neue Version … übernommen und neu gerechnet“, Vergleich vorige Version ↔ aktuell | [ ] |
@@ -170,6 +175,20 @@ Mach die Punkte für die CAD-Programme, die du hast; den Rest einfach übersprin
 Fehlermeldungen aus dem CAD bitte wörtlich oder als Screenshot – die CAD-Schnittstellen unterscheiden sich je nach
 Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (Onshape nur gegen einen Nachbau).
 
+## 16. Schweißnähte (Bleche) – Reiter Modell, Abschnitt „Schweißnähte“
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 16.1 | `examples/geometrie/blechkasten.step` öffnen (Blechkasten 2 mm, Ecken mit 0,2 mm Spalt). Boden unten fest, auf die Außenseite einer Längswand 2000 N nach innen, rechnen | rechnet, u max ≈ 0,9 mm (Wand nur am Boden gehalten) | [ ] |
+| 16.2 | „Spalte suchen“ (bis 1 mm) | 4 Spalte à 0,2 mm, 76 mm² | [ ] |
+| 16.3 | „Alle 4 als Naht übernehmen“, rechnen | u max ≈ 0,5 mm; Karte „Schweißnähte“ mit Kraft, l/a, τw, Ausnutzung | [ ] |
+| 16.4 | Eine Naht auf „Kehlnaht“, a = 1 mm | τw steigt etwa auf das Doppelte | [ ] |
+| 16.5 | Naht von Hand: „Naht hinzufügen“ → Fläche A (schmale Stirnfläche), Fläche B (Gegenfläche) | Flächen orange eingefärbt, Zähler | [ ] |
+| 16.6 | **Dein SolidWorks-Blechteil** mit geschlossenen Ecken als STEP: Spalte suchen, Nähte, rechnen | Spalte werden gefunden, Ergebnis plausibel? | [ ] |
+| 16.7 | Ohne Nähte bei getrennten Teilen rechnen | Meldung „nicht ausreichend gelagert … Schweißnähte anlegen“ | [ ] |
+| 16.8 | PDF-Bericht | Abschnitt „Schweißnähte“ | [ ] |
+| 16.9 | Projekt speichern und öffnen | Nähte wieder da | [ ] |
+
 ---
 
 ## Annahmen und Standardwerte, die du prüfen solltest
@@ -182,6 +201,9 @@ Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (O
 - **Erforderliche Sicherheiten** Standard 1,5 (Fließen) / 2,0 (Bruch).
 - **Strömung**: nur Staudruck × c_w auf der angeströmten Seite, keine Sogseite.
 - **IPE-Profilwerte** aus der Profiltabelle (DIN 1025-5) – bei Bedarf gegenprüfen.
+- **Schweißnähte**: Nachweis vereinfacht nach EN 1993-1-8 (Linienkraft / a ≤ Rm/(√3·β_w·1,25)), β_w aus dem
+  Werkstoffnamen (S235 0,8, S275 0,85, S355 0,9, S420/S460 und Edelstahl 1,0, sonst 0,8). Nahtenden/Kerben und
+  Ermüdung nicht bewertet. Die Naht ist ideal steif (keine Nahtnachgiebigkeit).
 
 ## Bekannte Grenzen
 
@@ -199,5 +221,7 @@ Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (O
 3. **Baugruppen** (neu auf der Liste): Welche Fälle hast du? (verschraubt, verklebt, Kontakt mit Spalt, Pressverband …)
 4. **Ansys-Werte** für den Hebel (Spannung im R6-Radius, max. Verformung, Lagerkraft).
 5. **Slicer**: Prusa, Orca oder Bambu Studio? Dann kann als Nächstes der 3MF-Import der Slicer-Einstellungen kommen.
-6. **CAD**: Welche Programme nutzt du wirklich (und welche Version)? Mit „SolidCraft“ war Solid Edge gemeint?
-   Und AutoCAD: eher 2D-Zeichnungen (→ DXF-Import fürs Stabwerk) oder 3D-Körper?
+6. **CAD**: Welche Programme nutzt du wirklich (und welche Version)? AutoCAD: eher 2D-Zeichnungen (→ DXF-Import fürs
+   Stabwerk) oder 3D-Körper? (Solid-Edge-Skripte bleiben drin, falls doch jemand sie braucht.)
+7. **Schweißnähte**: Brauchst du auch unterbrochene Nähte (nur Abschnitte) oder Punktschweißungen? Und Nähte an
+   T-Stößen ohne Spalt (Kehlnaht zwischen zwei Blechen, die sich berühren)?

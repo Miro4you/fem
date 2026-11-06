@@ -14,7 +14,14 @@ use crate::sparse::Bsr;
 use crate::{FemError, Result};
 
 /// Besetzungsstruktur aus der Element-Konnektivität (Knoten sind gekoppelt, wenn sie ein Element teilen).
-fn pattern(n_nodes: usize, conn: &[usize], npe: usize) -> (Vec<usize>, Vec<u32>) {
+fn pattern(n_nodes: usize, conn: &[usize], npe: usize, extra: &[(Vec<usize>, DMatrix<f64>)]) -> (Vec<usize>, Vec<u32>) {
+    // Knoten → Zusatzelemente (Kopplungen von Schweißnähten)
+    let mut extra_of: Vec<Vec<u32>> = vec![Vec::new(); if extra.is_empty() { 0 } else { n_nodes }];
+    for (i, (nodes, _)) in extra.iter().enumerate() {
+        for &n in nodes {
+            extra_of[n].push(i as u32);
+        }
+    }
     // Knoten → Elemente
     let mut start = vec![0usize; n_nodes + 1];
     for &n in conn {
@@ -36,6 +43,11 @@ fn pattern(n_nodes: usize, conn: &[usize], npe: usize) -> (Vec<usize>, Vec<u32>)
                 .iter()
                 .flat_map(|&e| conn[e as usize * npe..(e as usize + 1) * npe].iter().map(|&m| m as u32))
                 .collect();
+            if let Some(xs) = extra_of.get(n) {
+                for &x in xs {
+                    nb.extend(extra[x as usize].0.iter().map(|&m| m as u32));
+                }
+            }
             nb.push(n as u32); // auch unbenutzte Knoten bekommen einen Diagonalblock
             nb.sort_unstable();
             nb.dedup();
@@ -65,8 +77,9 @@ pub fn assemble(
     prescribed: &[Option<f64>],
     f_ext: &[f64],
     ke: impl Fn(usize) -> Result<DMatrix<f64>> + Sync,
+    extra: &[(Vec<usize>, DMatrix<f64>)],
 ) -> Result<System> {
-    let (ptr, col) = pattern(n_nodes, conn, npe);
+    let (ptr, col) = pattern(n_nodes, conn, npe, extra);
     let mut k = Bsr { nrows: n_nodes, ncols: n_nodes, br: 3, bc: 3, ptr, col, val: Vec::new() };
 
     // Elemente parallel, Addition über atomare Operationen (keine Zwischenkopie der Elementmatrizen)
@@ -75,9 +88,11 @@ pub fn assemble(
     let add = |cell: &AtomicU64, v: f64| {
         let _ = cell.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| Some((f64::from_bits(old) + v).to_bits()));
     };
-    (0..conn.len() / npe).into_par_iter().try_for_each(|e| -> Result<()> {
-        let m = ke(e)?;
-        let nodes = &conn[e * npe..(e + 1) * npe];
+    let n_elem = conn.len() / npe;
+    (0..n_elem + extra.len()).into_par_iter().try_for_each(|e| -> Result<()> {
+        let (owned, nodes): (DMatrix<f64>, &[usize]) =
+            if e < n_elem { (ke(e)?, &conn[e * npe..(e + 1) * npe]) } else { (extra[e - n_elem].1.clone(), &extra[e - n_elem].0) };
+        let m = owned;
         for (a, &na) in nodes.iter().enumerate() {
             for (b, &nb) in nodes.iter().enumerate() {
                 let p = k.find(na, nb).expect("Block in Besetzungsstruktur");
