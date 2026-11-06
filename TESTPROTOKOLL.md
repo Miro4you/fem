@@ -3,11 +3,15 @@
 Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 56 von 56 Lehrbuchprüfungen bestanden
 (`./target/release/projekt-fem validieren`), 43 automatische Tests grün.
 
-**So ausfüllen:** Jeden Punkt durchgehen, `[ ]` → `[x]` wenn es passt, sonst Anmerkung dahinter schreiben
-(was du gemacht hast, was passiert ist, gern mit Screenshot). Die Datei kannst du mir einfach zurückschicken.
+**So ausfüllen:** Jeden Punkt durchgehen, abhaken wenn es passt, sonst Anmerkung dazuschreiben (was du gemacht hast,
+was passiert ist, gern mit Screenshot). Die Datei oder ein Foto des ausgedruckten PDFs kannst du mir einfach schicken.
+
+**Wichtigste Punkte zuerst:** 0 (Starten), 1 + 1a (Grundablauf, Animation), 15.2–15.5a (Onshape), 16 (Schweißnähte,
+besonders 16.6 mit deinem SolidWorks-Blech), 15.10 (SolidWorks). Der Rest nach Lust und Zeit.
 
 Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung Ø8 = 13) und
-`examples/geometrie/` (lochplatte, winkel, welle, balken_gelenk). Gern auch eigene Teile.
+`examples/geometrie/` (lochplatte, winkel, welle, balken_gelenk, blechkasten). Gern auch eigene Teile.
+Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke`, Hebel) in deinem Konto.
 
 ---
 
@@ -15,9 +19,9 @@ Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung 
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 0.1 | Im Ordner `FEM`: `git pull` | neuester Stand (aktueller Stand von `claude/stoic-maxwell-rtmn09`) | [ ] |
-| 0.2 | `cd app && npm install` (**neu nötig**: PDF-Bibliothek jsPDF) | ohne Fehler | [ ] |
-| 0.3 | `npx tauri build --no-bundle` | baut durch, `target/release/projekt-fem-app` | [ ] |
+| 0.1 | Pull Request #1 auf GitHub zusammenführen („Merge“), dann im Ordner `FEM`: `git checkout main && git pull` | neuester Stand (`git log --oneline -1` zeigt die Verformungsanimation oder neuer) | [ ] |
+| 0.2 | `cd app && npm install` (neu: PDF-Bibliothek jsPDF) | ohne Fehler | [ ] |
+| 0.3 | `npx tauri build --no-bundle` (lädt beim ersten Mal neue Rust-Bibliotheken, Internet nötig) | baut durch, `target/release/projekt-fem-app` | [ ] |
 | 0.4 | App starten | Fenster öffnet, oben 5 Reiter: Modell · Geometrie · Studie · Stabwerk · Ergebnis; rechts „CAD“, „Heimnetz“ | [ ] |
 | 0.5 | Mac: dasselbe auf dem Mac | baut und startet | [ ] |
 
@@ -172,20 +176,23 @@ NX, Solid Edge und „Senden an“ kannst du überspringen.
 | 15.3 | Lesezeichen „→ Projekt-FEM“ in die Lesezeichenleiste ziehen, in Onshape ein Teilestudio öffnen, Lesezeichen klicken | kleines Fenster „… an Projekt-FEM geschickt“, Projekt-FEM öffnet „Dokument - Teilestudio“ | [ ] |
 | 15.4 | Lager + Last setzen, rechnen. In Onshape etwas ändern (z. B. Radius), Lesezeichen wieder klicken | Hinweis „neue Version … übernommen und neu gerechnet“, Vergleich vorige Version ↔ aktuell | [ ] |
 | 15.5 | Lesezeichen „FEM-Ergebnis → Onshape“ klicken, in Onshape Teil → Eigenschaften | Beschreibung enthält `[FEM …: S = … · σv … · u … · … g …]`, eigener Text bleibt | [ ] |
+| 15.4a | Onshape-Baugruppe statt Teilestudio schicken | Meldung „Baugruppen kann Projekt-FEM noch nicht rechnen – bitte das Teilestudio öffnen“ | [ ] |
 | 15.5a | **Onshape-Variable:** im Teilestudio Feature „Variable“ `#dicke = 5 mm` anlegen und in einer Extrusion verwenden, Teil holen, rechnen; Reiter Studie → „Onshape: #dicke“ → `3; 5; 8` → Studie starten | Kurve/Tabelle; in Onshape steht danach wieder 5 mm | [ ] |
+| 15.5b | Kostenloses Onshape-Konto: Dokumente sind öffentlich – der FEM-Eintrag in der Beschreibung ist also für alle sichtbar | zur Kenntnis genommen | [ ] |
 | 15.6 | Falls der Browser das Lesezeichen blockiert: Onshape-Adresse kopieren → „CAD“ → einfügen → „Holen“ | Teil wird geöffnet | [ ] |
 | 15.7 | **Fusion:** Add-in einrichten (Umschalt+S → Add-Ins → +), Reiter VOLUMENKÖRPER | Gruppe „Projekt-FEM“ mit zwei Knöpfen | [ ] |
 | 15.8 | Fusion: „In Projekt-FEM rechnen“, in Projekt-FEM rechnen, in Fusion ändern, nochmal „In Projekt-FEM rechnen“ | wie 15.3/15.4 | [ ] |
 | 15.9 | Fusion: „Ergebnis holen“ | Meldung mit Werten, Ändern → Parameter: FEM_Sicherheit usw. | [ ] |
 | 15.10 | **SolidWorks:** Makro importieren, zwei Makro-Knöpfe anlegen, senden + Ergebnis holen | Teil kommt an; Datei → Eigenschaften → Benutzerdefiniert: FEM_… | [ ] |
-| 15.11 | **NX:** Journale ausführen (Alt+F8), dann als Benutzerbefehl-Knopf | Teil kommt an; Attribute FEM_… | [ ] |
-| 15.12 | **Solid Edge** (falls du das mit „SolidCraft“ meintest): Skripte per Doppelklick | Teil kommt an; Eigenschaften FEM_… | [ ] |
+| 15.11 | *(optional, nutzt du nicht)* **NX:** Journale ausführen (Alt+F8), dann als Benutzerbefehl-Knopf | Teil kommt an; Attribute FEM_… | [ ] |
+| 15.12 | *(optional, nutzt du nicht)* **Solid Edge:** Skripte per Doppelklick | Teil kommt an; Eigenschaften FEM_… | [ ] |
 | 15.13 | **Anderes CAD / Datei:** „Senden an → An Projekt-FEM“ (Windows) bzw. Schnellaktion (Mac) auf eine `.step` | Teil wird geöffnet | [ ] |
 | 15.14 | **Über das Heimnetz:** am Laptop `projekt-fem-cad.txt` aus dem Dialog „CAD“ anlegen, dort aus dem CAD senden; Projekt-FEM im Browser offen | Teil erscheint im Browser-Tab; „Ergebnis holen“ geht auch | [ ] |
 | 15.15 | Projekt-FEM neu starten, im CAD „Ergebnis holen“ | letzte Werte kommen noch | [ ] |
 
 Fehlermeldungen aus dem CAD bitte wörtlich oder als Screenshot – die CAD-Schnittstellen unterscheiden sich je nach
-Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (Onshape nur gegen einen Nachbau).
+Version. Onshape ist mit echtem Konto getestet; Fusion, SolidWorks, NX, Solid Edge und SolidCraft konnte ich hier nicht
+selbst starten.
 
 ## 16. Schweißnähte (Bleche) – Reiter Modell, Abschnitt „Schweißnähte“
 
@@ -200,6 +207,17 @@ Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (O
 | 16.7 | Ohne Nähte bei getrennten Teilen rechnen | Meldung „nicht ausreichend gelagert … Schweißnähte anlegen“ | [ ] |
 | 16.8 | PDF-Bericht | Abschnitt „Schweißnähte“ | [ ] |
 | 16.9 | Projekt speichern und öffnen | Nähte wieder da | [ ] |
+
+## 17. Aufräumen und Sicherheit (nach dem Test)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 17.1 | Onshape-Passwort ändern (war kurz im Speicher der Cloud-Umgebung), Zwei-Faktor-Anmeldung einschalten | erledigt | [ ] |
+| 17.2 | Test-API-Schlüssel löschen: dev-portal.onshape.com → API keys (stand im Chat, gültig bis 13.11.) | Schlüssel weg | [ ] |
+| 17.3 | Neuen API-Schlüssel anlegen und **nur** in Projekt-FEM unter „CAD“ eintragen | „API-Schlüssel hinterlegt“ | [ ] |
+| 17.4 | In der Claude-Sitzung: Cloud-Umgebungs-Menü → Bearbeiten → Network secrets → Eintrag cad.onshape.com entfernen | Eintrag weg | [ ] |
+| 17.5 | Onshape-Testdokument „Projekt-FEM Test 1“ behalten oder löschen | entschieden | [ ] |
+| 17.6 | Heimnetz-Freigabe: Link mit Schlüssel nur auf eigenen Geräten; bei Bedarf „Neuen Zugangsschlüssel erzeugen“ (Lesezeichen danach neu anlegen) | ok | [ ] |
 
 ---
 
@@ -223,6 +241,9 @@ Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (O
 - Eigenfrequenzen/Knicken: massiver Werkstoff (Infill wird dort nicht berücksichtigt), bis ca. 600 000 Unbekannte.
 - Stabwerk: kein Stabilitätsnachweis der Stäbe (Biegeknicken/Kippen), keine Schnittgrößen-Diagramme.
 - Schalenelemente (Bleche) nicht umgesetzt – dünne Teile mit feinem Volumennetz rechnen.
+- Baugruppen: Körper nur verklebt (gemeinsame Flächen) oder über Schweißnähte gekoppelt; kein Kontakt, keine Schrauben,
+  ein Werkstoff für alle Körper.
+- Video-Aufnahme in der Linux-Desktop-App je nach WebKit-Version nicht verfügbar (dann im Browser aufnehmen).
 - Strömung nur überschlägig (keine CFD).
 - Topologieoptimierung: Form ist ein Vorschlag (STL), keine fertige CAD-Geometrie.
 
@@ -233,6 +254,9 @@ Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (O
 3. **Baugruppen** (neu auf der Liste): Welche Fälle hast du? (verschraubt, verklebt, Kontakt mit Spalt, Pressverband …)
 4. **Ansys-Werte** für den Hebel (Spannung im R6-Radius, max. Verformung, Lagerkraft).
 5. **Slicer**: Prusa, Orca oder Bambu Studio? Dann kann als Nächstes der 3MF-Import der Slicer-Einstellungen kommen.
-6. **CAD**: SolidWorks-Version auf der Arbeit? (Makros/VBA erlaubt?) Onshape-Abo (Free/Standard/Professional)?
+6. **CAD**: SolidWorks-Version auf der Arbeit? Sind Makros (VBA) dort erlaubt?
 7. **Schweißnähte**: Brauchst du auch unterbrochene Nähte (nur Abschnitte) oder Punktschweißungen? Und Nähte an
    T-Stößen ohne Spalt (Kehlnaht zwischen zwei Blechen, die sich berühren)?
+8. **Baugruppen / Bewegung**: Hast du ein konkretes Beispiel (z. B. Koppelstange mit Bolzen) als Onshape-Baugruppe,
+   an dem wir Baugruppen und später die Bewegungssimulation entwickeln können?
+9. **Animation/Video**: Reicht WebM/MP4, oder brauchst du GIF (z. B. für Foren)?
