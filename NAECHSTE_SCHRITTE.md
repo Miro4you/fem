@@ -79,6 +79,9 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - ✅ Schweißnähte (Bleche mit Spalt, getrennte Teile): Kopplung über den Spalt, Spaltsuche, Nahtkraft/Linienkraft/τw,
   Nachweis EN 1993-1-8 vereinfacht. Offen: unterbrochene Nähte/Punktschweißen, Kehlnähte an T-Stößen ohne Spalt,
   Ermüdung (Kerbfälle)
+- CAD-Schwerpunkt laut Felix: **Onshape** (privat, Hauptsystem), **SolidWorks** (Arbeit), Fusion selten,
+  SolidCraft zum Anschauen. Breite Kompatibilität bleibt Ziel (Bekanntheit). Nächste Kandidaten: Parameterstudie über
+  Onshape-Konfigurationen/Variablen (wie bei SolidCraft), SolidWorks-Konfigurationen
 - **Neu: Baugruppen** – mehrere Körper aus einer STEP-Datei: Werkstoff je Körper, Verbindungen (verklebt/
   verschraubt/Kontakt), Körper ein-/ausblenden, Kräfte zwischen den Körpern auswerten
 - Mac: läuft laut Felix (installiert) – Rückmeldung abwarten

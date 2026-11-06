@@ -147,7 +147,9 @@ Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung 
 
 ## 15. CAD-Schnittstelle (Knöpfe im CAD) – Anleitung: `cad-addins/README.md`
 
-Mach die Punkte für die CAD-Programme, die du hast; den Rest einfach überspringen.
+**Reihenfolge für dich:** zuerst **Onshape** (15.2–15.6, privat am meisten genutzt), dann **SolidWorks** (15.10, Arbeit –
+Makro-Rechte vorher klären), **Fusion** (15.7–15.9) bei Gelegenheit, SolidCraft (15.1a–e), wenn du es dir anschaust.
+NX, Solid Edge und „Senden an“ kannst du überspringen.
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
@@ -221,7 +223,6 @@ Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (O
 3. **Baugruppen** (neu auf der Liste): Welche Fälle hast du? (verschraubt, verklebt, Kontakt mit Spalt, Pressverband …)
 4. **Ansys-Werte** für den Hebel (Spannung im R6-Radius, max. Verformung, Lagerkraft).
 5. **Slicer**: Prusa, Orca oder Bambu Studio? Dann kann als Nächstes der 3MF-Import der Slicer-Einstellungen kommen.
-6. **CAD**: Welche Programme nutzt du wirklich (und welche Version)? AutoCAD: eher 2D-Zeichnungen (→ DXF-Import fürs
-   Stabwerk) oder 3D-Körper? (Solid-Edge-Skripte bleiben drin, falls doch jemand sie braucht.)
+6. **CAD**: SolidWorks-Version auf der Arbeit? (Makros/VBA erlaubt?) Onshape-Abo (Free/Standard/Professional)?
 7. **Schweißnähte**: Brauchst du auch unterbrochene Nähte (nur Abschnitte) oder Punktschweißungen? Und Nähte an
    T-Stößen ohne Spalt (Kehlnaht zwischen zwei Blechen, die sich berühren)?
