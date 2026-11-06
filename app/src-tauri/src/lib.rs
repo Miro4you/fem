@@ -565,6 +565,15 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
     }
 }
 
+// --- Stabwerk (Balken, Rahmen, Fachwerke) -----------------------------------------------
+
+#[tauri::command]
+async fn frame_solve(frame: fem_core::frame::Frame) -> Result<fem_core::frame::FrameResults, String> {
+    tauri::async_runtime::spawn_blocking(move || fem_core::frame::solve_frame(&frame).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // --- Eigenfrequenzen und Knicken --------------------------------------------------------
 
 #[derive(Serialize)]
@@ -904,6 +913,7 @@ pub fn run() {
             orientation_scan,
             topopt,
             modes,
+            frame_solve,
             topo_surface,
             topo_stl,
             export_vtu,

@@ -170,6 +170,7 @@ fn router(shared: Shared) -> Router {
         .route("/orientation_scan", post(api_orientation_scan))
         .route("/topopt", post(api_topopt))
         .route("/modes", post(api_modes))
+        .route("/frame_solve", post(api_frame_solve))
         .route("/topo_surface", post(api_topo_surface))
         .route("/topo_stl", get(api_topo_stl))
         .route("/vtu", get(api_vtu))
@@ -356,6 +357,11 @@ async fn api_orientation_scan(State(s): State<Shared>, headers: HeaderMap, Json(
     let state = s.session(&headers);
     let v = tokio::task::spawn_blocking(move || orientation_scan_impl(&state, a.material)).await.map_err(bad)?.map_err(bad)?;
     Ok(Json(v).into_response())
+}
+
+async fn api_frame_solve(Json(f): Json<fem_core::frame::Frame>) -> ApiResult<Response> {
+    let r = tokio::task::spawn_blocking(move || fem_core::frame::solve_frame(&f)).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(r).into_response())
 }
 
 #[derive(Deserialize)]

@@ -61,6 +61,8 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - ✅ Leichtbau: Materialausnutzung + Topologieoptimierung mit STL-Export
 - ✅ Phase 3: Werkstoffdatenbank (Dichte, eigene Werkstoffe), Festigkeitsnachweis, PDF-Bericht,
   Parameterstudien, MathPad-Export
+- ✅ Phase 4: Stabwerk (Balken/Rahmen/Fachwerke, Profile inkl. IPE, Vorlagen). Offen: Schalenelemente,
+  Stabilitätsnachweis der Stäbe (Biegeknicken/Kippen), Schnittgrößenverläufe als Diagramm
 - ✅ Phase 5: Eigenfrequenzen + lineares Knicken (Lanczos), animierte Formen, Prüffälle Kragbalken/Euler
 - ✅ Phase 6 (überschlägig): Strömungs-/Windlast (Staudruck × c_w auf angeströmte Flächen). Echte CFD-Kopplung
   (OpenFOAM: Netz, Löser, Druckfeld zurück auf die Oberfläche) wäre ein eigenes Großprojekt

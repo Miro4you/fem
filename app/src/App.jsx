@@ -13,6 +13,7 @@ import {
 } from './materials.js'
 import { fmt, fmtVec } from './format.js'
 import { buildReport } from './report.js'
+import { FrameSidebar, FrameView, newFrame, framePayload } from './FrameStudio.jsx'
 import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES, regionRefine } from './region.js'
 import { GEO_OPS, opFromSurface, newSketchOp, opPayload, opProblem, remapSurfaces, axisLabel } from './geoops.js'
 
@@ -112,6 +113,25 @@ export default function App() {
   const [analysis, setAnalysis] = useState('static')
   const [modeCount, setModeCount] = useState('6')
   const [modes, setModes] = useState(null) // { kind, values, shapes, seconds, sel, animate }
+  // Stabwerk (unabhängig von der STEP-Geometrie)
+  const [frame, setFrameRaw] = useState(() => newFrame())
+  const [frameResults, setFrameResults] = useState(null)
+  const [frameDisplay, setFrameDisplay] = useState('util')
+  const setFrame = (f) => {
+    setFrameRaw(f)
+    setFrameResults(null)
+  }
+  async function onFrameSolve() {
+    setBusy('Stabwerk rechnen …')
+    setError(null)
+    try {
+      setFrameResults(await api.frameSolve(framePayload(frame)))
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
   const [result, setResult] = useState(null)
   const [resultStale, setResultStale] = useState(false)
   const [view, setView] = useState('setup')
@@ -1163,6 +1183,9 @@ export default function App() {
           <button className={view === 'study' ? 'on' : ''} disabled={!mesh} onClick={() => { setActive(null); setDrawing(null); setView('study') }}>
             Studie
           </button>
+          <button className={view === 'frame' ? 'on' : ''} onClick={() => { setActive(null); setDrawing(null); setView('frame') }}>
+            Stabwerk
+          </button>
           <button className={view === 'result' ? 'on' : ''} disabled={!result && !modes} onClick={() => setView('result')}>
             Ergebnis{resultStale && result ? ' (veraltet)' : ''}
           </button>
@@ -1555,6 +1578,28 @@ export default function App() {
                 </div>
               )}
             </>
+          ) : view === 'frame' ? (
+            <FrameSidebar
+              frame={frame}
+              setFrame={setFrame}
+              results={frameResults}
+              onSolve={onFrameSolve}
+              busy={!!busy}
+              display={frameDisplay}
+              setDisplay={setFrameDisplay}
+              onSave={() => api.saveBlob(new Blob([JSON.stringify({ format: 'projekt-fem-stabwerk', version: 1, ...frame }, null, 2)], { type: 'application/json' }), 'stabwerk.stab.json', 'Stabwerk', 'json').catch((e) => setError(String(e)))}
+              onOpen={async () => {
+                try {
+                  const d = await api.openJson('Stabwerk', 'json')
+                  if (!d) return
+                  if (d.format !== 'projekt-fem-stabwerk') throw new Error('Keine Stabwerk-Datei')
+                  const { format, version, ...rest } = d // eslint-disable-line no-unused-vars
+                  setFrame({ ...newFrame(), ...rest })
+                } catch (e) {
+                  setError(String(e))
+                }
+              }}
+            />
           ) : view === 'study' ? (
             <StudyPanel
               study={study}
@@ -1620,7 +1665,8 @@ export default function App() {
         </aside>
 
         <section className="stage">
-          {!mesh && !busy && (
+          {view === 'frame' && <FrameView frame={frame} results={frameResults} display={frameDisplay} />}
+          {!mesh && !busy && view !== 'frame' && (
             <div className="empty">
               <Layers size={40} strokeWidth={1.4} />
               <h2>Bauteil öffnen</h2>

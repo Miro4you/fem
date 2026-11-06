@@ -72,6 +72,18 @@ abgebildet; linear-elastisch, kein Kriechen.
 - **Werkstoffe**: Vorlagen mit Dichte (Masse im Ergebnis), eigene Werkstoffe speichern
   (`~/.config/projekt-fem/werkstoffe.json`), Werte aus eigenem Zugversuch übernehmen.
 
+## Stabwerk: Balken, Rahmen, Fachwerke (Phase 4)
+
+Reiter **„Stabwerk“** (ohne STEP-Datei): Knoten, Stäbe, Profile (Rechteck, Rund, Rohr, Rechteckrohr, IPE 100–300),
+Lager (eingespannt, gelenkig, Loslager), Knoten- und Streckenlasten, Eigengewicht, ebene oder räumliche Systeme.
+3D-Balken nach Euler-Bernoulli (je Stab 10 Abschnitte) bzw. Fachwerkstäbe (nur Normalkraft). Ergebnis: Verformung,
+Normalkraft, Biegemoment, Vergleichsspannung σv = |N|/A + |M|/W (mit Torsion), Ausnutzung je Stab, Lagerkräfte.
+Vorlagen: Einfeldträger, Kragarm, Fachwerkbinder, Rahmen; Speichern als `.stab.json`.
+Stabilität (Knicken/Kippen) der Stäbe wird nicht nachgewiesen.
+
+**Schalen (Bleche)** sind nicht als eigene Elemente umgesetzt: Dünnwandige Teile lassen sich mit den quadratischen
+Volumenelementen rechnen, wenn das Netz in der Blechdicke fein genug ist (Elementgröße ≈ Blechdicke).
+
 ## Eigenfrequenzen und Knicken (Phase 5)
 
 Über „Rechnen“: **Statik / Eigenfrequenzen / Knicken**, Anzahl Moden wählbar. Eigenfrequenzen mit konsistenter
@@ -194,6 +206,7 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
 | 3D-Druck-Zugstab in der Schicht / quer zu den Schichten | Δl, Querkontraktion, Auslastung | exakt |
 | 3D-Druck-Zugstab mit Wand + 20 % Gitter-Infill | E·A (Wand und Kern parallel), Auslastung Wand/Infill | ±0,01 % |
+| Stabwerk: Einfeldträger / Fachwerk-Dreieck | Durchbiegung, Biegespannung / Stabkräfte | exakt |
 | Kragbalken 200×10×10 Stahl, Eigenfrequenzen | 1./2. Biegeeigenfrequenz (Euler-Bernoulli) | +0,2 % / −1,0 % |
 | Kragbalken 200×10×10 Stahl, Knicken | Euler Fall 1, P_kr = π²EI/(4L²) | +0,2 % |
 | Zugstab schräg im Raum, nur reibungsfreie Auflagen | σ, Δl, Lagerkraft (direkt und iterativ) | exakt |

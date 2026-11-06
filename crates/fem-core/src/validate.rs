@@ -386,6 +386,48 @@ pub fn kragbalken_dynamik() -> Result<Vec<Check>> {
     ])
 }
 
+/// Stabwerk: Einfeldträger mit Einzellast (w = F·L³/(48·E·I), σ = F·L/4/W) und Fachwerk-Dreieck (Stabkräfte)
+pub fn stabwerk() -> Result<Vec<Check>> {
+    use crate::frame::*;
+    let base = |nodes: Vec<[f64; 3]>, members: Vec<Member>, profile: Profile| Frame {
+        nodes,
+        members,
+        profiles: vec![profile],
+        e: 210_000.0,
+        nu: 0.3,
+        strength: Some(235.0),
+        density: 7.85e-9,
+        self_weight: false,
+        planar: false,
+        supports: vec![],
+        node_loads: vec![],
+        member_loads: vec![],
+    };
+    let mem = |a, b, truss| Member { a, b, profile: 0, truss, angle: 0.0 };
+    let mut f = base(vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [2000.0, 0.0, 0.0]], vec![mem(0, 1, false), mem(1, 2, false)], Profile::Rect { b: 40.0, h: 80.0 });
+    f.supports = vec![FrameSupport { node: 0, fix: [true, true, true, true, false, false] }, FrameSupport { node: 2, fix: [false, true, true, false, false, false] }];
+    f.node_loads = vec![NodeLoad { node: 1, f: [0.0, 0.0, -5000.0], m: [0.0; 3] }];
+    let r = solve_frame(&f)?;
+    let i = 40.0 * 80f64.powi(3) / 12.0;
+    let name = "Stabwerk: Einfeldträger 2 m, Rechteck 40×80, F = 5 kN";
+    let mut v = vec![
+        check(name, "Durchbiegung Mitte [mm]", -r.displacement[1][2], 5000.0 * 2000f64.powi(3) / (48.0 * 210_000.0 * i), 1e-6),
+        check(name, "Biegespannung Mitte [MPa]", r.max_sigma_v, 5000.0 * 500.0 / (40.0 * 80.0 * 80.0 / 6.0), 1e-6),
+    ];
+    let mut t = base(vec![[0.0, 0.0, 0.0], [2000.0, 0.0, 0.0], [1000.0, 0.0, 1000.0]], vec![mem(0, 1, true), mem(0, 2, true), mem(1, 2, true)], Profile::Round { d: 20.0 });
+    t.supports = vec![
+        FrameSupport { node: 0, fix: [true, true, true, false, false, false] },
+        FrameSupport { node: 1, fix: [false, true, true, false, false, false] },
+        FrameSupport { node: 2, fix: [false, true, false, false, false, false] },
+    ];
+    t.node_loads = vec![NodeLoad { node: 2, f: [0.0, 0.0, -10_000.0], m: [0.0; 3] }];
+    let rt = solve_frame(&t)?;
+    let name = "Stabwerk: Fachwerk-Dreieck 45°, F = 10 kN";
+    v.push(check(name, "Untergurt Zugkraft [N]", rt.members[0].stations[0].n, 5000.0, 1e-6));
+    v.push(check(name, "Diagonale Druckkraft [N]", -rt.members[1].stations[0].n, 10_000.0 / 2f64.sqrt(), 1e-6));
+    Ok(v)
+}
+
 /// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
@@ -399,6 +441,7 @@ pub fn all() -> Result<Vec<Check>> {
     v.extend(zugstab_gedruckt()?);
     v.extend(zugstab_infill(crate::SolverKind::Direct)?);
     v.extend(kragbalken_dynamik()?);
+    v.extend(stabwerk()?);
     v.extend(zugstab_schraeg(crate::SolverKind::Direct)?);
     v.extend(zugstab_schraeg(crate::SolverKind::Iterative)?);
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");

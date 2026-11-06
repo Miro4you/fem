@@ -145,6 +145,20 @@ export async function saveBlob(blob, name, filterName, ext) {
 export const modes = (setup, kind, count, density) =>
   isDesktop ? invoke('modes', { setup, kind, count, density }) : http('/modes', { method: 'POST', json: { setup, kind, count, density } })
 
+/// Stabwerk rechnen
+export const frameSolve = (frame) => (isDesktop ? invoke('frame_solve', { frame }) : http('/frame_solve', { method: 'POST', json: frame }))
+
+/// JSON-Datei öffnen (Desktop: Dialog, Browser: Dateiauswahl) → Inhalt als Objekt
+export async function openJson(filterName, ext) {
+  if (isDesktop) {
+    const p = await open({ multiple: false, filters: [{ name: filterName, extensions: [ext, 'json'] }] })
+    if (!p) return null
+    return JSON.parse(await invoke('load_text', { path: p }))
+  }
+  const f = await chooseFile('.json')
+  return f ? JSON.parse(await f.text()) : null
+}
+
 export const solve = (setup) => (isDesktop ? invoke('solve', { setup }) : http('/solve', { method: 'POST', json: { setup } }))
 
 /// STEP auswählen → Pfad auf dem rechnenden Rechner (im Browser: hochladen)

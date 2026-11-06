@@ -6,6 +6,7 @@
 pub mod amg;
 pub mod dynamics;
 pub mod element;
+pub mod frame;
 pub mod generate;
 pub mod infill;
 pub mod geometry;
