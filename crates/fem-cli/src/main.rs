@@ -1,6 +1,6 @@
 //! Kommandozeile für Projekt-FEM.
 //!
-//!   projekt-fem rechnen <fall.toml> [-o ergebnis.vtu]
+//!   projekt-fem rechnen <fall.toml> [-o ergebnis.vtu] [--loeser auto|direkt|iterativ]
 //!   projekt-fem validieren
 
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use fem_core::generate::box_mesh;
-use fem_core::{validate, Axis, Fix, Load, Material, Model, Order, Selection};
+use fem_core::{validate, Axis, Fix, Load, LocalFix, Material, Model, Order, Region, Selection, SolverKind};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -47,6 +47,8 @@ struct GroupDef {
     plane: Option<PlaneDef>,
     #[serde(rename = "box")]
     bbox: Option<BoxDef>,
+    /// Wirkbereich: Last/Lager nur auf diesem Teil der Flächen
+    region: Option<Region>,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +71,9 @@ struct SupportDef {
     group: String,
     /// festgehaltene Richtungen, Standard: alle (feste Einspannung)
     fix: Option<Vec<Axis>>,
+    /// lokale Lagerung: { type = "normal" } oder
+    /// { type = "cylindrical", origin = [...], axis = [...], radial = true, tangential = false, axial = true }
+    local: Option<LocalFix>,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +83,8 @@ struct LoadDef {
     force: Option<[f64; 3]>,
     traction: Option<[f64; 3]>,
     pressure: Option<f64>,
+    moment: Option<[f64; 3]>,
+    bearing: Option<[f64; 3]>,
 }
 
 fn build_model(case: Case) -> Result<Model> {
@@ -98,9 +105,13 @@ fn build_model(case: Case) -> Result<Model> {
             (None, Some(b)) => Selection::Box { min: b.min, max: b.max },
             _ => bail!("Gruppe „{}“: genau eine Auswahl angeben (plane oder box)", g.name),
         };
-        model = model.group(&g.name, sel);
+        model = model.group_in(&g.name, sel, g.region);
     }
     for s in case.support {
+        if let Some(local) = s.local {
+            model = model.support_local(&s.group, local);
+            continue;
+        }
         let fix = match s.fix {
             None => Fix::all(),
             Some(axes) => {
@@ -114,11 +125,13 @@ fn build_model(case: Case) -> Result<Model> {
         model = model.support(&s.group, fix);
     }
     for l in case.load {
-        let load = match (l.force, l.traction, l.pressure) {
-            (Some(force), None, None) => Load::Force { group: l.group, force },
-            (None, Some(traction), None) => Load::Traction { group: l.group, traction },
-            (None, None, Some(pressure)) => Load::Pressure { group: l.group, pressure },
-            _ => bail!("Last auf „{}“: genau eines von force, traction oder pressure angeben", l.group),
+        let load = match (l.force, l.traction, l.pressure, l.moment, l.bearing) {
+            (Some(force), None, None, None, None) => Load::Force { group: l.group, force },
+            (None, Some(traction), None, None, None) => Load::Traction { group: l.group, traction },
+            (None, None, Some(pressure), None, None) => Load::Pressure { group: l.group, pressure },
+            (None, None, None, Some(moment), None) => Load::Moment { group: l.group, moment },
+            (None, None, None, None, Some(force)) => Load::Bearing { group: l.group, force },
+            _ => bail!("Last auf „{}“: genau eines von force, traction, pressure, moment oder bearing angeben", l.group),
         };
         model = model.load(load);
     }
@@ -128,12 +141,12 @@ fn build_model(case: Case) -> Result<Model> {
     Ok(model)
 }
 
-fn run(path: &Path, out: Option<PathBuf>) -> Result<()> {
+fn run(path: &Path, out: Option<PathBuf>, solver: SolverKind) -> Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("{} nicht lesbar", path.display()))?;
     let case: Case = toml::from_str(&text).with_context(|| format!("Fehler in {}", path.display()))?;
 
     let t0 = Instant::now();
-    let model = build_model(case)?;
+    let model = build_model(case)?.solver(solver);
     let mesh = &model.mesh;
     println!(
         "Netz:       {} Knoten, {} Elemente ({}), Volumen {:.4}",
@@ -143,7 +156,11 @@ fn run(path: &Path, out: Option<PathBuf>) -> Result<()> {
         mesh.volume()
     );
     let res = fem_core::solve(&model)?;
-    println!("Rechnung:   {} Unbekannte in {:.2} s", res.n_equations, t0.elapsed().as_secs_f64());
+    let method = match res.iterations {
+        Some(n) => format!("iterativ, {n} Iterationen"),
+        None => "direkt".into(),
+    };
+    println!("Rechnung:   {} Unbekannte in {:.2} s ({method})", res.n_equations, t0.elapsed().as_secs_f64());
 
     let (n, u) = res.max_displacement();
     let p = mesh.nodes[n];
@@ -207,14 +224,24 @@ const USAGE: &str = "Projekt-FEM – lineare Statik für 3D-Bauteile
 
 Verwendung:
   projekt-fem rechnen <fall.toml> [-o ergebnis.vtu]   Rechnung ausführen
-  projekt-fem validieren                              Lehrbuchfälle gegen Theorie prüfen";
+  projekt-fem validieren                              Lehrbuchfälle gegen Theorie prüfen
+
+Optionen für „rechnen“:
+  -o <datei.vtu>                     Ergebnisdatei (Standard: neben der Eingabedatei)
+  --loeser auto|direkt|iterativ      Gleichungslöser (Standard auto: iterativ ab 50 000 Unbekannten)";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("rechnen" | "run") if args.len() >= 2 => {
-            let out = args.iter().position(|a| a == "-o").and_then(|i| args.get(i + 1)).map(PathBuf::from);
-            run(Path::new(&args[1]), out)
+            let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1));
+            let out = opt("-o").map(PathBuf::from);
+            match opt("--loeser").map(String::as_str) {
+                None | Some("auto") => run(Path::new(&args[1]), out, SolverKind::Auto),
+                Some("direkt") => run(Path::new(&args[1]), out, SolverKind::Direct),
+                Some("iterativ") => run(Path::new(&args[1]), out, SolverKind::Iterative),
+                Some(o) => Err(anyhow::anyhow!("unbekannter Löser „{o}“ (auto, direkt oder iterativ)")),
+            }
         }
         Some("validieren" | "validate") => validate_all(),
         _ => {

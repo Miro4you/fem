@@ -1,0 +1,13 @@
+{
+	"autodeskProduct": "Fusion360",
+	"type": "addin",
+	"id": "5b0c3a52-7f0e-4d0b-9a57-0c2f6a0d8e41",
+	"author": "Projekt-FEM",
+	"description": {
+		"": "Knöpfe „In Projekt-FEM rechnen“ und „Ergebnis holen“"
+	},
+	"version": "0.1.0",
+	"runOnStartup": true,
+	"supportedOS": "windows|mac",
+	"editEnabled": true
+}

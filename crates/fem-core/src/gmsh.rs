@@ -17,12 +17,79 @@ pub struct MeshOptions {
     pub order: Order,
     /// Elemente je Vollkreis an gekrümmten Flächen (feineres Netz an Bohrungen und Radien)
     pub curvature_points: u32,
+    /// örtliche Verfeinerungen (Lastflächen, Druckwände)
+    pub refine: Vec<Refine>,
 }
 
 impl Default for MeshOptions {
     fn default() -> Self {
-        MeshOptions { size: None, order: Order::Quadratic, curvature_points: 16 }
+        MeshOptions { size: None, order: Order::Quadratic, curvature_points: 16, refine: vec![] }
     }
+}
+
+/// Örtliche Netzverfeinerung: im Bereich höchstens `size`, nach außen weicher Übergang.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum Refine {
+    Ball { center: [f64; 3], radius: f64, size: f64 },
+    Box { min: [f64; 3], max: [f64; 3], size: f64 },
+    /// Zylinder um die Strecke center … center + axis
+    Cylinder { center: [f64; 3], axis: [f64; 3], radius: f64, size: f64 },
+    /// Nahe aller Oberflächen (bis Abstand `dist`), z. B. Druckwände
+    Surface { size: f64, dist: f64 },
+}
+
+/// Gmsh-Felder für die Verfeinerungen (leer, wenn keine)
+fn refine_fields(refine: &[Refine]) -> String {
+    let mut s = String::new();
+    let mut ids = Vec::new();
+    let mut n = 0;
+    for r in refine {
+        n += 1;
+        match r {
+            Refine::Ball { center, radius, size } => s += &format!(
+                "Field[{n}] = Ball; Field[{n}].Radius = {radius}; Field[{n}].XCenter = {}; Field[{n}].YCenter = {}; \
+                 Field[{n}].ZCenter = {}; Field[{n}].VIn = {size}; Field[{n}].VOut = 1e22; Field[{n}].Thickness = {};\n",
+                center[0], center[1], center[2], 0.5 * radius
+            ),
+            Refine::Box { min, max, size } => s += &format!(
+                "Field[{n}] = Box; Field[{n}].XMin = {}; Field[{n}].YMin = {}; Field[{n}].ZMin = {}; Field[{n}].XMax = {}; \
+                 Field[{n}].YMax = {}; Field[{n}].ZMax = {}; Field[{n}].VIn = {size}; Field[{n}].VOut = 1e22; Field[{n}].Thickness = {};\n",
+                min[0], min[1], min[2], max[0], max[1], max[2], 4.0 * size
+            ),
+            Refine::Cylinder { center, axis, radius, size } => s += &format!(
+                "Field[{n}] = Cylinder; Field[{n}].Radius = {radius}; Field[{n}].XCenter = {}; Field[{n}].YCenter = {}; \
+                 Field[{n}].ZCenter = {}; Field[{n}].XAxis = {}; Field[{n}].YAxis = {}; Field[{n}].ZAxis = {}; \
+                 Field[{n}].VIn = {size}; Field[{n}].VOut = 1e22;\n",
+                center[0] + axis[0] / 2.0,
+                center[1] + axis[1] / 2.0,
+                center[2] + axis[2] / 2.0,
+                axis[0] / 2.0,
+                axis[1] / 2.0,
+                axis[2] / 2.0
+            ),
+            Refine::Surface { size, dist } => {
+                s += &format!(
+                    "rs{n}() = Surface{{:}};\nField[{n}] = Distance; Field[{n}].SurfacesList = {{rs{n}()}}; Field[{n}].Sampling = 30;\n"
+                );
+                let d = n;
+                n += 1;
+                s += &format!(
+                    "Field[{n}] = Threshold; Field[{n}].InField = {d}; Field[{n}].SizeMin = {size}; Field[{n}].SizeMax = hmax; \
+                     Field[{n}].DistMin = {dist}; Field[{n}].DistMax = {};\n",
+                    3.0 * dist
+                );
+            }
+        }
+        ids.push(n);
+    }
+    if ids.is_empty() {
+        return s;
+    }
+    n += 1;
+    let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+    s += &format!("Field[{n}] = Min; Field[{n}].FieldsList = {{{list}}};\nBackground Field = {n};\nMesh.MeshSizeExtendFromBoundary = 0;\n");
+    s
 }
 
 pub fn find_gmsh() -> Option<PathBuf> {
@@ -56,10 +123,11 @@ pub fn mesh_step(step: &Path, opts: &MeshOptions) -> Result<Mesh> {
     let msh = dir.join("netz.msh");
 
     let size = match opts.size {
-        Some(h) if h > 0.0 => format!("Mesh.MeshSizeMax = {h};"),
+        Some(h) if h > 0.0 => format!("hmax = {h};\nMesh.MeshSizeMax = hmax;"),
         _ => "v() = Volume \"*\";\n\
               bb() = BoundingBox Volume{v()};\n\
-              Mesh.MeshSizeMax = Sqrt((bb(3)-bb(0))^2 + (bb(4)-bb(1))^2 + (bb(5)-bb(2))^2) / 25;"
+              hmax = Sqrt((bb(3)-bb(0))^2 + (bb(4)-bb(1))^2 + (bb(5)-bb(2))^2) / 25;\n\
+              Mesh.MeshSizeMax = hmax;"
             .into(),
     };
     let script = format!(
@@ -69,6 +137,7 @@ Merge "{step}";
 Coherence;
 {size}
 Mesh.MeshSizeFromCurvature = {curv};
+{fields}
 Mesh.ElementOrder = {order};
 Mesh.HighOrderOptimize = 1;
 Mesh.Optimize = 1;
@@ -81,6 +150,7 @@ Save "{msh}";
         step = escape(&step),
         msh = escape(&msh),
         curv = opts.curvature_points,
+        fields = refine_fields(&opts.refine),
         order = if opts.order == Order::Quadratic { 2 } else { 1 },
     );
     std::fs::write(&geo, script).map_err(|e| FemError::Gmsh(e.to_string()))?;
@@ -245,5 +315,52 @@ mod tests {
         let v = 80.0 * 40.0 * 8.0 + 8.0 * 40.0 * 52.0 + (36.0 - std::f64::consts::PI * 9.0) * 40.0
             - std::f64::consts::PI * (2.0 * 4.5f64.powi(2) * 8.0 + 5.5f64.powi(2) * 8.0);
         assert!((m.volume() - v).abs() / v < 0.005, "Volumen {} statt {v}", m.volume());
+    }
+
+    #[test]
+    fn verfeinerung_kugel_und_oberflaeche() {
+        if find_gmsh().is_none() {
+            eprintln!("Gmsh fehlt – Test übersprungen");
+            return;
+        }
+        let step = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/lochplatte.step");
+        let base = MeshOptions { size: Some(8.0), order: Order::Linear, ..Default::default() };
+        let grob = mesh_step(&step, &base).unwrap();
+        // Kugel um die Bohrung: dort Kanten ≤ 1 mm
+        let kugel = MeshOptions { refine: vec![Refine::Ball { center: [100.0, 25.0, 2.5], radius: 10.0, size: 1.0 }], ..base.clone() };
+        let fein = mesh_step(&step, &kugel).unwrap();
+        assert!(fein.n_elems() > 2 * grob.n_elems(), "{} vs {}", fein.n_elems(), grob.n_elems());
+        let kante = |m: &Mesh, nahe: &dyn Fn([f64; 3]) -> bool| {
+            let mut l: f64 = 0.0;
+            for e in 0..m.n_elems() {
+                let c = m.elem_coords(e);
+                if nahe(c[0]) {
+                    l = l.max(((c[0][0] - c[1][0]).powi(2) + (c[0][1] - c[1][1]).powi(2) + (c[0][2] - c[1][2]).powi(2)).sqrt());
+                }
+            }
+            l
+        };
+        let an_bohrung = |p: [f64; 3]| ((p[0] - 100.0).powi(2) + (p[1] - 25.0).powi(2)).sqrt() < 7.0;
+        let mittel = |m: &Mesh, nahe: &dyn Fn([f64; 3]) -> bool| {
+            let (mut sum, mut n) = (0.0, 0);
+            for e in 0..m.n_elems() {
+                let c = m.elem_coords(e);
+                if nahe(c[0]) {
+                    for (a, b) in [(0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3)] {
+                        sum += ((c[a][0] - c[b][0]).powi(2) + (c[a][1] - c[b][1]).powi(2) + (c[a][2] - c[b][2]).powi(2)).sqrt();
+                        n += 1;
+                    }
+                }
+            }
+            sum / n as f64
+        };
+        eprintln!("Kugel: mittlere Kante {:.2}, max {:.2}; grob {:.2}", mittel(&fein, &an_bohrung), kante(&fein, &an_bohrung), mittel(&grob, &an_bohrung));
+        assert!(mittel(&fein, &an_bohrung) < 1.5, "{}", mittel(&fein, &an_bohrung));
+        // Oberfläche: Platte nur 5 mm dick → überall fein, weit weg von der Bohrung trotzdem ≤ 1,5·size
+        let wand = MeshOptions { refine: vec![Refine::Surface { size: 1.5, dist: 1.5 }], ..base.clone() };
+        let w = mesh_step(&step, &wand).unwrap();
+        eprintln!("Wand: mittlere Kante {:.2}", mittel(&w, &|p| p[0] < 30.0));
+        let weit = |p: [f64; 3]| p[0] < 30.0;
+        assert!(mittel(&w, &weit) < 0.65 * mittel(&grob, &weit), "{} vs {}", mittel(&w, &weit), mittel(&grob, &weit));
     }
 }
