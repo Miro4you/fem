@@ -172,6 +172,12 @@ export async function cadInfo() {
 export const onshapeSetKeys = (access, secret) =>
   isDesktop ? invoke('onshape_set_keys', { access, secret }) : http('/onshape/keys', { method: 'POST', json: { access, secret } })
 /// Onshape-Teilestudio holen (Adresse aus dem Browser); das Teil kommt wie aus einem Add-in an
+/// Onshape-Variablen des Teilestudios (`#dicke` …), ändern, und für die Studie: setzen + STEP holen
+export const onshapeVariables = (url) => (isDesktop ? invoke('onshape_variables', { url }) : http('/onshape/variables', { method: 'POST', json: { url } }))
+export const onshapeSetVariable = (url, name, expression) =>
+  isDesktop ? invoke('onshape_set_variable', { url, name, expression }) : http('/onshape/set_variable', { method: 'POST', json: { url, name, expression } })
+export const onshapeStudy = (url, name, expression) =>
+  isDesktop ? invoke('onshape_study', { url, name, expression }) : http('/onshape/study', { method: 'POST', json: { url, name, expression } })
 export const onshapeImport = (url) => (isDesktop ? invoke('onshape_import', { url }) : http('/onshape/import', { method: 'POST', json: { url } }))
 // --- SolidCraft (Live-Verbindung über seinen Steuerkanal, läuft auf dem rechnenden Rechner) ---
 const sc = (cmd, args, path, method = 'POST', json) =>

@@ -88,6 +88,14 @@ Onshape einfach wieder klicken → neue Version wird gerechnet.
 in die **Beschreibung** der Teile (Teil anklicken → Eigenschaften). Vorhandener Text bleibt, nur der FEM-Eintrag
 wird ersetzt. Geht nur im Arbeitsbereich, nicht in gespeicherten Versionen.
 
+**Parameterstudie über Onshape-Variablen:** Im Teilestudio eine Variable anlegen (Feature „Variable“, z. B.
+`#dicke = 5 mm`) und in Maßen verwenden. Das Teil mit dem Lesezeichen an Projekt-FEM schicken, Lager/Lasten festlegen,
+rechnen. Dann Reiter **Studie** → Parameter **„Onshape: #dicke“** → Werte (z. B. `4; 6; 8`) → Studie starten.
+Projekt-FEM setzt die Variable in Onshape auf jeden Wert, holt die Geometrie, überträgt Lager/Lasten/Nähte und rechnet;
+zum Schluss steht wieder der alte Wert drin. Ergebnis als Kurve (Spannung, Verformung, Sicherheit, Masse) und CSV.
+Jede Änderung erscheint in der Onshape-Versionsgeschichte. Variablen aus Variablen-Studios werden noch nicht angeboten,
+nur die im Teilestudio selbst.
+
 Falls der Browser das Lesezeichen blockiert: die Onshape-Adresse kopieren und im Dialog „CAD“ bei
 „Adresse des Teilestudios einfügen“ → „Holen“.
 
@@ -162,7 +170,7 @@ Stabwerk (Rahmen/Fachwerke aus einer Linienzeichnung) vorgemerkt.
 |---|---|
 | Projekt-FEM-Seite (Empfang, neue Version erkennen, Lager/Lasten übertragen, neu rechnen, Ergebnis bereitstellen) | getestet |
 | SolidCraft | gegen einen Nachbau des SolidCraft-Steuerkanals getestet (nach dessen Dokumentation: Schlüsseldatei, Mitlaufen, neue Version nach Maßänderung, Ergebnis als Parameter + Eigenschaft, Parameterstudie mit Rücksetzen). **Mit echtem SolidCraft noch nicht** (Programm konnte hier nicht gestartet werden) |
-| Onshape | **mit echtem Onshape getestet** (06.11.2026, kostenloses Konto, Dokument „Projekt-FEM Test 1“): Teilestudio holen (STEP in ~8 s, Maße in mm korrekt), rechnen, in Onshape Variable `#dicke` 5 → 8 mm ändern, neue Version holen → Lager/Lasten übernommen, automatisch neu gerechnet (σv 117,9 → 45,5 MPa, Handrechnung 120 → 46,9 MPa), Ergebnis in die Beschreibung geschrieben, Baugruppe wird abgelehnt. Offen: Klick auf das Lesezeichen im echten Onshape-Tab (Browser-Sicherheitsregeln) |
+| Onshape | **mit echtem Onshape getestet** (06.11.2026, kostenloses Konto, Dokument „Projekt-FEM Test 1“): Teilestudio holen (STEP in ~8 s, Maße in mm korrekt), rechnen, in Onshape Variable `#dicke` 5 → 8 mm ändern, neue Version holen → Lager/Lasten übernommen, automatisch neu gerechnet (σv 117,9 → 45,5 MPa, Handrechnung 120 → 46,9 MPa), Ergebnis in die Beschreibung geschrieben, Baugruppe wird abgelehnt, Parameterstudie über `#dicke` 4/6/8 mm (σv 177,7 / 82,5 / 45,8 MPa, Handrechnung 187,5 / 83,3 / 46,9 MPa; 15 s; danach wieder 8 mm). Offen: Klick auf das Lesezeichen im echten Onshape-Tab (Browser-Sicherheitsregeln) |
 | Fusion-Add-in, NX-Journale | Ablauf mit Platzhaltern statt Fusion/NX gegen Projekt-FEM getestet (senden, holen, Heimnetz, Fehler). **Im echten Programm noch nicht** |
 | SolidWorks-Makro, Solid-Edge-Skripte, „Senden an“ (Windows) | **ungetestet** (hier kein Windows) |
 | `an_projekt_fem.sh` (Mac/Linux) | getestet (lokal, Heimnetz, falscher Schlüssel, Umlaute im Namen) |

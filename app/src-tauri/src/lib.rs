@@ -326,6 +326,21 @@ fn onshape_set_keys(access: String, secret: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn onshape_variables(url: String) -> Result<Vec<onshape::Variable>, String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::variables(&url)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn onshape_set_variable(url: String, name: String, expression: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::set_variable(&url, &name, &expression)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn onshape_study(url: String, name: String, expression: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::study_value(&url, &name, &expression)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn onshape_import(url: String) -> Result<cad::Incoming, String> {
     tauri::async_runtime::spawn_blocking(move || onshape::import(&url)).await.map_err(|e| e.to_string())?
 }
@@ -1063,6 +1078,9 @@ pub fn run() {
             solidcraft_study,
             onshape_set_keys,
             onshape_import,
+            onshape_variables,
+            onshape_set_variable,
+            onshape_study,
             load_user_materials,
             save_user_materials,
             open_step,

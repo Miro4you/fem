@@ -182,6 +182,12 @@ pub fn import(url: &str) -> Result<crate::cad::Incoming, String> {
     let t = parse_url(url)?;
     let c = Client::new(&t)?;
     let name = part_name(&c, &t)?;
+    let data = export_step(&c, &t)?;
+    crate::cad::receive_from(&name, "Onshape", &data, Some(url.trim().to_string()))
+}
+
+/// Teilestudio als STEP (Onshape erzeugt die Datei im Hintergrund)
+fn export_step(c: &Client, t: &Target) -> Result<Vec<u8>, String> {
     let tr = c.post(
         &format!("partstudios/{}/translations", t.element()),
         json!({ "formatName": "STEP", "storeInDocument": false, "flattenAssemblies": false, "yAxisIsUp": false }),
@@ -198,8 +204,110 @@ pub fn import(url: &str) -> Result<crate::cad::Incoming, String> {
             _ => std::thread::sleep(Duration::from_millis(700)),
         }
     };
-    let data = c.bytes(&format!("documents/d/{}/externaldata/{fid}", t.did))?;
-    crate::cad::receive(&name, "Onshape", &data)
+    c.bytes(&format!("documents/d/{}/externaldata/{fid}", t.did))
+}
+
+// --- Variablen (Parameterstudie) ---------------------------------------------------------------
+
+/// Variable eines Teilestudios (`#dicke`)
+#[derive(Debug, Clone, Serialize)]
+pub struct Variable {
+    pub name: String,
+    pub expression: String,
+    /// LENGTH, ANGLE, NUMBER oder ANY
+    pub kind: String,
+    /// Zahl und Einheit, wenn der Ausdruck einfach ist („5 mm“ → 5, „mm“)
+    pub value: Option<f64>,
+    pub unit: String,
+}
+
+/// „5 mm“ → (5, „mm“), „12.5“ → (12,5, „“), „#a*2“ → None
+pub fn split_expression(expr: &str) -> Option<(f64, String)> {
+    let e = expr.trim();
+    let i = e.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')).unwrap_or(e.len());
+    let (num, rest) = e.split_at(i);
+    let v: f64 = num.parse().ok()?;
+    let unit = rest.trim();
+    (unit.is_empty() || unit.chars().all(|c| c.is_ascii_alphabetic())).then(|| (v, unit.to_string()))
+}
+
+fn default_unit(kind: &str) -> &'static str {
+    match kind {
+        "LENGTH" => "mm",
+        "ANGLE" => "deg",
+        _ => "",
+    }
+}
+
+/// Variablen, die im Teilestudio selbst angelegt sind (Variablen-Studios: noch nicht)
+pub fn variables(url: &str) -> Result<Vec<Variable>, String> {
+    let t = parse_url(url)?;
+    let c = Client::new(&t)?;
+    let groups = c.get(&format!("variables/{}/variables", t.element()))?;
+    let mut out = Vec::new();
+    for g in groups.as_array().into_iter().flatten() {
+        if !g["variableStudioReference"].is_null() {
+            continue;
+        }
+        for v in g["variables"].as_array().into_iter().flatten() {
+            let (Some(name), Some(expr)) = (v["name"].as_str(), v["expression"].as_str()) else { continue };
+            let kind = v["type"].as_str().unwrap_or("ANY").to_string();
+            let (value, unit) = match split_expression(expr) {
+                Some((x, u)) => (Some(x), if u.is_empty() { default_unit(&kind).to_string() } else { u }),
+                None => (None, default_unit(&kind).to_string()),
+            };
+            out.push(Variable { name: name.into(), expression: expr.into(), kind, value, unit });
+        }
+    }
+    Ok(out)
+}
+
+/// Variable im Teilestudio ändern (Variablen-Feature anpassen); Fehler, wenn das Teilestudio danach nicht aufgeht
+pub fn set_variable(url: &str, name: &str, expression: &str) -> Result<(), String> {
+    let t = parse_url(url)?;
+    if t.wvm != "w" {
+        return Err("Variablen lassen sich nur im Arbeitsbereich ändern, nicht in einer gespeicherten Version".into());
+    }
+    let c = Client::new(&t)?;
+    let fs = c.get(&format!("partstudios/{}/features", t.element()))?;
+    let feat = fs["features"]
+        .as_array()
+        .and_then(|a| {
+            a.iter().rev().find(|f| {
+                f["featureType"] == "assignVariable"
+                    && f["parameters"].as_array().is_some_and(|ps| ps.iter().any(|p| p["parameterId"] == "name" && p["value"] == name))
+            })
+        })
+        .cloned()
+        .ok_or(format!("Variable #{name} im Teilestudio nicht gefunden"))?;
+    let mut feat = feat;
+    let ps = feat["parameters"].as_array_mut().ok_or("Variablen-Feature ohne Parameter")?;
+    let slot = ps
+        .iter_mut()
+        .find(|p| matches!(p["parameterId"].as_str(), Some("lengthValue" | "angleValue" | "numberValue" | "anyValue")) && p.get("expression").is_some())
+        .ok_or("Wert der Variablen nicht gefunden")?;
+    slot["expression"] = json!(expression);
+    let fid = feat["featureId"].as_str().ok_or("Variablen-Feature ohne Kennung")?.to_string();
+    let r = c.post(
+        &format!("partstudios/{}/features/featureid/{fid}", t.element()),
+        json!({ "feature": feat, "serializationVersion": fs["serializationVersion"], "sourceMicroversion": fs["sourceMicroversion"] }),
+    )?;
+    match r["featureState"]["featureStatus"].as_str() {
+        Some("ERROR") => Err(format!("Onshape: #{name} = {expression} ergibt einen Fehler im Teilestudio")),
+        _ => Ok(()),
+    }
+}
+
+/// Parameterstudie: Variable setzen und die Geometrie dazu als STEP holen (Pfad auf diesem Rechner)
+pub fn study_value(url: &str, name: &str, expression: &str) -> Result<String, String> {
+    set_variable(url, name, expression)?;
+    let t = parse_url(url)?;
+    let c = Client::new(&t)?;
+    let data = export_step(&c, &t)?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("projekt-fem-onshape-studie-{stamp}.step"));
+    std::fs::write(&path, data).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
 }
 
 /// Zahl mit Komma, wie im Datenblatt
@@ -315,6 +423,15 @@ mod tests {
             assert!(parse_url(evil).is_err(), "{evil}");
         }
         assert!(parse_url("https://firma.onshape.com/documents/0123456789abcdef01234567/v/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98").is_ok());
+    }
+
+    #[test]
+    fn ausdruck_zerlegen() {
+        assert_eq!(split_expression("5 mm"), Some((5.0, "mm".into())));
+        assert_eq!(split_expression("12.5"), Some((12.5, "".into())));
+        assert_eq!(split_expression("30deg"), Some((30.0, "deg".into())));
+        assert_eq!(split_expression("#a * 2"), None);
+        assert_eq!(split_expression("2 * #a"), None);
     }
 
     #[test]

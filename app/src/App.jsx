@@ -92,6 +92,8 @@ export default function App() {
   const [orientations, setOrientations] = useState(null)
   const [supports, setSupports] = useState([])
   const [welds, setWelds] = useState([])
+  // Herkunft des offenen Teils (Onshape-Adresse) – für die Parameterstudie über Onshape-Variablen
+  const [partOrigin, setPartOrigin] = useState(null)
   const [gaps, setGaps] = useState({ max: '1', list: null })
   const [loads, setLoads] = useState([])
   const [active, setActive] = useState(null)
@@ -280,6 +282,7 @@ export default function App() {
         setSupports([])
         setLoads([])
         setWelds([])
+        if (base) setPartOrigin(null)
         setGaps((g) => ({ ...g, list: null }))
         setActive(null)
         setDrawing(null)
@@ -302,7 +305,7 @@ export default function App() {
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
     if (!stepPath) return
-    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof }
+    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin }
     try {
       await api.saveProject(stepPath, data)
     } catch (e) {
@@ -336,6 +339,7 @@ export default function App() {
       }
       setMaterial({ ...materialFromPreset(MATERIALS[0]), ...d.material, infill: { ...DEFAULT_INFILL, ...(d.material?.infill ?? {}) } })
       if (d.proof) setProof(d.proof)
+      setPartOrigin(d.origin ?? null)
       setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
       setLoads(d.loads.map((l) => ({ ...newLoad(), ...l, id: nextId++ })))
       setWelds((d.welds ?? []).map((w) => ({ ...newWeld(), ...w, id: nextId++ })))
@@ -672,13 +676,35 @@ export default function App() {
     }
   }, [view, stepPath])
 
-  // Wählbare Parameter: Netzgröße, Füllgrad, je Geometrieänderung ein Maß, SolidCraft-Parameter
+  // Onshape-Variablen, wenn das offene Teil aus Onshape kommt
+  const [osVars, setOsVars] = useState(null)
+  useEffect(() => {
+    if (view !== 'study' || !partOrigin?.includes('/documents/')) {
+      setOsVars(null)
+      return
+    }
+    let stop = false
+    api
+      .onshapeVariables(partOrigin)
+      .then((v) => !stop && setOsVars(v))
+      .catch((e) => !stop && setOsVars({ error: String(e) }))
+    return () => {
+      stop = true
+    }
+  }, [view, partOrigin])
+
+  // Wählbare Parameter: Netzgröße, Füllgrad, je Geometrieänderung ein Maß, SolidCraft-Parameter, Onshape-Variablen
   const studyParams = useMemo(() => {
     const out = [{ key: 'mesh', label: 'Netzgröße (Konvergenzstudie)', unit: 'mm' }]
     for (const p of scStudyInfo?.params ?? []) {
       const v = p.value
       const values = Number.isFinite(v) && v !== 0 ? [0.6, 0.8, 1, 1.2, 1.4].map((f) => Number((f * v).toPrecision(3))).join('; ').replace(/\./g, ',') : ''
       out.push({ key: `sc:${p.name}`, label: `SolidCraft: ${p.name}`, unit: p.unit || '', values })
+    }
+    for (const v of Array.isArray(osVars) ? osVars : []) {
+      const x = v.value
+      const values = Number.isFinite(x) && x !== 0 ? [0.6, 0.8, 1, 1.2, 1.4].map((f) => Number((f * x).toPrecision(3))).join('; ').replace(/\./g, ',') : ''
+      out.push({ key: `os:${v.name}`, label: `Onshape: #${v.name}`, unit: v.unit || '', values })
     }
     if (material.layered && material.infill?.on) out.push({ key: 'infill', label: 'Füllgrad', unit: '%' })
     geoOps.forEach((o, i) => {
@@ -692,7 +718,7 @@ export default function App() {
       if ((o.op === 'add' || o.op === 'cut') && o.sketch?.shape === 'rect') out.push({ key: `geo:${o.id}:width`, label: `${n}: Skizze Breite`, unit: 'mm' })
     })
     return out
-  }, [material, geoOps, scStudyInfo])
+  }, [material, geoOps, scStudyInfo, osVars])
 
   async function runStudy() {
     const values = study.values.split(/[;\s]+/).map((v) => Number(v.replace(',', '.'))).filter((v) => Number.isFinite(v))
@@ -705,6 +731,9 @@ export default function App() {
     const active = geoOps.filter((o) => o.enabled && !opProblem(o))
     const scParam = param.startsWith('sc:') ? scStudyInfo?.params.find((p) => p.name === param.slice(3)) : null
     let scTouched = false
+    const osVar = param.startsWith('os:') && Array.isArray(osVars) ? osVars.find((v) => v.name === param.slice(3)) : null
+    const osUrl = partOrigin
+    let osTouched = false
     setError(null)
     setActive(null)
     setDrawing(null)
@@ -723,6 +752,18 @@ export default function App() {
             : await api.openStep(stepPath, v, false, currentRefine(v))
         } else if (param === 'infill') {
           mat = { ...material, infill: { ...material.infill, percent: v } }
+        } else if (osVar) {
+          // Variable in Onshape setzen, Geometrie holen, Lager/Lasten/Nähte übertragen
+          osTouched = true
+          const path = await api.onshapeStudy(osUrl, osVar.name, osVar.unit ? `${v} ${osVar.unit}` : String(v))
+          m = await api.openStep(path, Number(meshSize) || null, false, refine)
+          const map = remapSurfaces(origSurfaces, m.surfaces)
+          const mapTags = (ts) => [...new Set(ts.map((t) => map.get(t)).filter((t) => t != null))]
+          if ([...supports, ...loads].some((x) => x.surfaces.some((t) => map.get(t) == null)))
+            throw new Error(`Bei #${osVar.name} = ${fmt(v)} ${osVar.unit} sind Lager- oder Lastflächen nicht mehr wiederzufinden – Studie abgebrochen`)
+          sups = supports.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
+          lds = loads.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
+          wls = welds.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) }))
         } else if (scParam) {
           // Maß in SolidCraft setzen, Geometrie holen, Lager/Lasten/Nähte übertragen
           scTouched = true
@@ -762,12 +803,17 @@ export default function App() {
         setStudyRows({ param: meta, rows: [...rows] })
       }
       // Ausgangszustand wiederherstellen (Netz und Ergebnis)
+      if (osTouched) {
+        osTouched = false
+        setBusy(`Onshape: #${osVar.name} zurück auf ${osVar.expression} …`)
+        await api.onshapeSetVariable(osUrl, osVar.name, osVar.expression)
+      }
       if (scTouched) {
         scTouched = false
         setBusy(`SolidCraft: ${scParam.name} zurück auf ${scParam.expression} …`)
         await api.scStudy(scParam.name, scParam.expression)
       }
-      if (param === 'mesh' || param.startsWith('geo:') || scParam) {
+      if (param === 'mesh' || param.startsWith('geo:') || scParam || osVar) {
         setBusy('Ausgangszustand wiederherstellen …')
         const m = active.length
           ? (await api.modifyGeometry(stepPath, active.map(opPayload), Number(meshSize) || null, refine)).mesh
@@ -782,6 +828,8 @@ export default function App() {
     } catch (e) {
       setError(String(e))
     } finally {
+      // Onshape: Variable zurücksetzen (auch nach Fehler)
+      if (osVar && osTouched) await api.onshapeSetVariable(osUrl, osVar.name, osVar.expression).catch(() => {})
       // SolidCraft: Maß zurücksetzen (auch nach Fehler) und wieder mitlaufen
       if (scParam) {
         if (scTouched) await api.scStudy(scParam.name, scParam.expression).catch(() => {})
@@ -969,6 +1017,7 @@ export default function App() {
     const same = mesh && cur === inc.name
     if (!same) {
       await loadGeometry(inc.path, null)
+      setPartOrigin(inc.origin ?? null)
       setNotice(`${inc.source}: „${inc.name}“ geöffnet – Lager und Lasten festlegen`)
       return
     }
@@ -997,6 +1046,7 @@ export default function App() {
       setWelds(wls)
       setMesh(m)
       setStepPath(inc.path)
+      setPartOrigin(inc.origin ?? null)
       setMeshRefineKey(JSON.stringify(ref))
       setGeoOps([])
       setGeoStep(null)
@@ -1845,6 +1895,13 @@ export default function App() {
               canRun={problems.length === 0 && !busy}
               onRun={runStudy}
               onCsv={exportStudyCsv}
+              note={
+                osVars?.error
+                  ? `Onshape-Variablen nicht abrufbar: ${osVars.error}`
+                  : Array.isArray(osVars) && !osVars.length
+                    ? 'Das Onshape-Teilestudio hat keine Variablen. In Onshape eine Variable anlegen (Feature „Variable“, z. B. #dicke) und im Maß verwenden.'
+                    : null
+              }
             />
           ) : view === 'geometry' ? (
             <GeometryPanel
@@ -2477,7 +2534,7 @@ function StudyChart({ rows, metric, param }) {
   )
 }
 
-function StudyPanel({ study, setStudy, params, rows, canRun, onRun, onCsv }) {
+function StudyPanel({ study, setStudy, params, rows, canRun, onRun, onCsv, note }) {
   const [metric, setMetric] = useState('vm')
   const param = params.find((p) => p.key === study.param) ?? params[0]
   const defaults = { mesh: '4; 3; 2; 1,5', infill: '10; 20; 40; 60; 100' }
@@ -2491,7 +2548,7 @@ function StudyPanel({ study, setStudy, params, rows, canRun, onRun, onCsv }) {
           Rechnet dasselbe Modell für mehrere Werte eines Parameters. Die Netzstudie zeigt, ob eine Spannung belastbar ist: Bleibt sie bei feinerem
           Netz gleich, passt es; wächst sie immer weiter, ist es eine Singularität (Lagerkante, scharfe Ecke). Geometriemaße erscheinen hier, sobald im
           Reiter Geometrie eine Änderung angelegt ist.
-         Läuft Projekt-FEM live mit SolidCraft, stehen hier auch alle Parameter des SolidCraft-Designs zur Wahl (SolidCraft rechnet die Geometrie je Wert neu).
+         Kommt das Teil aus Onshape, stehen hier die Variablen des Teilestudios (#dicke …) zur Wahl; läuft Projekt-FEM live mit SolidCraft, die Parameter des SolidCraft-Designs. Das CAD baut die Geometrie je Wert neu auf, danach wird der alte Wert wieder eingesetzt.
         </p>
         <label className="field">
           <span>Parameter</span>
@@ -2506,6 +2563,7 @@ function StudyPanel({ study, setStudy, params, rows, canRun, onRun, onCsv }) {
             ))}
           </select>
         </label>
+        {note && <p className="hint">{note}</p>}
         <label className="field">
           <span>Werte {param.unit && `[${param.unit}]`}, getrennt mit Semikolon</span>
           <input value={study.values} onChange={(e) => setStudy({ ...study, values: e.target.value })} />

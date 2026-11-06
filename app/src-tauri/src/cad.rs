@@ -31,6 +31,9 @@ pub struct Incoming {
     pub source: String,
     /// Datei auf dem rechnenden Rechner
     pub path: String,
+    /// Herkunft, falls bekannt (Onshape: Adresse des Teilestudios – für die Parameterstudie über Variablen)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     #[serde(skip)]
     pub at: Option<Instant>,
 }
@@ -82,6 +85,11 @@ pub fn clean_name(name: &str) -> String {
 
 /// Teil ablegen und melden
 pub fn receive(name: &str, source: &str, data: &[u8]) -> Result<Incoming, String> {
+    receive_from(name, source, data, None)
+}
+
+/// wie `receive`, mit Herkunft (z. B. Onshape-Adresse)
+pub fn receive_from(name: &str, source: &str, data: &[u8], origin: Option<String>) -> Result<Incoming, String> {
     if data.len() < 20 || !String::from_utf8_lossy(&data[..data.len().min(200)]).contains("ISO-10303") {
         return Err("Keine STEP-Datei (ISO-10303) empfangen".into());
     }
@@ -96,6 +104,7 @@ pub fn receive(name: &str, source: &str, data: &[u8]) -> Result<Incoming, String
             name,
             source: source.chars().take(40).collect(),
             path: path.display().to_string(),
+            origin,
             at: Some(Instant::now()),
         };
         s.queue.push(inc.clone());

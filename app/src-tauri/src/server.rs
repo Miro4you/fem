@@ -176,6 +176,9 @@ fn router(shared: Shared) -> Router {
         .route("/onshape/status", get(crate::cad::http_onshape_status))
         .route("/onshape/keys", post(crate::cad::http_onshape_keys))
         .route("/onshape/import", post(crate::cad::http_onshape_import))
+        .route("/onshape/variables", post(os_variables))
+        .route("/onshape/set_variable", post(os_set_variable))
+        .route("/onshape/study", post(os_study))
         .route("/materials", get(api_materials_get).post(api_materials_set))
         .route("/progress", get(api_progress))
         .route("/upload", post(api_upload))
@@ -367,6 +370,32 @@ async fn api_solve(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<So
 struct SectionArgs {
     point: [f64; 3],
     normal: [f64; 3],
+}
+
+// --- Onshape-Variablen (Parameterstudie) ---
+
+#[derive(Deserialize)]
+struct OsUrl {
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct OsVar {
+    url: String,
+    name: String,
+    expression: String,
+}
+
+async fn os_variables(Json(a): Json<OsUrl>) -> ApiResult<Response> {
+    sc_blocking(move || crate::onshape::variables(&a.url)).await
+}
+
+async fn os_set_variable(Json(a): Json<OsVar>) -> ApiResult<Response> {
+    sc_blocking(move || crate::onshape::set_variable(&a.url, &a.name, &a.expression)).await
+}
+
+async fn os_study(Json(a): Json<OsVar>) -> ApiResult<Response> {
+    sc_blocking(move || crate::onshape::study_value(&a.url, &a.name, &a.expression)).await
 }
 
 // --- SolidCraft ---

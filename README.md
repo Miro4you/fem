@@ -157,6 +157,7 @@ Geometrie, rechnet automatisch neu und zeigt den Vergleich zur vorigen Version.
   als Parameter zurück und rechnet Parameterstudien über SolidCraft-Parameter (Abschnitt SolidCraft im Dialog „CAD“).
 - **Onshape:** API-Schlüssel in Projekt-FEM unter **„CAD“** eintragen, zwei Lesezeichen („→ Projekt-FEM“,
   „FEM-Ergebnis → Onshape“) in die Lesezeichenleiste ziehen. Das Ergebnis landet in der Beschreibung der Teile.
+  Parameterstudie über Variablen des Teilestudios (`#dicke` …) im Reiter Studie.
 - **Fusion, SolidWorks, NX, Solid Edge:** Add-ins/Makros im Ordner [`cad-addins`](cad-addins/README.md) mit Anleitung.
 - **Jedes andere CAD:** STEP speichern → Rechtsklick „Senden an → An Projekt-FEM“ (Windows) bzw. Schnellaktion (Mac).
 - Desktop-App: Empfang auf `127.0.0.1:8791` (nur dieser Rechner). CAD auf einem anderen Rechner: über die

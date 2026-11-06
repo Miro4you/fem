@@ -81,7 +81,7 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
   Ermüdung (Kerbfälle)
 - CAD-Schwerpunkt laut Felix: **Onshape** (privat, Hauptsystem), **SolidWorks** (Arbeit), Fusion selten,
   SolidCraft zum Anschauen. Breite Kompatibilität bleibt Ziel (Bekanntheit). Nächste Kandidaten: Parameterstudie über
-  Onshape-Variablen/Konfigurationen (wie bei SolidCraft; Variable per API ändern ist an „Projekt-FEM Test 1“ erprobt),
+  ✅ Onshape-Variablen (Teilestudio) – mit echtem Onshape getestet. Offen: Variablen-Studios, Konfigurationen,
   SolidWorks-Konfigurationen. Onshape-Anbindung mit echtem Konto getestet (06.11.)
 - **Neu: Baugruppen** – mehrere Körper aus einer STEP-Datei: Werkstoff je Körper, Verbindungen (verklebt/
   verschraubt/Kontakt), Körper ein-/ausblenden, Kräfte zwischen den Körpern auswerten
