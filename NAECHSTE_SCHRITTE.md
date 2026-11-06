@@ -68,6 +68,11 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - ✅ Phase 5: Eigenfrequenzen + lineares Knicken (Lanczos), animierte Formen, Prüffälle Kragbalken/Euler
 - ✅ Phase 6 (überschlägig): Strömungs-/Windlast (Staudruck × c_w auf angeströmte Flächen). Echte CFD-Kopplung
   (OpenFOAM: Netz, Löser, Druckfeld zurück auf die Oberfläche) wäre ein eigenes Großprojekt
+- ✅ CAD-Schnittstelle: Knöpfe „In Projekt-FEM rechnen“ / „Ergebnis holen“ – Onshape (API + Lesezeichen),
+  Fusion (Add-in), SolidWorks (Makro), NX (Journale), Solid Edge (Skripte), „Senden an“ für jedes CAD.
+  Gleiches Teil → Lager/Lasten übertragen, automatisch neu rechnen, Vergleich. In den echten CAD-Programmen
+  noch ungetestet (Felix). Später: Onshape-Konfigurationen/Variablen, Baugruppen aus dem CAD, DXF → Stabwerk
+  (AutoCAD), farbiges Ergebnis zurück ins CAD
 - **Neu: Baugruppen** – mehrere Körper aus einer STEP-Datei: Werkstoff je Körper, Verbindungen (verklebt/
   verschraubt/Kontakt), Körper ein-/ausblenden, Kräfte zwischen den Körpern auswerten
 - Mac: läuft laut Felix (installiert) – Rückmeldung abwarten

@@ -130,6 +130,20 @@ Sicherheit: Zugriff nur mit dem Schlüssel im Link (bleibt gleich, bis man einen
 ins Internet freigeben. Falls der Link nicht erreichbar ist: Firewall des Rechners für Port 8790 öffnen
 (macOS fragt beim ersten Start nach).
 
+## CAD-Schnittstelle (Onshape, Fusion, SolidWorks, NX, Solid Edge)
+
+Knöpfe direkt im CAD: **„In Projekt-FEM rechnen“** schickt das aktive Teil als STEP an Projekt-FEM,
+**„Ergebnis holen“** trägt Sicherheit, Vergleichsspannung, Verformung, Masse und Nachweis als Eigenschaften ins Teil ein.
+Kommt dasselbe Teil (gleicher Name) in einer neuen Version, überträgt Projekt-FEM Lager und Lasten auf die neue
+Geometrie, rechnet automatisch neu und zeigt den Vergleich zur vorigen Version.
+
+- **Onshape:** API-Schlüssel in Projekt-FEM unter **„CAD“** eintragen, zwei Lesezeichen („→ Projekt-FEM“,
+  „FEM-Ergebnis → Onshape“) in die Lesezeichenleiste ziehen. Das Ergebnis landet in der Beschreibung der Teile.
+- **Fusion, SolidWorks, NX, Solid Edge:** Add-ins/Makros im Ordner [`cad-addins`](cad-addins/README.md) mit Anleitung.
+- **Jedes andere CAD:** STEP speichern → Rechtsklick „Senden an → An Projekt-FEM“ (Windows) bzw. Schnellaktion (Mac).
+- Desktop-App: Empfang auf `127.0.0.1:8791` (nur dieser Rechner). CAD auf einem anderen Rechner: über die
+  Heimnetz-Freigabe, Adresse und Schlüssel stehen im Dialog „CAD“.
+
 ## Bauen und benutzen
 
 Voraussetzungen: Rust, Node.js, **Gmsh** (`uv tool install gmsh` – Linux und Mac; oder `brew install gmsh`).
@@ -254,4 +268,5 @@ crates/fem-core   Rechenkern (Bibliothek): element, mesh, generate, model, solve
 crates/fem-cli    Kommandozeile `projekt-fem`
 app/              Desktop-App (Tauri 2 + React + three.js), Backend in app/src-tauri
 examples/         Beispielfälle, examples/geometrie: STEP-Testteile (+ .geo-Quellen)
+cad-addins/       Knöpfe für Fusion, SolidWorks, NX, Solid Edge + „Senden an“ für jedes CAD
 ```

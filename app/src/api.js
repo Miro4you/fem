@@ -14,7 +14,7 @@ const storage = {
 
 if (!isDesktop && typeof window !== 'undefined') {
   // Link aus der Desktop-App: http://rechner:8790/#k=SCHLÜSSEL
-  const m = window.location.hash.match(/k=([a-z0-9]+)/i)
+  const m = window.location.hash.match(/^#k=([a-z0-9]+)/i)
   if (m) {
     storage.set(KEY_STORE, m[1])
     history.replaceState(null, '', window.location.pathname)
@@ -160,6 +160,16 @@ export async function openJson(filterName, ext) {
 }
 
 // --- CAD-Schnittstelle (Add-ins schicken Teile, holen Ergebnisse) ---------------------------------
+/// Angaben für den Dialog „CAD“: Schlüssel, Adressen, Onshape eingerichtet?
+export async function cadInfo() {
+  if (isDesktop) return invoke('cad_info')
+  const st = await http('/onshape/status')
+  return { key: storage.get(KEY_STORE) ?? '', onshape: st.configured, web: window.location.origin }
+}
+export const onshapeSetKeys = (access, secret) =>
+  isDesktop ? invoke('onshape_set_keys', { access, secret }) : http('/onshape/keys', { method: 'POST', json: { access, secret } })
+/// Onshape-Teilestudio holen (Adresse aus dem Browser); das Teil kommt wie aus einem Add-in an
+export const onshapeImport = (url) => (isDesktop ? invoke('onshape_import', { url }) : http('/onshape/import', { method: 'POST', json: { url } }))
 export const startupFile = () => (isDesktop ? invoke('startup_file') : Promise.resolve(null))
 export const cadSetSummary = (name, summary) =>
   isDesktop ? invoke('cad_set_summary', { name, summary }) : http('/cad/summary?name=' + encodeURIComponent(name), { method: 'POST', json: summary })
@@ -182,8 +192,12 @@ export function onCadOpen(cb) {
   const tick = async () => {
     try {
       const list = await http('/cad/inbox?after=' + (after ?? 0))
-      if (after === null) after = list.length ? list[list.length - 1].seq : 0
-      else
+      if (after === null) {
+        // erster Abruf: nur ein gerade eben geschicktes Teil übernehmen (Tab über „Projekt-FEM öffnen“ aufgerufen)
+        after = list.length ? list[list.length - 1].seq : 0
+        const fresh = list.filter((i) => i.age < 120).pop()
+        if (fresh) cb(fresh)
+      } else
         for (const inc of list) {
           after = Math.max(after, inc.seq)
           cb(inc)

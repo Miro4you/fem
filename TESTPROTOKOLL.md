@@ -1,7 +1,7 @@
 # Testprotokoll Projekt-FEM
 
 Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 50 von 50 Lehrbuchprüfungen bestanden
-(`./target/release/projekt-fem validieren`), 33 automatische Tests grün.
+(`./target/release/projekt-fem validieren`), 37 automatische Tests grün.
 
 **So ausfüllen:** Jeden Punkt durchgehen, `[ ]` → `[x]` wenn es passt, sonst Anmerkung dahinter schreiben
 (was du gemacht hast, was passiert ist, gern mit Screenshot). Die Datei kannst du mir einfach zurückschicken.
@@ -15,10 +15,10 @@ Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung 
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 0.1 | Im Ordner `FEM`: `git pull` | neuester Stand (`git log --oneline -1` → „Testprotokoll …“) | [ ] |
+| 0.1 | Im Ordner `FEM`: `git pull` | neuester Stand (`git log --oneline -1` → „CAD-Knöpfe …“) | [ ] |
 | 0.2 | `cd app && npm install` (**neu nötig**: PDF-Bibliothek jsPDF) | ohne Fehler | [ ] |
 | 0.3 | `npx tauri build --no-bundle` | baut durch, `target/release/projekt-fem-app` | [ ] |
-| 0.4 | App starten | Fenster öffnet, oben 6 Reiter: Modell · Geometrie · Studie · Stabwerk · Ergebnis | [ ] |
+| 0.4 | App starten | Fenster öffnet, oben 5 Reiter: Modell · Geometrie · Studie · Stabwerk · Ergebnis; rechts „CAD“, „Heimnetz“ | [ ] |
 | 0.5 | Mac: dasselbe auf dem Mac | baut und startet | [ ] |
 
 ## 1. Grundablauf (Kurzcheck, dass nichts kaputt ist)
@@ -145,6 +145,31 @@ Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung 
 | 14.1 | Heimnetz-Freigabe an, Link am Laptop öffnen | App im Browser | [ ] |
 | 14.2 | Stichproben im Browser: Infill + Schnitt, PDF, MathPad, Studie, Stabwerk, Eigenfrequenzen | geht wie am PC (Dateien als Download) | [ ] |
 
+## 15. CAD-Schnittstelle (Knöpfe im CAD) – Anleitung: `cad-addins/README.md`
+
+Mach die Punkte für die CAD-Programme, die du hast; den Rest einfach überspringen.
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 15.1 | Oben **„CAD“** öffnen | Dialog mit Erklärung, Onshape-Schlüsselfeldern | [ ] |
+| 15.2 | **Onshape:** API-Schlüssel anlegen (dev-portal.onshape.com → API keys, lesen + schreiben), in „CAD“ eintragen | „API-Schlüssel hinterlegt“, zwei Lesezeichen erscheinen | [ ] |
+| 15.3 | Lesezeichen „→ Projekt-FEM“ in die Lesezeichenleiste ziehen, in Onshape ein Teilestudio öffnen, Lesezeichen klicken | kleines Fenster „… an Projekt-FEM geschickt“, Projekt-FEM öffnet „Dokument - Teilestudio“ | [ ] |
+| 15.4 | Lager + Last setzen, rechnen. In Onshape etwas ändern (z. B. Radius), Lesezeichen wieder klicken | Hinweis „neue Version … übernommen und neu gerechnet“, Vergleich vorige Version ↔ aktuell | [ ] |
+| 15.5 | Lesezeichen „FEM-Ergebnis → Onshape“ klicken, in Onshape Teil → Eigenschaften | Beschreibung enthält `[FEM …: S = … · σv … · u … · … g …]`, eigener Text bleibt | [ ] |
+| 15.6 | Falls der Browser das Lesezeichen blockiert: Onshape-Adresse kopieren → „CAD“ → einfügen → „Holen“ | Teil wird geöffnet | [ ] |
+| 15.7 | **Fusion:** Add-in einrichten (Umschalt+S → Add-Ins → +), Reiter VOLUMENKÖRPER | Gruppe „Projekt-FEM“ mit zwei Knöpfen | [ ] |
+| 15.8 | Fusion: „In Projekt-FEM rechnen“, in Projekt-FEM rechnen, in Fusion ändern, nochmal „In Projekt-FEM rechnen“ | wie 15.3/15.4 | [ ] |
+| 15.9 | Fusion: „Ergebnis holen“ | Meldung mit Werten, Ändern → Parameter: FEM_Sicherheit usw. | [ ] |
+| 15.10 | **SolidWorks:** Makro importieren, zwei Makro-Knöpfe anlegen, senden + Ergebnis holen | Teil kommt an; Datei → Eigenschaften → Benutzerdefiniert: FEM_… | [ ] |
+| 15.11 | **NX:** Journale ausführen (Alt+F8), dann als Benutzerbefehl-Knopf | Teil kommt an; Attribute FEM_… | [ ] |
+| 15.12 | **Solid Edge** (falls du das mit „SolidCraft“ meintest): Skripte per Doppelklick | Teil kommt an; Eigenschaften FEM_… | [ ] |
+| 15.13 | **Anderes CAD / Datei:** „Senden an → An Projekt-FEM“ (Windows) bzw. Schnellaktion (Mac) auf eine `.step` | Teil wird geöffnet | [ ] |
+| 15.14 | **Über das Heimnetz:** am Laptop `projekt-fem-cad.txt` aus dem Dialog „CAD“ anlegen, dort aus dem CAD senden; Projekt-FEM im Browser offen | Teil erscheint im Browser-Tab; „Ergebnis holen“ geht auch | [ ] |
+| 15.15 | Projekt-FEM neu starten, im CAD „Ergebnis holen“ | letzte Werte kommen noch | [ ] |
+
+Fehlermeldungen aus dem CAD bitte wörtlich oder als Screenshot – die CAD-Schnittstellen unterscheiden sich je nach
+Version, ich konnte Fusion/SolidWorks/NX/Solid Edge hier nicht selbst starten (Onshape nur gegen einen Nachbau).
+
 ---
 
 ## Annahmen und Standardwerte, die du prüfen solltest
@@ -174,3 +199,5 @@ Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung 
 3. **Baugruppen** (neu auf der Liste): Welche Fälle hast du? (verschraubt, verklebt, Kontakt mit Spalt, Pressverband …)
 4. **Ansys-Werte** für den Hebel (Spannung im R6-Radius, max. Verformung, Lagerkraft).
 5. **Slicer**: Prusa, Orca oder Bambu Studio? Dann kann als Nächstes der 3MF-Import der Slicer-Einstellungen kommen.
+6. **CAD**: Welche Programme nutzt du wirklich (und welche Version)? Mit „SolidCraft“ war Solid Edge gemeint?
+   Und AutoCAD: eher 2D-Zeichnungen (→ DXF-Import fürs Stabwerk) oder 3D-Körper?

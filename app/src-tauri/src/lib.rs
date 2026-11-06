@@ -12,6 +12,7 @@ use fem_core::{Fix, Load, LocalFix, Material, Mesh, Model, Order, Region, Result
 use serde::{Deserialize, Serialize};
 
 pub mod cad;
+pub mod onshape;
 pub mod server;
 
 /// Aktueller Fortschritt einer langen Rechnung (für die Anzeige)
@@ -246,6 +247,27 @@ fn startup_file() -> Option<String> {
 #[tauri::command]
 fn cad_set_summary(name: String, summary: serde_json::Value) {
     cad::set_summary(&name, summary);
+}
+
+/// Angaben für den Dialog „CAD“: Schlüssel für die Lesezeichen, lokaler Port, Onshape eingerichtet?
+#[tauri::command]
+fn cad_info() -> serde_json::Value {
+    serde_json::json!({
+        "key": server::ServerConfig::load_saved().key,
+        "localPort": cad::LOCAL_PORT,
+        "onshape": onshape::configured(),
+    })
+}
+
+#[tauri::command]
+fn onshape_set_keys(access: String, secret: String) -> Result<bool, String> {
+    onshape::save_keys(&access, &secret)?;
+    Ok(onshape::configured())
+}
+
+#[tauri::command]
+async fn onshape_import(url: String) -> Result<cad::Incoming, String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::import(&url)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -929,6 +951,9 @@ pub fn run() {
             progress,
             startup_file,
             cad_set_summary,
+            cad_info,
+            onshape_set_keys,
+            onshape_import,
             load_user_materials,
             save_user_materials,
             open_step,

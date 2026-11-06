@@ -1,0 +1,3 @@
+# VBA und VBScript erwarten Windows-Zeilenenden
+*.bas text eol=crlf
+*.vbs text eol=crlf

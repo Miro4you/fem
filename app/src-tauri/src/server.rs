@@ -65,6 +65,15 @@ impl ServerConfig {
             .unwrap_or_else(|| ServerConfig { port: DEFAULT_PORT, key: new_key(), autostart: false })
     }
 
+    /// wie `load`, legt die Datei aber an, falls es sie noch nicht gibt (Schlüssel bleibt dann gleich)
+    pub fn load_saved() -> ServerConfig {
+        let cfg = ServerConfig::load();
+        if config_path().is_some_and(|p| !p.exists()) {
+            let _ = cfg.save();
+        }
+        cfg
+    }
+
     pub fn save(&self) -> Result<(), String> {
         let p = config_path().ok_or("Kein Konfigurationsordner gefunden")?;
         std::fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
@@ -162,6 +171,11 @@ fn router(shared: Shared) -> Router {
         .route("/cad/open", post(crate::cad::http_open))
         .route("/cad/summary", get(crate::cad::http_summary).post(crate::cad::http_set_summary))
         .route("/cad/inbox", get(crate::cad::http_inbox))
+        .route("/cad/onshape", get(crate::cad::http_onshape))
+        .route("/cad/onshape_result", get(crate::cad::http_onshape_result))
+        .route("/onshape/status", get(crate::cad::http_onshape_status))
+        .route("/onshape/keys", post(crate::cad::http_onshape_keys))
+        .route("/onshape/import", post(crate::cad::http_onshape_import))
         .route("/materials", get(api_materials_get).post(api_materials_set))
         .route("/progress", get(api_progress))
         .route("/upload", post(api_upload))
@@ -219,7 +233,8 @@ async fn check_key(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
-    let ok = req.headers().get("x-fem-key").and_then(|v| v.to_str().ok()) == Some(s.key.as_str());
+    let ok = req.headers().get("x-fem-key").and_then(|v| v.to_str().ok()) == Some(s.key.as_str())
+        || crate::cad::query_key(req.uri().query()).as_deref() == Some(s.key.as_str());
     if !ok {
         return (StatusCode::UNAUTHORIZED, "Zugangsschlüssel fehlt oder ist falsch").into_response();
     }

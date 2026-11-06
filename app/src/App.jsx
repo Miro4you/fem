@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FolderOpen, Save, FileUp, Play, Plus, Trash2, MousePointerClick, Anchor, ArrowDownToLine,
   TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine, Wifi, Copy, Move3d,
-  Spline, SquarePlus, SquareMinus, CircleDot, Wrench, RotateCcw,
+  Spline, SquarePlus, SquareMinus, CircleDot, Wrench, RotateCcw, Cable,
 } from 'lucide-react'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
@@ -913,7 +913,15 @@ export default function App() {
   }
   const incomingRef = useRef(null)
   incomingRef.current = handleIncoming
-  useEffect(() => api.onCadOpen((inc) => incomingRef.current?.(inc)), [])
+  // eingehende Teile nacheinander verarbeiten (sonst überholt ein schnelles Teil ein langsames)
+  const incomingQueue = useRef(Promise.resolve())
+  useEffect(
+    () =>
+      api.onCadOpen((inc) => {
+        incomingQueue.current = incomingQueue.current.then(() => incomingRef.current?.(inc)).catch(() => {})
+      }),
+    [],
+  )
   useEffect(() => {
     api.startupFile().then((p) => p && loadGeometry(p, null)).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1282,6 +1290,7 @@ export default function App() {
           </button>
         </div>
         <div className="actions">
+          <CadButton onError={(e) => setError(String(e))} />
           {api.isDesktop ? (
             <ShareButton onError={(e) => setError(String(e))} />
           ) : (
@@ -3079,6 +3088,179 @@ function VectorInput({ item, field, labels, unit, upd, picking, onPick, presets,
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+// Lesezeichen für die Lesezeichenleiste (React lässt javascript:-Links nicht zu → Attribut direkt setzen)
+function Bookmarklet({ code, children }) {
+  return (
+    <a
+      className="bookmarklet"
+      ref={(el) => el?.setAttribute('href', code)}
+      onClick={(e) => {
+        e.preventDefault()
+        window.alert('In die Lesezeichenleiste des Browsers ziehen (nicht anklicken). Danach im offenen Onshape-Teilestudio anklicken.')
+      }}
+      title="In die Lesezeichenleiste ziehen"
+    >
+      {children}
+    </a>
+  )
+}
+
+const bookmarkletCode = (base, key, path) =>
+  `javascript:void(window.open('${base}/${path}?k=${key}&url='+encodeURIComponent(location.href),'projekt-fem','width=600,height=420'))`
+
+// CAD-Verbindung: Add-ins, Onshape-Schlüssel und -Lesezeichen
+function CadButton({ onError }) {
+  const [open, setOpen] = useState(false)
+  const [info, setInfo] = useState(null)
+  const [net, setNet] = useState(null)
+  const [access, setAccess] = useState('')
+  const [secret, setSecret] = useState('')
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(null)
+  const [msg, setMsg] = useState(null)
+  useEffect(() => {
+    if (!open) return
+    api.cadInfo().then(setInfo).catch(onError)
+    if (api.isDesktop) api.serverStatus().then(setNet).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+  const saveKeys = async (a, s) => {
+    try {
+      const ok = await api.onshapeSetKeys(a, s)
+      setInfo({ ...info, onshape: ok })
+      setAccess('')
+      setSecret('')
+      setMsg(ok ? 'Onshape-Schlüssel gespeichert' : 'Onshape-Schlüssel entfernt')
+    } catch (e) {
+      onError(e)
+    }
+  }
+  const fetchUrl = async () => {
+    setBusy('Hole Teilestudio aus Onshape …')
+    setMsg(null)
+    try {
+      const inc = await api.onshapeImport(url)
+      setMsg(`„${inc.name}“ geholt – wird geöffnet`)
+      setUrl('')
+    } catch (e) {
+      setMsg(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  // Einstellungsdatei für Add-ins auf einem anderen Rechner (Desktop: nur mit Heimnetz-Freigabe)
+  const remoteBase = info && (api.isDesktop ? net?.running && net.urls?.[0] && new URL(net.urls[0]).origin : info.web)
+  const remote = remoteBase ? `adresse = ${remoteBase}/api/cad\nschluessel = ${info.key}` : null
+  const [copied, setCopied] = useState(false)
+  const copySettings = () => {
+    navigator.clipboard?.writeText(remote + '\n')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  // Adressen, unter denen die Lesezeichen Projekt-FEM erreichen
+  const targets = []
+  if (info) {
+    if (api.isDesktop) {
+      targets.push(['dieser Rechner', `http://127.0.0.1:${info.localPort}/cad`])
+      if (net?.running && net.urls?.[0]) targets.push(['andere Rechner im Heimnetz', new URL(net.urls[0]).origin + '/api/cad'])
+    } else targets.push([null, info.web + '/api/cad'])
+  }
+  return (
+    <div className="share">
+      <button className="btn ghost" onClick={() => setOpen(!open)} title="Verbindung zu Onshape, Fusion 360, SolidWorks, NX, Solid Edge">
+        <Cable size={15} /> CAD
+      </button>
+      {open && (
+        <div className="share-panel cad-panel">
+          <div className="item-head">
+            <strong>CAD-Verbindung</strong>
+            <span className="spacer" />
+            <button className="icon-btn" onClick={() => setOpen(false)}>
+              <X size={14} />
+            </button>
+          </div>
+          <p className="hint">
+            Knöpfe im CAD: <b>In Projekt-FEM rechnen</b> schickt das aktive Teil hierher (gleiches Teil: Lager und Lasten bleiben, es
+            wird neu gerechnet), <b>Ergebnis holen</b> trägt Sicherheit, Spannung, Verformung und Masse als Eigenschaften ins Teil ein.
+            Add-ins für Fusion 360, SolidWorks, NX und Solid Edge: Ordner <code>cad-addins</code> im Projekt, Anleitung dort.
+          </p>
+          {api.isDesktop && net && !net.running && (
+            <p className="hint">CAD auf einem anderen Rechner? Dann zusätzlich die Heimnetz-Freigabe einschalten.</p>
+          )}
+          {remote && (
+            <>
+              <p className="hint">
+                {api.isDesktop ? 'CAD auf einem anderen Rechner im Heimnetz' : 'CAD auf diesem Rechner'}: Datei{' '}
+                <code>projekt-fem-cad.txt</code> im Benutzerordner anlegen ({api.isDesktop ? 'dort' : 'hier'}), Inhalt:
+              </p>
+              <div className="share-url">
+                <code className="cad-settings">{remote}</code>
+                <button className="icon-btn" title="Kopieren" onClick={copySettings}>
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </div>
+            </>
+          )}
+          <div className="cad-section">
+            <strong>Onshape</strong>
+            {info && (
+              <span className={info.onshape ? 'ok-text' : 'warn-text'}>
+                {info.onshape ? ' API-Schlüssel hinterlegt' : ' API-Schlüssel fehlen'}
+              </span>
+            )}
+          </div>
+          <p className="hint">
+            Schlüssel anlegen unter <code>dev-portal.onshape.com</code> → API keys (Rechte: lesen, für „Ergebnis → Onshape“ auch
+            schreiben). Sie bleiben auf dem rechnenden Rechner.
+          </p>
+          <div className="grid2">
+            <label className="field">
+              <span>Access Key</span>
+              <input value={access} onChange={(e) => setAccess(e.target.value)} autoComplete="off" />
+            </label>
+            <label className="field">
+              <span>Secret Key</span>
+              <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" />
+            </label>
+          </div>
+          <div className="row">
+            <button className="btn" disabled={!access.trim() || !secret.trim()} onClick={() => saveKeys(access, secret)}>
+              <Check size={14} /> Speichern
+            </button>
+            {info?.onshape && (
+              <button className="btn ghost" onClick={() => saveKeys('', '')}>
+                <Trash2 size={14} /> Entfernen
+              </button>
+            )}
+          </div>
+          {info?.onshape && (
+            <>
+              <p className="hint">Lesezeichen in die Lesezeichenleiste ziehen, dann im offenen Onshape-Teilestudio anklicken:</p>
+              {targets.map(([label, base]) => (
+                <div key={base} className="bookmarks">
+                  {label && <span className="hint">{label}:</span>}
+                  <Bookmarklet code={bookmarkletCode(base, info.key, 'onshape')}>→ Projekt-FEM</Bookmarklet>
+                  <Bookmarklet code={bookmarkletCode(base, info.key, 'onshape_result')}>FEM-Ergebnis → Onshape</Bookmarklet>
+                </div>
+              ))}
+              <label className="field">
+                <span>oder Adresse des Teilestudios einfügen</span>
+                <div className="row">
+                  <input value={url} placeholder="https://cad.onshape.com/documents/…" onChange={(e) => setUrl(e.target.value)} />
+                  <button className="btn" disabled={!url.trim() || !!busy} onClick={fetchUrl}>
+                    {busy ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Holen
+                  </button>
+                </div>
+              </label>
+            </>
+          )}
+          {msg && <p className="hint cad-msg">{msg}</p>}
+        </div>
+      )}
     </div>
   )
 }
