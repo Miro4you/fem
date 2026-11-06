@@ -57,6 +57,7 @@ const newSupport = () => ({
 })
 const newLoad = () => ({
   id: nextId++, kind: 'force', force: [0, 0, -1000], pressure: 1, moment: [0, 0, 100], surfaces: [], region: null,
+  flowDir: [1, 0, 0], medium: 'luft', velocity: '30', cw: '1.2', rhoFluid: '1000',
 })
 
 const LOAD_KINDS = {
@@ -64,6 +65,14 @@ const LOAD_KINDS = {
   pressure: 'Druck',
   moment: 'Moment',
   bearing: 'Lagerlast (Bolzen/Welle, halber Umfang)',
+  flow: 'Strömung / Wind (überschlägig)',
+}
+
+// Strömung: Staudruck q = ½·ρ·v² [Pa], Druck auf angeströmte Flächen p = q·c_w
+const MEDIA = { luft: ['Luft', 1.225], wasser: ['Wasser', 1000], eigen: ['eigene Dichte', null] }
+const flowPressurePa = (l) => {
+  const rho = l.medium === 'eigen' ? Number(l.rhoFluid) : MEDIA[l.medium ?? 'luft'][1]
+  return 0.5 * rho * Number(l.velocity) ** 2 * Number(l.cw)
 }
 
 export default function App() {
@@ -479,6 +488,7 @@ export default function App() {
       if (region) tip = regionAnchor(region, selectionCylinder(l.surfaces, surfaceInfo))
       let dir = null
       if ((l.kind === 'force' || l.kind === 'bearing') && Math.hypot(...l.force) > 0) dir = l.force
+      if (l.kind === 'flow' && Math.hypot(...l.flowDir.map(Number)) > 0) dir = l.flowDir.map(Number)
       if (l.kind === 'moment' && Math.hypot(...l.moment.map(Number)) > 0) {
         // Momentenvektor (rechte Hand) vom Bereich weg
         const m = l.moment.map(Number)
@@ -735,6 +745,7 @@ export default function App() {
           if (l.kind === 'pressure') return { ...base, pressure: Number(l.pressure) }
           // Moment in der Oberfläche in N·m, im Rechenkern N·mm
           if (l.kind === 'moment') return { ...base, moment: l.moment.map((v) => Number(v) * 1000) }
+          if (l.kind === 'flow') return { ...base, direction: l.flowDir.map(Number), pressure: flowPressurePa(l) * 1e-6 }
           return { ...base, force: l.force.map(Number) }
         }),
       }
@@ -1058,6 +1069,7 @@ export default function App() {
       let t
       if (l.kind === 'pressure') t = `Druck ${fmt(Number(l.pressure))} MPa`
       else if (l.kind === 'moment') t = `Moment (${fmtVec(l.moment.map(Number))}) N·m`
+      else if (l.kind === 'flow') t = `Strömung ${MEDIA[l.medium ?? 'luft'][0]}, v = ${fmt(Number(l.velocity))} m/s, c_w = ${fmt(Number(l.cw))}, Richtung (${fmtVec(l.flowDir.map(Number))}), Druck ${fmt(flowPressurePa(l))} Pa`
       else t = `${l.kind === 'bearing' ? 'Lagerlast' : 'Kraft'} (${fmtVec(l.force.map(Number))}) N, Betrag ${fmt(Math.hypot(...l.force.map(Number)))} N`
       return [`Last ${i + 1}`, `${t}, ${l.surfaces.length} Fläche(n)${regionText(l.region)}`]
     })
@@ -1420,6 +1432,43 @@ export default function App() {
                               presets={cyl ? [['um die Wellenachse (Torsion)', cyl.axis]] : []}
                             />
                             <p className="hint">Wirkt um den Schwerpunkt des Bereichs, linear verteilt wie bei einem starren Anschlussteil. Drehsinn nach der rechten Hand.</p>
+                          </>
+                        ) : l.kind === 'flow' ? (
+                          <>
+                            <div className="grid3">
+                              <label className="field">
+                                <span>Medium</span>
+                                <select value={l.medium ?? 'luft'} onChange={(e) => upd({ medium: e.target.value })}>
+                                  {Object.entries(MEDIA).map(([k, [lab]]) => (
+                                    <option key={k} value={k}>
+                                      {lab}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <NumField label="Geschwindigkeit" unit="m/s" value={l.velocity} onChange={(v) => upd({ velocity: v })} />
+                              <NumField label="c_w" value={l.cw} onChange={(v) => upd({ cw: v })} />
+                            </div>
+                            {l.medium === 'eigen' && <NumField label="Dichte" unit="kg/m³" value={l.rhoFluid} onChange={(v) => upd({ rhoFluid: v })} />}
+                            <VectorInput
+                              item={l}
+                              field="flowDir"
+                              labels={['x', 'y', 'z']}
+                              unit=""
+                              upd={upd}
+                              picking={false}
+                              onPick={() => {}}
+                              aiming={aim?.id === l.id && aim.field === 'flowDir'}
+                              onAimToggle={() => startAim(l.id, 'flowDir')}
+                              presets={[]}
+                            />
+                            <button className="link" onClick={() => upd({ surfaces: (mesh?.surfaces ?? []).map((x) => x.tag) })}>
+                              Alle Außenflächen wählen
+                            </button>
+                            <p className="hint">
+                              Staudruck × c_w = {fmt(flowPressurePa(l))} Pa auf alle angeströmten Flächen (Richtung = Strömungsrichtung). Überschlägig: keine Sogseite,
+                              keine Umströmung; c_w z. B. Platte quer 1,2, Zylinder 1,0, Kugel 0,5. Für genaue Strömungslasten wäre eine CFD-Rechnung nötig.
+                            </p>
                           </>
                         ) : l.kind === 'bearing' ? (
                           <>

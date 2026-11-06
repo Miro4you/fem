@@ -129,6 +129,9 @@ pub enum Load {
     /// Lagerlast (Bolzen in Bohrung, Welle in Lager): Kraft wirkt nur auf die Hälfte der Zylinderfläche,
     /// gegen die gedrückt wird, mit kosinusförmiger Druckverteilung
     Bearing { group: String, force: [f64; 3] },
+    /// Strömung/Wind (überschlägig): Druck `pressure` (= ½·ρ·v²·c_w) auf allen Flächen der Gruppe, die
+    /// der Strömungsrichtung `direction` zugewandt sind → Gesamtkraft ≈ Druck × angeströmte Projektionsfläche
+    Flow { group: String, direction: [f64; 3], pressure: f64 },
 }
 
 impl Load {
@@ -138,7 +141,8 @@ impl Load {
             | Load::Traction { group, .. }
             | Load::Pressure { group, .. }
             | Load::Moment { group, .. }
-            | Load::Bearing { group, .. } => group,
+            | Load::Bearing { group, .. }
+            | Load::Flow { group, .. } => group,
         }
     }
 }

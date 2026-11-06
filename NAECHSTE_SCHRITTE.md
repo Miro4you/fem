@@ -62,6 +62,8 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - ✅ Phase 3: Werkstoffdatenbank (Dichte, eigene Werkstoffe), Festigkeitsnachweis, PDF-Bericht,
   Parameterstudien, MathPad-Export
 - ✅ Phase 5: Eigenfrequenzen + lineares Knicken (Lanczos), animierte Formen, Prüffälle Kragbalken/Euler
+- ✅ Phase 6 (überschlägig): Strömungs-/Windlast (Staudruck × c_w auf angeströmte Flächen). Echte CFD-Kopplung
+  (OpenFOAM: Netz, Löser, Druckfeld zurück auf die Oberfläche) wäre ein eigenes Großprojekt
 - **Neu: Baugruppen** – mehrere Körper aus einer STEP-Datei: Werkstoff je Körper, Verbindungen (verklebt/
   verschraubt/Kontakt), Körper ein-/ausblenden, Kräfte zwischen den Körpern auswerten
 - Mac: läuft laut Felix (installiert) – Rückmeldung abwarten

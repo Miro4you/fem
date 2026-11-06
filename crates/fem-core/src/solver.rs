@@ -648,6 +648,20 @@ fn add_load(model: &Model, load: &Load, faces: &[Face], f_ext: &mut [f64]) -> Re
             let omega = j.lu().solve(&Vector3::from(*moment)).ok_or_else(|| bad("Moment lässt sich auf diese Fläche nicht verteilen"))?;
             Box::new(move |p| omega.cross(&(p.x - center)))
         }
+        Load::Flow { direction, pressure, .. } => {
+            let d = Vector3::from(*direction);
+            let d = d / d.norm().max(1e-300);
+            let p = *pressure;
+            // nur angeströmte Flächen (Außennormale gegen die Strömung): Druck drückt aufs Bauteil
+            Box::new(move |q| {
+                let n = q.nda.normalize();
+                if n.dot(&d) < 0.0 {
+                    -n * p
+                } else {
+                    Vector3::zeros()
+                }
+            })
+        }
         Load::Bearing { force, .. } => {
             let f = Vector3::from(*force);
             let fmag = f.norm();
@@ -770,6 +784,21 @@ mod tests {
         let (fs, ms) = resultant(&model, &f, [10.0, 10.0, 4.0]);
         assert!(fs.norm() < 1e-9, "{fs:?}");
         assert!((ms - Vector3::from(m)).norm() < 1e-9, "{ms:?}");
+    }
+
+    #[test]
+    fn stroemung_kraft_gleich_druck_mal_projektion() {
+        // Quader 40 × 20 × 4, Strömung schräg in der xy-Ebene: angeströmt Stirn (20·4) und Seite (40·4)
+        let d = Vector3::new(1.0, 2.0, 0.0).normalize();
+        let all = Selection::Box { min: [-1.0, -1.0, -1.0], max: [41.0, 21.0, 5.0] };
+        let model = platte().group("alles", all).load(Load::Flow { group: "alles".into(), direction: d.into(), pressure: 0.01 });
+        let f = load_vector(&model, &model.mesh.boundary_faces()).unwrap();
+        let (fs, _) = resultant(&model, &f, [0.0; 3]);
+        // Kraft je angeströmter Fläche = p·A in Richtung −n: Stirn x=0 → +x·80·p, Seite y=0 → +y·160·p
+        assert!((fs - Vector3::new(0.8, 1.6, 0.0)).norm() < 1e-9, "{fs:?}");
+        // Anteil in Strömungsrichtung = p · projizierte Fläche (80·cos α + 160·sin α)
+        let proj = 80.0 * d.x + 160.0 * d.y;
+        assert!((fs.dot(&d) - 0.01 * proj).abs() < 1e-9);
     }
 
     #[test]

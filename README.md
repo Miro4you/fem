@@ -79,6 +79,12 @@ TET10-Massenmatrix (Dichte aus dem Werkstoff), lineares Knicken mit geometrische
 Lösung (Knicklast = Lastfaktor × Last). Lanczos-Verfahren mit Spektraltransformation (direkte Zerlegung, bis
 600 000 Unbekannte). Schwing-/Knickform animiert. Infill wird hier nicht berücksichtigt (massiver Werkstoff).
 
+## Strömung / Wind (Phase 6, überschlägig)
+
+Lastart „Strömung / Wind“: Medium (Luft, Wasser, eigene Dichte), Geschwindigkeit, c_w und Strömungsrichtung →
+Druck q = ½·ρ·v²·c_w auf allen angeströmten Flächen (Außennormale gegen die Strömung), Gesamtkraft = q × Projektions-
+fläche. Keine Sogseite, keine Umströmung – für genaue Strömungslasten wäre eine CFD-Rechnung (z. B. OpenFOAM) nötig.
+
 ## Leichtbau
 
 Ergebnisansicht „Materialausnutzung“ und **Leichtbau-Vorschlag** (Reiter Geometrie): Topologieoptimierung (SIMP,

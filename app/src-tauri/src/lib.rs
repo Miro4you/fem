@@ -356,6 +356,8 @@ enum LoadDef {
     Pressure { surfaces: Vec<i32>, pressure: f64, #[serde(default)] region: Option<Region> },
     Moment { surfaces: Vec<i32>, moment: [f64; 3], #[serde(default)] region: Option<Region> },
     Bearing { surfaces: Vec<i32>, force: [f64; 3], #[serde(default)] region: Option<Region> },
+    /// Strömung/Wind: Druck (MPa) auf alle angeströmten Flächen
+    Flow { surfaces: Vec<i32>, direction: [f64; 3], pressure: f64, #[serde(default)] region: Option<Region> },
 }
 
 #[derive(Deserialize)]
@@ -450,6 +452,9 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
                 }
                 LoadDef::Moment { surfaces, moment, region } => (surfaces, region, Load::Moment { group, moment: *moment }),
                 LoadDef::Bearing { surfaces, force, region } => (surfaces, region, Load::Bearing { group, force: *force }),
+                LoadDef::Flow { surfaces, direction, pressure, region } => {
+                    (surfaces, region, Load::Flow { group, direction: *direction, pressure: *pressure })
+                }
             };
             model = model.group_in(&name, Selection::Surfaces(sel.clone()), region.clone()).load(load);
         }
