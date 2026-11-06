@@ -1,0 +1,176 @@
+# Testprotokoll Projekt-FEM
+
+Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 50 von 50 Lehrbuchprüfungen bestanden
+(`./target/release/projekt-fem validieren`), 33 automatische Tests grün.
+
+**So ausfüllen:** Jeden Punkt durchgehen, `[ ]` → `[x]` wenn es passt, sonst Anmerkung dahinter schreiben
+(was du gemacht hast, was passiert ist, gern mit Screenshot). Die Datei kannst du mir einfach zurückschicken.
+
+Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung Ø8 = 13) und
+`examples/geometrie/` (lochplatte, winkel, welle, balken_gelenk). Gern auch eigene Teile.
+
+---
+
+## 0. Aktualisieren und starten
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 0.1 | Im Ordner `FEM`: `git pull` | neuester Stand (`git log --oneline -1` → „Testprotokoll …“) | [ ] |
+| 0.2 | `cd app && npm install` (**neu nötig**: PDF-Bibliothek jsPDF) | ohne Fehler | [ ] |
+| 0.3 | `npx tauri build --no-bundle` | baut durch, `target/release/projekt-fem-app` | [ ] |
+| 0.4 | App starten | Fenster öffnet, oben 6 Reiter: Modell · Geometrie · Studie · Stabwerk · Ergebnis | [ ] |
+| 0.5 | Mac: dasselbe auf dem Mac | baut und startet | [ ] |
+
+## 1. Grundablauf (Kurzcheck, dass nichts kaputt ist)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 1.1 | Hebel öffnen, S235JR, Lager Rechteckaufnahme fest, Last 1000 N in −y auf Bohrung, Rechnen | max. σv ≈ 209 MPa (2-mm-Netz), u ≈ 0,175 mm, S ≈ 1,12 | [ ] |
+| 1.2 | Drehen/Verschieben/Zoomen im Bild | wie zuletzt (CAD-artig) | [ ] |
+| 1.3 | Projekt speichern und wieder öffnen | alles wieder da (auch Infill, Nachweis, Geometrieänderungen) | [ ] |
+
+## 2. Fortschrittsanzeige
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 2.1 | Netz auf 1 mm, Neu vernetzen, Rechnen | im grauen Hinweis: „Vernetzen …“, dann „Steifigkeitsmatrix aufbauen“, „Mehrgitter …“, „Iteration n, Restfehler …“ mit Balken, „Spannungen berechnen“ | [ ] |
+
+## 3. Netz in Wirkbereichen verfeinern
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 3.1 | Last mit Wirkbereich (z. B. Kreis Ø10 auf der Oberseite) anlegen | unter Netz Hinweis „Wirkbereiche geändert – Neu vernetzen“, Knopf blau | [ ] |
+| 3.2 | Neu vernetzen, „Netz anzeigen“ | im Kreis deutlich feineres Netz | [ ] |
+| 3.3 | Häkchen „Netz in Wirkbereichen automatisch verfeinern“ aus, neu vernetzen | wieder gleichmäßiges Netz | [ ] |
+
+## 4. 3D-Druck: Wände + Infill, Schnittansicht
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 4.1 | Werkstoff „PLA (FDM)“, Last auf 100 N | Tabelle XY / Z, Abschnitt Aufbaurichtung | [ ] |
+| 4.2 | „Wände und Infill berücksichtigen“ an | Felder Muster, Füllgrad (+ Regler), Wände, Linienbreite, Schichthöhe, Deck-/Bodenschichten; Hinweis mit Wandstärke und Ersatzwerten des Infills | [ ] |
+| 4.3 | Neu vernetzen (Netz wird an der Oberfläche auf Wandstärke verfeinert) | dauert länger, deutlich mehr Elemente | [ ] |
+| 4.4 | Rechnen | Ergebnis; Ansichten „Sicherheit Infill“ und „Wand / Infill“ wählbar | [ ] |
+| 4.5 | Ergebnis → „Schnitt (ins Bauteil schauen)“, Achse Y, Regler verschieben | Bauteil aufgeschnitten, Schnittfläche eingefärbt; bei „Wand / Infill“ rot = Wand außen, blau = Infill innen | [ ] |
+| 4.6 | „⇄ Seite“ | andere Hälfte sichtbar | [ ] |
+| 4.7 | Füllgrad 20 % → 60 %, rechnen | Sicherheit Infill steigt deutlich, Masse steigt | [ ] |
+| 4.8 | Muster durchprobieren (Gitter, Gyroid, Waben …) | plausible Unterschiede (Waben in der Ebene weicher) | [ ] |
+
+## 5. 3D-Druck: Aufbaurichtung, Überhänge, Kalibrierung
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 5.1 | Aufbaurichtung X, Y, Z durchklicken | Schichtlinien und Druckbett drehen mit; rote Flächen = Überhang > 45° | [ ] |
+| 5.2 | „⇅ Umdrehen“ | Druckbett auf der anderen Seite, andere Flächen rot | [ ] |
+| 5.3 | Nach einer Rechnung „Aufbaurichtung optimieren (alle Richtungen)“ | Tabelle mit 6 Richtungen (S ≈, Stützfläche, Höhe) in < 1 s; Sortierung Sicherheit / wenig Stützmaterial / Kompromiss | [ ] |
+| 5.4 | Bei einer Zeile „prüfen“ | Richtung wird übernommen und voll gerechnet | [ ] |
+| 5.5 | „Werte aus eigenem Zugversuch übernehmen …“: b, h, L₀, Höchstkraft, F₁/ΔL eintragen, liegend/stehend | Vorschau Rm/Rp/E stimmt mit Handrechnung; „Übernehmen“ setzt die XY- bzw. Z-Werte | [ ] |
+
+## 6. Leichtbau
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 6.1 | Ergebnis → „Materialausnutzung“ | blau = kaum genutztes Material (auch im Schnitt) | [ ] |
+| 6.2 | Reiter Geometrie → Leichtbau-Vorschlag: 40 %, 20 Durchläufe, „Form berechnen“ | Fortschritt je Durchlauf; danach grüne Form im durchsichtigen Bauteil entlang des Kraftflusses | [ ] |
+| 6.3 | Schwellwert-Regler bewegen | Form wird dicker/dünner, Volumenanteil im Text | [ ] |
+| 6.4 | „Form als STL speichern“, in Slicer/CAD öffnen | STL lässt sich öffnen, Maße passen zum Bauteil | [ ] |
+
+## 7. Werkstoffe, Masse, Festigkeitsnachweis
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 7.1 | Werkstoffliste | Gruppen Stahl, Aluminium, Kupfer, Kunststoff, 3D-Druck …; Feld Dichte | [ ] |
+| 7.2 | Rechnen | Ergebnis zeigt „Masse“ (Hebel S235: ≈ 105 g) | [ ] |
+| 7.3 | „Als eigenen Werkstoff speichern“, Namen eingeben; App neu starten | eigener Werkstoff unter „Eigene Werkstoffe“; löschen geht | [ ] |
+| 7.4 | Nachweis: erforderlich 1,5 / 2 eintragen, rechnen | Karte „Festigkeitsnachweis erfüllt/nicht erfüllt“ mit Ausnutzung je Zeile (Hebel 1000 N: 134 % / 116 % → nicht erfüllt) | [ ] |
+| 7.5 | „Verformung max.“ eintragen | zusätzliche Zeile Verformung | [ ] |
+
+## 8. PDF-Bericht
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 8.1 | Ergebnis → „Bericht als PDF“ | App schaltet kurz durch die Ansichten, dann Speichern-Dialog | [ ] |
+| 8.2 | PDF öffnen | 4–6 Seiten: Kopf mit Urteil, Bauteil/Netz, Werkstoff, Lager, Lasten, Ergebnisse, Nachweis, Hinweise, Bilder mit Farbskala, Annahmen | [ ] |
+| 8.3 | Mit 3D-Druck-Werkstoff + Infill | Werkstoffteil enthält Aufbaurichtung, Füllung, Wände | [ ] |
+
+## 9. Parameterstudie (Reiter „Studie“)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 9.1 | Netzgröße „4; 3; 2; 1,5“, Studie starten | Tabelle + Diagramm; Hebel: σv steigt leicht (200 → 210 MPa), u fast gleich | [ ] |
+| 9.2 | Im Diagramm über die Punkte fahren | Wert erscheint | [ ] |
+| 9.3 | Reiter Geometrie: Radius-Änderung anlegen; Studie → Parameter „Radius“, Werte „4; 6; 8; 10“ | je Wert Geometrie geändert und gerechnet; danach Ausgangszustand wieder da | [ ] |
+| 9.4 | Mit Infill: Parameter Füllgrad | Werte je Füllgrad | [ ] |
+| 9.5 | „Tabelle als CSV (Excel)“ | öffnet sich in Excel/LibreOffice korrekt (Semikolon, Komma) | [ ] |
+
+## 10. MathPad
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 10.1 | Ergebnis → „Nach MathPad (.mathpad)“ | Datei „… FEM.mathpad“ | [ ] |
+| 10.2 | In MathPad öffnen | Notizen + Werte mit Einheiten (E, R_e, σ_v, u_max, m, F_A1x …), S_F = R_e/σ_v rechnet live, a_F = Ausnutzung | [ ] |
+
+## 11. Eigenfrequenzen und Knicken
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 11.1 | Über „Rechnen“: „Eigenfrequenzen“, 6 Moden | Liste in Hz (Hebel: 1. Mode ≈ 597 Hz, Arm schwingt aus der Ebene) | [ ] |
+| 11.2 | Zeilen anklicken | jeweilige Schwingform, animiert („Form animieren“) | [ ] |
+| 11.3 | Ohne Dichte im Werkstoff | Hinweis „Dichte angeben“ | [ ] |
+| 11.4 | „Knicken“, rechnen | Lastfaktoren λ und Knicklast (Hebel 1000 N: λ ≈ 82) | [ ] |
+| 11.5 | Zurück auf „Statik“ | normales Ergebnis wieder sichtbar | [ ] |
+
+## 12. Strömung / Wind
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 12.1 | Last „Strömung / Wind“, „Alle Außenflächen wählen“, Luft 30 m/s, c_w 1,2, Richtung −z | Hinweis mit Druck ≈ 662 Pa; Pfeil in Strömungsrichtung | [ ] |
+| 12.2 | Rechnen | „Summe Lasten“ ≈ Druck × angeströmte Fläche (Hebel Oberseite 26,8 cm² → ≈ 1,8 N) | [ ] |
+
+## 13. Stabwerk (Reiter „Stabwerk“)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 13.1 | Vorlage „Einfeldträger“, rechnen | IPE 200, 4 m, 20 kN: σv = 103,1 MPa, w = 6,54 mm (Handrechnung F·L/4/W und F·L³/48EI) | [ ] |
+| 13.2 | Vorlagen Kragarm, Fachwerkbinder, Rahmen | plausible Bilder; beim Binder Pfosten über unbelasteten Untergurtknoten = Nullstäbe (blau) | [ ] |
+| 13.3 | Anzeige Ausnutzung / Normalkraft / Biegemoment | Farben und Legende wechseln | [ ] |
+| 13.4 | Eigenes Modell: Knoten, Stäbe, Lager, Lasten ändern | Bild aktualisiert sofort, Rechnen geht | [ ] |
+| 13.5 | Speichern / Öffnen | `.stab.json` geht wieder auf | [ ] |
+| 13.6 | Mechanismus bauen (z. B. Lager löschen) | verständliche Meldung „nicht ausreichend gelagert“ | [ ] |
+
+## 14. Heimnetz (Laptop/Arbeits-PC)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 14.1 | Heimnetz-Freigabe an, Link am Laptop öffnen | App im Browser | [ ] |
+| 14.2 | Stichproben im Browser: Infill + Schnitt, PDF, MathPad, Studie, Stabwerk, Eigenfrequenzen | geht wie am PC (Dateien als Download) | [ ] |
+
+---
+
+## Annahmen und Standardwerte, die du prüfen solltest
+
+- **Infill-Ersatzwerte** sind Näherungen (Gibson/Ashby-Skalierung je Muster), keine Messwerte – siehe Hinweistext beim
+  Infill. Am besten mit eigenem Zugstab gleicher Einstellungen gegenprüfen.
+- **Druckwerkstoffe** (PLA, PETG …): Richtwerte für 100 % Füllung; stark drucker- und einstellungsabhängig.
+- **Slicer-Voreinstellung**: Gyroid 20 %, 2 Wände × 0,45 mm, Schicht 0,2 mm, 5 Deck- / 4 Bodenschichten.
+- **Überhang** ab 45° (FDM-Faustregel).
+- **Erforderliche Sicherheiten** Standard 1,5 (Fließen) / 2,0 (Bruch).
+- **Strömung**: nur Staudruck × c_w auf der angeströmten Seite, keine Sogseite.
+- **IPE-Profilwerte** aus der Profiltabelle (DIN 1025-5) – bei Bedarf gegenprüfen.
+
+## Bekannte Grenzen
+
+- Alles linear-elastisch, kleine Verformungen; kein Kontakt, keine Plastizität, kein Kriechen.
+- Eigenfrequenzen/Knicken: massiver Werkstoff (Infill wird dort nicht berücksichtigt), bis ca. 600 000 Unbekannte.
+- Stabwerk: kein Stabilitätsnachweis der Stäbe (Biegeknicken/Kippen), keine Schnittgrößen-Diagramme.
+- Schalenelemente (Bleche) nicht umgesetzt – dünne Teile mit feinem Volumennetz rechnen.
+- Strömung nur überschlägig (keine CFD).
+- Topologieoptimierung: Form ist ein Vorschlag (STL), keine fertige CAD-Geometrie.
+
+## Fragen an dich
+
+1. **Programmname** – Vorschläge: „Kraftfluss“, „Lastpfad“, „Spannweite“, „Formfest“ – oder eigener?
+2. **Geometrie bearbeiten**: Was fehlt dir genau? (Ablauf beschreiben: was willst du am Teil ändern, wie soll es sich bedienen?)
+3. **Baugruppen** (neu auf der Liste): Welche Fälle hast du? (verschraubt, verklebt, Kontakt mit Spalt, Pressverband …)
+4. **Ansys-Werte** für den Hebel (Spannung im R6-Radius, max. Verformung, Lagerkraft).
+5. **Slicer**: Prusa, Orca oder Bambu Studio? Dann kann als Nächstes der 3MF-Import der Slicer-Einstellungen kommen.

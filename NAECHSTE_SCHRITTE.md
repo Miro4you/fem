@@ -1,4 +1,6 @@
-# Nächste Schritte (Stand 31.10.26, aktualisiert)
+# Nächste Schritte (Stand 06.11.26)
+
+**Aktuell: Felix testet nach `TESTPROTOKOLL.md`.**
 
 ## 1. Ansys-Vergleich Hebel (wartet auf Felix)
 Geometrie: `Daten/Hebel.step` (Onshape, in Metern gespeichert → wird korrekt in mm gelesen).
