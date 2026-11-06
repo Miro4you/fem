@@ -33,6 +33,7 @@ export default function Viewport({
   aim,
   onAim,
   layers,
+  topoShape,
 }) {
   const host = useRef(null)
   const ctx = useRef(null)
@@ -446,6 +447,32 @@ export default function Viewport({
     }
     s.dirty = true
   }, [mesh, mode, result, surfaceTint, hoverTag, layers?.dir?.join(',')])
+
+  // --- Leichtbau-Vorschlag: grüne Form im halbdurchsichtigen Bauteil ----------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    if (s.topoMesh) {
+      s.scene.remove(s.topoMesh)
+      s.topoMesh.geometry.dispose()
+      s.topoMesh.material.dispose()
+      s.topoMesh = null
+    }
+    if (s.setupMat) {
+      s.setupMat.transparent = !!topoShape
+      s.setupMat.opacity = topoShape ? 0.15 : 1
+      s.setupMat.depthWrite = !topoShape
+      s.setupMat.needsUpdate = true
+    }
+    if (topoShape && topoShape.triangles.length) {
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(topoShape.positions), 3))
+      geo.setIndex(Array.from(topoShape.triangles))
+      geo.computeVertexNormals()
+      s.topoMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x3fae6a, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide }))
+      s.scene.add(s.topoMesh)
+    }
+    s.dirty = true
+  }, [topoShape, mesh])
 
   // --- Schnitt: Oberfläche abschneiden, Schnittfläche einfärben ----------------------------------
   useEffect(() => {

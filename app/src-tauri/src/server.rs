@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::{
-    modify_geometry_impl, open_step_impl, orientation_scan_impl, progress_impl, section_impl, solve_impl, write_vtu_impl, AppState, Setup,
+    modify_geometry_impl, open_step_impl, orientation_scan_impl, progress_impl, section_impl, solve_impl, topo_stl_impl, topo_surface_impl,
+    topopt_impl, write_vtu_impl, AppState, Setup, TopoArgs,
 };
 use fem_core::gmsh::Refine;
 
@@ -161,6 +162,9 @@ fn router(shared: Shared) -> Router {
         .route("/solve", post(api_solve))
         .route("/section", post(api_section))
         .route("/orientation_scan", post(api_orientation_scan))
+        .route("/topopt", post(api_topopt))
+        .route("/topo_surface", post(api_topo_surface))
+        .route("/topo_stl", get(api_topo_stl))
         .route("/vtu", get(api_vtu))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
         .layer(axum::middleware::from_fn_with_state(shared.clone(), check_key));
@@ -337,6 +341,35 @@ async fn api_orientation_scan(State(s): State<Shared>, headers: HeaderMap, Json(
     let state = s.session(&headers);
     let v = tokio::task::spawn_blocking(move || orientation_scan_impl(&state, a.material)).await.map_err(bad)?.map_err(bad)?;
     Ok(Json(v).into_response())
+}
+
+#[derive(Deserialize)]
+struct TopoReq {
+    setup: Setup,
+    args: TopoArgs,
+}
+
+async fn api_topopt(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<TopoReq>) -> ApiResult<Response> {
+    let state = s.session(&headers);
+    let v = tokio::task::spawn_blocking(move || topopt_impl(&state, a.setup, a.args)).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(v).into_response())
+}
+
+#[derive(Deserialize)]
+struct ThresholdArgs {
+    threshold: f64,
+}
+
+async fn api_topo_surface(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<ThresholdArgs>) -> ApiResult<Response> {
+    let state = s.session(&headers);
+    let v = tokio::task::spawn_blocking(move || topo_surface_impl(&state, a.threshold)).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(v).into_response())
+}
+
+async fn api_topo_stl(State(s): State<Shared>, headers: HeaderMap, Query(a): Query<ThresholdArgs>) -> ApiResult<Response> {
+    let state = s.session(&headers);
+    let data = tokio::task::spawn_blocking(move || topo_stl_impl(&state, a.threshold)).await.map_err(bad)?.map_err(bad)?;
+    Ok(([(header::CONTENT_TYPE, "model/stl")], data).into_response())
 }
 
 async fn api_vtu(State(s): State<Shared>, headers: HeaderMap) -> ApiResult<Response> {

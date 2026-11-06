@@ -111,6 +111,19 @@ export const section = (point, normal) =>
 export const orientationScan = (material) =>
   isDesktop ? invoke('orientation_scan', { material }) : http('/orientation_scan', { method: 'POST', json: { material } })
 
+/// Leichtbau: Topologieoptimierung
+export const topopt = (setup, args) => (isDesktop ? invoke('topopt', { setup, args }) : http('/topopt', { method: 'POST', json: { setup, args } }))
+export const topoSurface = (threshold) =>
+  isDesktop ? invoke('topo_surface', { threshold }) : http('/topo_surface', { method: 'POST', json: { threshold } })
+export async function exportTopoStl(threshold, name) {
+  if (isDesktop) {
+    const p = await save({ defaultPath: name, filters: [{ name: 'STL', extensions: ['stl'] }] })
+    if (p) await invoke('topo_stl', { path: p, threshold })
+    return
+  }
+  download(await http('/topo_stl?threshold=' + threshold, { raw: true }), name)
+}
+
 export const solve = (setup) => (isDesktop ? invoke('solve', { setup }) : http('/solve', { method: 'POST', json: { setup } }))
 
 /// STEP auswählen → Pfad auf dem rechnenden Rechner (im Browser: hochladen)

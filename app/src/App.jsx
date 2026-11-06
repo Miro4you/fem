@@ -32,6 +32,7 @@ const QUANTITIES = {
   safety_layers: { label: 'Sicherheit Schichthaftung', unit: '', hint: 'quer zu den Schichten' },
   safety_infill: { label: 'Sicherheit Infill', unit: '', hint: 'Füllung innen' },
   shell: { label: 'Wand / Infill', unit: '', hint: '1 = Wand, 0 = Infill' },
+  usage: { label: 'Materialausnutzung', unit: '%', hint: 'blau = kaum genutzt' },
 }
 
 // Ergebnisfeld je Darstellung (für Oberfläche und Schnitt)
@@ -91,6 +92,8 @@ export default function App() {
   const [geoWarnings, setGeoWarnings] = useState([])
   // Ergebnis zum Vergleichen (z. B. Original vor den Geometrieänderungen)
   const [reference, setReference] = useState(null)
+  // Leichtbau-Vorschlag: { view, threshold, show, surface }
+  const [topo, setTopo] = useState(null)
   const [result, setResult] = useState(null)
   const [resultStale, setResultStale] = useState(false)
   const [view, setView] = useState('setup')
@@ -200,6 +203,7 @@ export default function App() {
         setGeoInfo(null)
         setGeoWarnings([])
       }
+      setTopo(null)
       if (!keepSetup) {
         setSupports([])
         setLoads([])
@@ -524,12 +528,39 @@ export default function App() {
       setGeoStep(g ? g.step : null)
       setGeoInfo(g)
       setGeoApplied(JSON.stringify(payload))
+      setTopo(null)
       setProbe(null)
       if (result) setResultStale(true)
     } catch (e) {
       setError(String(e))
     } finally {
       setBusy(null)
+    }
+  }
+
+  // --- Leichtbau ----------------------------------------------------------------------
+  async function onTopo(args) {
+    setBusy('Leichtbau-Vorschlag berechnen …')
+    setError(null)
+    setDrawing(null)
+    setGeoPick(false)
+    try {
+      const v = await api.topopt(buildSetup(material), args)
+      setTopo({ view: v, threshold: 0.5, show: true, surface: v.surface })
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onTopoThreshold(t) {
+    setTopo((x) => ({ ...x, threshold: t }))
+    try {
+      const sfc = await api.topoSurface(t)
+      setTopo((x) => (x && x.threshold === t ? { ...x, surface: sfc } : x))
+    } catch (e) {
+      setError(String(e))
     }
   }
 
@@ -685,6 +716,10 @@ export default function App() {
       const u = result[FIELD_OF[quantity][0]]
       values = Float32Array.from(u ?? [], (v) => Math.min(1 / Math.max(v, 1e-12), 10))
       reverse = true
+    } else if (quantity === 'usage') {
+      // Auslastung in % (ohne Festigkeitswerte: Vergleichsspannung bezogen auf das Maximum)
+      const vmax = result.max_von_mises.value || 1
+      values = result.utilization ? Float32Array.from(result.utilization, (u) => 100 * u) : Float32Array.from(result.von_mises, (v) => (100 * v) / vmax)
     } else if (quantity === 'shell') {
       values = Float32Array.from(result.shell_fraction ?? [])
     } else values = Float32Array.from(result[quantity])
@@ -700,6 +735,10 @@ export default function App() {
       if (quantity === 'disp') {
         cutValues = new Float32Array(m)
         for (let i = 0; i < m; i++) cutValues[i] = Math.hypot(cutData.displacement[3 * i], cutData.displacement[3 * i + 1], cutData.displacement[3 * i + 2])
+      } else if (quantity === 'usage') {
+        const vmax = result.max_von_mises.value || 1
+        const src = cutData.fields.utilization
+        cutValues = src ? Float32Array.from(src, (u) => 100 * u) : Float32Array.from(cutData.fields.von_mises, (v) => (100 * v) / vmax)
       } else {
         const [field, inv] = FIELD_OF[quantity] ?? []
         const src = cutData.fields[field]
@@ -1078,6 +1117,12 @@ export default function App() {
               onApply={onApplyGeometry}
               busy={!!busy}
               modified={!!geoStep}
+              topo={topo}
+              setTopo={setTopo}
+              onTopo={onTopo}
+              onTopoThreshold={onTopoThreshold}
+              canTopo={supports.length > 0 && loads.length > 0 && problems.length === 0}
+              onTopoStl={() => api.exportTopoStl(topo.threshold, (stepPath ?? 'bauteil').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') + '_leichtbau.stl').catch((e) => setError(String(e)))}
               onExport={() => api.exportStep(geoStep, (stepPath ?? 'geometrie').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') + '_geaendert.step').catch((e) => setError(String(e)))}
               mesh={mesh}
             />
@@ -1133,6 +1178,7 @@ export default function App() {
             planeNormal={planeNormal}
             onDraw={onDraw}
             overlays={overlays}
+            topoShape={view === 'geometry' && topo?.show ? topo.surface : null}
             aim={view === 'setup' ? aimView : null}
             onAim={onAim}
           />
@@ -1771,7 +1817,60 @@ function PrintOrientation({ material, setMaterial, picking, onPick, canCompare, 
 
 const OP_ICONS = { fillet: Spline, hole: CircleDot, add: SquarePlus, cut: SquareMinus }
 
-function GeometryPanel({ ops, setOps, pending, info, warnings, picking, onPick, drawing, onDraw, onCancelDraw, onApply, busy, modified, onExport, mesh }) {
+function TopoSection({ topo, setTopo, onTopo, onTopoThreshold, canTopo, onTopoStl }) {
+  const [vf, setVf] = useState('40')
+  const [iters, setIters] = useState('30')
+  const [radius, setRadius] = useState('')
+  const h = topo?.view?.history
+  return (
+    <section className="section">
+      <h2>
+        <Spline size={15} /> Leichtbau-Vorschlag
+      </h2>
+      <p className="hint">
+        Topologieoptimierung: Bei gleichen Lagern und Lasten wird das Material so verteilt, dass das Teil mit weniger Material möglichst steif bleibt.
+        Flächen mit Lagern und Lasten bleiben voll. Ergebnis als Vorlage für die Konstruktion (STL).
+      </p>
+      <div className="grid3">
+        <NumField label="Material behalten" unit="%" value={vf} onChange={setVf} />
+        <NumField label="Durchläufe" value={iters} onChange={setIters} />
+        <NumField label="Filterradius" unit="mm" value={radius} onChange={setRadius} />
+      </div>
+      <p className="hint">Filterradius leer = 2,5 × Elementgröße (größer = gröbere, einfachere Form).</p>
+      <button
+        className="btn wide"
+        disabled={!canTopo}
+        title={canTopo ? '' : 'Erst Lager und Lasten im Reiter Modell festlegen'}
+        onClick={() => onTopo({ volume_fraction: Number(vf) / 100, iterations: Number(iters) || 30, filter_radius: Number(radius) || 0 })}
+      >
+        <Play size={15} /> Form berechnen
+      </button>
+      {topo && (
+        <>
+          <label className="check">
+            <input type="checkbox" checked={topo.show} onChange={(e) => setTopo({ ...topo, show: e.target.checked })} /> Form im Bild zeigen
+          </label>
+          <div className="field">
+            <span>
+              Schwellwert {fmt(topo.threshold)} – sichtbar {fmt(100 * (topo.surface?.volume_fraction ?? 0))} % des Volumens
+            </span>
+            <input type="range" className="slim-range" min={0.1} max={0.9} step={0.05} value={topo.threshold} onChange={(e) => onTopoThreshold(Number(e.target.value))} />
+          </div>
+          {h?.length > 1 && (
+            <p className="hint">
+              {h.length} Durchläufe. Nachgiebigkeit {fmt(h[0][0])} → {fmt(h[h.length - 1][0])} N·mm bei {fmt(100 * h[h.length - 1][1])} % Material (kleiner = steifer).
+            </p>
+          )}
+          <button className="btn wide" onClick={onTopoStl}>
+            <Download size={15} /> Form als STL speichern
+          </button>
+        </>
+      )}
+    </section>
+  )
+}
+
+function GeometryPanel({ ops, setOps, pending, info, warnings, picking, onPick, drawing, onDraw, onCancelDraw, onApply, busy, modified, onExport, mesh, topo, setTopo, onTopo, onTopoThreshold, canTopo, onTopoStl }) {
   const upd = (id, patch) => setOps(ops.map((o) => (o.id === id ? { ...o, ...patch } : o)))
   const addSketch = (op, shape) => {
     const o = newSketchOp(op, shape)
@@ -1922,6 +2021,7 @@ function GeometryPanel({ ops, setOps, pending, info, warnings, picking, onPick, 
         )}
         {mesh && <p className="hint">{mesh.elements.toLocaleString('de-DE')} Elemente im aktuellen Netz.</p>}
       </div>
+      <TopoSection topo={topo} setTopo={setTopo} onTopo={onTopo} onTopoThreshold={onTopoThreshold} canTopo={canTopo} onTopoStl={onTopoStl} />
     </>
   )
 }

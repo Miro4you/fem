@@ -20,6 +20,7 @@ pub mod results;
 pub mod section;
 pub mod solver;
 pub mod sparse;
+pub mod topopt;
 pub mod validate;
 pub mod vtk;
 

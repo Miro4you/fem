@@ -41,6 +41,8 @@ pub fn progress_impl(state: &AppState) -> Option<ProgressView> {
 #[derive(Default)]
 pub struct Inner {
     progress: ProgressSlot,
+    /// Leichtbau-Vorschlag: Dichte je Element
+    topo: Option<Vec<f64>>,
     mesh: Option<Mesh>,
     faces: Vec<Face>,
     /// Anzeigeknoten → Netzknoten
@@ -243,7 +245,7 @@ pub fn open_step_impl(state: &AppState, path: &str, size: Option<f64>, linear: b
         let (view, disp_nodes) = build_view(&mesh, &faces, size.unwrap_or(diag / 25.0));
         *slot.lock().unwrap() = None;
         let mut s = state.lock().unwrap();
-        *s = Inner { progress: slot, mesh: Some(mesh), faces, disp_nodes, model: None, results: None };
+        *s = Inner { progress: slot, topo: None, mesh: Some(mesh), faces, disp_nodes, model: None, results: None };
         Ok(view)
     }
 }
@@ -384,19 +386,18 @@ async fn solve(state: tauri::State<'_, AppState>, setup: Setup) -> Result<Result
 }
 
 /// Rechnung mit dem aktuellen Netz (auch für Tests ohne Oberfläche nutzbar).
-pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> {
-    {
-        let t0 = Instant::now();
-        let (mesh, faces, disp_nodes) = {
-            let s = state.lock().unwrap();
-            let mesh = s.mesh.clone().ok_or("Zuerst eine Geometrie öffnen")?;
-            (mesh, s.faces.clone(), s.disp_nodes.clone())
-        };
-        if setup.supports.is_empty() {
-            return Err("Mindestens ein Lager festlegen".to_string());
-        }
-        let (progress, slot) = progress_for(state);
-        let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver).progress(progress);
+/// Modell aus dem aktuellen Netz und den Einstellungen der Oberfläche
+fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec<usize>, ProgressSlot), String> {
+    let (mesh, faces, disp_nodes) = {
+        let s = state.lock().unwrap();
+        let mesh = s.mesh.clone().ok_or("Zuerst eine Geometrie öffnen")?;
+        (mesh, s.faces.clone(), s.disp_nodes.clone())
+    };
+    if setup.supports.is_empty() {
+        return Err("Mindestens ein Lager festlegen".to_string());
+    }
+    let (progress, slot) = progress_for(state);
+    let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver).progress(progress);
         for (i, s) in setup.supports.iter().enumerate() {
             let name = format!("Lager {}", i + 1);
             model = model.group_in(&name, Selection::Surfaces(s.surfaces.clone()), s.region.clone());
@@ -418,7 +419,13 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             };
             model = model.group_in(&name, Selection::Surfaces(sel.clone()), region.clone()).load(load);
         }
+    Ok((model, faces, disp_nodes, slot))
+}
 
+pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> {
+    {
+        let t0 = Instant::now();
+        let (model, faces, disp_nodes, slot) = build_model(state, &setup)?;
         let res = fem_core::solve(&model);
         *slot.lock().unwrap() = None;
         let res = res.map_err(|e| e.to_string())?;
@@ -516,6 +523,108 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         s.results = Some(res);
         Ok(view)
     }
+}
+
+// --- Leichtbau: Topologieoptimierung -----------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct TopoArgs {
+    volume_fraction: f64,
+    iterations: usize,
+    #[serde(default)]
+    filter_radius: f64,
+}
+
+#[derive(Serialize)]
+pub struct TopoSurface {
+    positions: Vec<f32>,
+    triangles: Vec<u32>,
+    /// Volumenanteil der Elemente ≥ Schwellwert
+    volume_fraction: f64,
+}
+
+#[derive(Serialize)]
+pub struct TopoView {
+    /// Dichte je Anzeigeknoten
+    density: Vec<f32>,
+    /// je Durchlauf (Nachgiebigkeit, Volumenanteil)
+    history: Vec<(f64, f64)>,
+    surface: TopoSurface,
+}
+
+fn topo_surface_of(mesh: &Mesh, density: &[f64], threshold: f64) -> TopoSurface {
+    let (pts, tris) = fem_core::topopt::shape_surface(mesh, density, threshold, 3);
+    let (mut v, mut vt) = (0.0, 0.0);
+    for e in 0..mesh.n_elems() {
+        let ve = fem_core::element::tet_volume(&mesh.elem_coords(e)[..4]).abs();
+        vt += ve;
+        if density[e] >= threshold {
+            v += ve;
+        }
+    }
+    TopoSurface {
+        positions: pts.iter().flat_map(|p| p.map(|x| x as f32)).collect(),
+        triangles: tris.iter().flat_map(|t| *t).collect(),
+        volume_fraction: v / vt.max(1e-300),
+    }
+}
+
+pub fn topopt_impl(state: &AppState, setup: Setup, args: TopoArgs) -> Result<TopoView, String> {
+    let (model, _, disp_nodes, slot) = build_model(state, &setup)?;
+    let params = fem_core::topopt::TopoParams {
+        volume_fraction: args.volume_fraction,
+        iterations: args.iterations.clamp(1, 200),
+        filter_radius: args.filter_radius,
+        ..Default::default()
+    };
+    let r = fem_core::topopt::optimize(&model, &params);
+    *slot.lock().unwrap() = None;
+    let r = r.map_err(|e| e.to_string())?;
+    let nd = fem_core::topopt::nodal_density(&model.mesh, &r.density);
+    let view = TopoView {
+        density: disp_nodes.iter().map(|&n| nd[n] as f32).collect(),
+        history: r.history.clone(),
+        surface: topo_surface_of(&model.mesh, &r.density, 0.5),
+    };
+    state.lock().unwrap().topo = Some(r.density);
+    Ok(view)
+}
+
+pub fn topo_surface_impl(state: &AppState, threshold: f64) -> Result<TopoSurface, String> {
+    let s = state.lock().unwrap();
+    let (Some(mesh), Some(d)) = (&s.mesh, &s.topo) else {
+        return Err("Noch kein Leichtbau-Vorschlag berechnet".into());
+    };
+    Ok(topo_surface_of(mesh, d, threshold))
+}
+
+pub fn topo_stl_impl(state: &AppState, threshold: f64) -> Result<Vec<u8>, String> {
+    let s = state.lock().unwrap();
+    let (Some(mesh), Some(d)) = (&s.mesh, &s.topo) else {
+        return Err("Noch kein Leichtbau-Vorschlag berechnet".into());
+    };
+    let (pts, tris) = fem_core::topopt::shape_surface(mesh, d, threshold, 3);
+    let mut buf = Vec::new();
+    fem_core::topopt::write_stl(&pts, &tris, &mut buf).map_err(|e| e.to_string())?;
+    Ok(buf)
+}
+
+#[tauri::command]
+async fn topopt(state: tauri::State<'_, AppState>, setup: Setup, args: TopoArgs) -> Result<TopoView, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || topopt_impl(&state, setup, args)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn topo_surface(state: tauri::State<'_, AppState>, threshold: f64) -> Result<TopoSurface, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || topo_surface_impl(&state, threshold)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn topo_stl(state: tauri::State<'_, AppState>, path: String, threshold: f64) -> Result<(), String> {
+    let data = topo_stl_impl(state.inner(), threshold)?;
+    std::fs::write(path, data).map_err(|e| e.to_string())
 }
 
 // --- 3D-Druck: Aufbaurichtung bewerten ----------------------------------------------------
@@ -706,6 +815,9 @@ pub fn run() {
             solve,
             section,
             orientation_scan,
+            topopt,
+            topo_surface,
+            topo_stl,
             export_vtu,
             save_text,
             load_text,

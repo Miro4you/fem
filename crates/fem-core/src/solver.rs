@@ -17,9 +17,23 @@ pub const AUTO_ITERATIVE_FROM: usize = 50_000;
 pub const PCG_TOLERANCE: f64 = 1e-9;
 const PCG_MAX_ITER: usize = 2_000;
 
+/// Zusätzliche Einstellungen einer Rechnung (z. B. für die Topologieoptimierung)
+#[derive(Debug, Clone, Default)]
+pub struct SolveOptions<'a> {
+    /// Steifigkeitsfaktor je Element (1 = voller Werkstoff)
+    pub element_scale: Option<&'a [f64]>,
+    /// Abbruchgenauigkeit des iterativen Lösers (Standard `PCG_TOLERANCE`)
+    pub tolerance: Option<f64>,
+}
+
 /// Lineare statische Rechnung: K·u = f, gelöst direkt (dünnbesetzte Cholesky-Zerlegung)
 /// oder iterativ (PCG), siehe `Model::solver`.
 pub fn solve(model: &Model) -> Result<Results> {
+    solve_with(model, &SolveOptions::default())
+}
+
+/// Wie `solve`, mit zusätzlichen Einstellungen
+pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
     model.material.check()?;
     let mesh = &model.mesh;
     let n_nodes = mesh.nodes.len();
@@ -39,9 +53,13 @@ pub fn solve(model: &Model) -> Result<Results> {
     };
     // Steifigkeit je Element: Wand und Kern nach Volumenanteil gemischt (gleiche Dehnung)
     let elem_d = |e: usize| -> DMat {
-        match &zones {
+        let de = match &zones {
             Some((f, _, dc)) => d * f[e] + dc * (1.0 - f[e]),
             None => d,
+        };
+        match opts.element_scale {
+            Some(sc) => de * sc[e],
+            None => de,
         }
     };
 
@@ -163,7 +181,7 @@ pub fn solve(model: &Model) -> Result<Results> {
         progress.report(&format!("Steifigkeitsmatrix aufbauen ({neq} Unbekannte)"), None);
         let sys = pcg::assemble(n_nodes, &mesh.conn, mesh.npe, &prescribed, &f_sys, elem_k)?;
         let fixed: Vec<bool> = prescribed.iter().map(Option::is_some).collect();
-        let sol = pcg::solve(sys, &mesh.nodes, &fixed, &frames, PCG_TOLERANCE, PCG_MAX_ITER, progress)?;
+        let sol = pcg::solve(sys, &mesh.nodes, &fixed, &frames, opts.tolerance.unwrap_or(PCG_TOLERANCE), PCG_MAX_ITER, progress)?;
         (sol.x, Some(sol.iterations))
     } else {
         progress.report(&format!("Direkter Löser: Matrix aufbauen und zerlegen ({neq} Unbekannte)"), None);
