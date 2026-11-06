@@ -15,7 +15,7 @@ Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung 
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 0.1 | Im Ordner `FEM`: `git pull` | neuester Stand (`git log --oneline -1` → „Schweißnähte und SolidCraft …“) | [ ] |
+| 0.1 | Im Ordner `FEM`: `git pull` | neuester Stand (aktueller Stand von `claude/stoic-maxwell-rtmn09`) | [ ] |
 | 0.2 | `cd app && npm install` (**neu nötig**: PDF-Bibliothek jsPDF) | ohne Fehler | [ ] |
 | 0.3 | `npx tauri build --no-bundle` | baut durch, `target/release/projekt-fem-app` | [ ] |
 | 0.4 | App starten | Fenster öffnet, oben 5 Reiter: Modell · Geometrie · Studie · Stabwerk · Ergebnis; rechts „CAD“, „Heimnetz“ | [ ] |
