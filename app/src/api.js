@@ -179,6 +179,15 @@ export const onshapeSetVariable = (url, name, expression) =>
 export const onshapeStudy = (url, name, expression) =>
   isDesktop ? invoke('onshape_study', { url, name, expression }) : http('/onshape/study', { method: 'POST', json: { url, name, expression } })
 export const onshapeImport = (url) => (isDesktop ? invoke('onshape_import', { url }) : http('/onshape/import', { method: 'POST', json: { url } }))
+/// Bibliothek: eigene Onshape-Dokumente, Teilestudios eines Dokuments, Vorschaubilder (data:-Adresse)
+export const onshapeDocuments = (q = '') => (isDesktop ? invoke('onshape_documents', { q }) : http('/onshape/documents', { method: 'POST', json: { q } }))
+export const onshapeElements = (did, wid) =>
+  isDesktop ? invoke('onshape_elements', { did, wid }) : http('/onshape/elements', { method: 'POST', json: { did, wid } })
+export const onshapeThumbnail = ({ href = null, did = '', wid = '', eid = '' }) =>
+  isDesktop ? invoke('onshape_thumbnail', { href, did, wid, eid }) : http('/onshape/thumbnail', { method: 'POST', json: { href, did, wid, eid } })
+/// Ergebniswerte in die Beschreibung der Teile im Onshape-Teilestudio schreiben → Text
+export const onshapeWriteResult = (url) =>
+  isDesktop ? invoke('onshape_write_result', { url }) : http('/onshape/write_result', { method: 'POST', json: { url } })
 // --- SolidCraft (Live-Verbindung über seinen Steuerkanal, läuft auf dem rechnenden Rechner) ---
 const sc = (cmd, args, path, method = 'POST', json) =>
   isDesktop ? invoke(cmd, args) : http('/solidcraft/' + path, method === 'GET' ? {} : { method, json: json ?? args ?? {} })
@@ -250,7 +259,7 @@ export async function saveProject(stepPath, data) {
   if (isDesktop) {
     const p = await save({ defaultPath: stepPath.replace(/\.(step|stp)$/i, '') + '.fem.json', filters: [{ name: 'Projekt-FEM', extensions: ['fem.json'] }] })
     if (p) await invoke('save_text', { path: p, content: JSON.stringify(data, null, 2) })
-    return
+    return p
   }
   const step = await http('/file?path=' + encodeURIComponent(stepPath), { raw: true })
   const full = { ...data, stepName: baseName(stepPath), stepData: toBase64(await step.arrayBuffer()) }
@@ -258,11 +267,13 @@ export async function saveProject(stepPath, data) {
 }
 
 /// Projekt laden → Inhalt; `step` zeigt danach auf eine Datei, die der rechnende Rechner lesen kann
-export async function loadProject() {
+export async function loadProject(path = null) {
   let text
+  let file = null
   if (isDesktop) {
-    const p = await open({ multiple: false, filters: [{ name: 'Projekt-FEM', extensions: ['fem.json', 'json'] }] })
+    const p = path ?? (await open({ multiple: false, filters: [{ name: 'Projekt-FEM', extensions: ['fem.json', 'json'] }] }))
     if (!p) return null
+    file = p
     text = await invoke('load_text', { path: p })
   } else {
     const f = await chooseFile('.json,.fem.json')
@@ -274,7 +285,40 @@ export async function loadProject() {
     const bytes = Uint8Array.from(atob(d.stepData), (c) => c.charCodeAt(0))
     d.step = await uploadStep(new File([bytes], d.stepName ?? 'geometrie.step'))
   }
+  d.file = file
   return d
+}
+
+/// Projekt aus Text (z. B. hergezogene Datei im Browser)
+export async function projectFromText(text) {
+  const d = JSON.parse(text)
+  if (d.stepData && !isDesktop) {
+    const bytes = Uint8Array.from(atob(d.stepData), (c) => c.charCodeAt(0))
+    d.step = await uploadStep(new File([bytes], d.stepName ?? 'geometrie.step'))
+  }
+  return d
+}
+
+/// hergezogene STEP-Datei: Browser lädt hoch, Desktop bekommt den Pfad über das Fensterereignis
+export const uploadStepFile = (file) => uploadStep(file)
+
+/// Desktop: Dateien, die auf das Fenster gezogen werden → Pfade
+export function onFileDrop(cb) {
+  if (!isDesktop) return () => {}
+  let off = null
+  let stop = false
+  import('@tauri-apps/api/webview')
+    .then(({ getCurrentWebview }) =>
+      getCurrentWebview().onDragDropEvent((e) => {
+        if (e.payload.type === 'drop' && e.payload.paths?.length) cb(e.payload.paths)
+      }),
+    )
+    .then((f) => (stop ? f() : (off = f)))
+    .catch(() => {})
+  return () => {
+    stop = true
+    off?.()
+  }
 }
 
 /// Ergebnis für ParaView speichern

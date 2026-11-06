@@ -32,7 +32,7 @@ Das Teil wird am **Namen** wiedererkannt (Dateiname bzw. Dokumentname; bei Fusio
 `http://127.0.0.1:8791` an (nur von diesem Rechner).
 
 **CAD auf einem anderen Rechner** (z. B. Arbeits-PC, Projekt-FEM rechnet auf dem starken PC):
-Heimnetz-Freigabe einschalten, in Projekt-FEM oben **„CAD“** öffnen und den angezeigten Text in eine Datei
+Heimnetz-Freigabe einschalten, in Projekt-FEM **Einstellungen › CAD-Verbindungen** öffnen und den angezeigten Text in eine Datei
 `projekt-fem-cad.txt` im Benutzerordner des CAD-Rechners kopieren:
 
 ```
@@ -50,7 +50,7 @@ Projekt-FEM direkt mit dem offenen Design arbeitet – ohne Add-in und ohne Expo
 
 1. SolidCraft auf dem Rechner starten, auf dem Projekt-FEM rechnet. (Der Steuerkanal ist ab Werk an:
    SolidCraft-Einstellungen › Assistent › „Let AI agents connect (control channel / MCP)“.)
-2. In Projekt-FEM oben **„CAD“** → Abschnitt **SolidCraft** → **„Live mitlaufen“** anhaken.
+2. In Projekt-FEM **Einstellungen › CAD-Verbindungen** → Abschnitt **SolidCraft** → **„Live mitlaufen“** anhaken.
    Projekt-FEM übernimmt das offene Design sofort.
 3. Lager und Lasten festlegen, rechnen.
 4. In SolidCraft weiterkonstruieren: Nach jeder Änderung (Maß, Feature, Parameter) holt Projekt-FEM nach gut einer
@@ -74,16 +74,22 @@ lokal erreichbar). Einen Knopf direkt in SolidCraft gibt es noch nicht – Solid
 
 ## Onshape
 
-Onshape läuft im Browser – statt Add-in gibt es zwei **Lesezeichen** in der Lesezeichenleiste.
+Onshape läuft im Browser – statt Add-in gibt es die **Bibliothek** in Projekt-FEM und zwei **Lesezeichen** in der
+Lesezeichenleiste.
 
 1. API-Schlüssel anlegen: <https://dev-portal.onshape.com> → **API keys** → *Create new API key*, Rechte
    „Application can read your documents“ und (für „Ergebnis → Onshape“) „… write to your documents“.
-2. In Projekt-FEM oben **„CAD“** → Access Key und Secret Key eintragen → Speichern. Die Schlüssel bleiben auf dem
+2. In Projekt-FEM **Einstellungen › CAD-Verbindungen** (oder beim ersten Klick auf „Aus Onshape“) → Access Key und
+   Secret Key eintragen → Speichern. Die Schlüssel bleiben auf dem
    rechnenden Rechner (`~/.config/projekt-fem/onshape.json`), sie gehen nicht an den Browser zurück.
 3. Im selben Dialog die Lesezeichen **„→ Projekt-FEM“** und **„FEM-Ergebnis → Onshape“** in die Lesezeichenleiste
    ziehen.
 
-Benutzen: In Onshape das Teilestudio öffnen → Lesezeichen **„→ Projekt-FEM“** klicken. Ein kleines Fenster meldet
+**Bibliothek:** Startseite **„Aus Onshape“** bzw. Datei › Aus Onshape-Bibliothek: eigene Dokumente (zuletzt geändert
+zuerst, mit Suche und Vorschaubild), Teilestudio wählen → **Holen**. Danach steht es unter „Zuletzt geöffnet“.
+Ergebnis zurück: **Export › Ergebnis → Onshape**.
+
+**Lesezeichen:** In Onshape das Teilestudio öffnen → Lesezeichen **„→ Projekt-FEM“** klicken. Ein kleines Fenster meldet
 „an Projekt-FEM geschickt“, Projekt-FEM öffnet das Teil (Name: „Dokument - Teilestudio“). Nach einer Änderung in
 Onshape einfach wieder klicken → neue Version wird gerechnet.
 **„FEM-Ergebnis → Onshape“** schreibt `[FEM 6.11.2026: S = 1,21 (Bruch 1,86) · σv 193,7 MPa · u 0,195 mm · 106,5 g · …]`
@@ -92,14 +98,14 @@ wird ersetzt. Geht nur im Arbeitsbereich, nicht in gespeicherten Versionen.
 
 **Parameterstudie über Onshape-Variablen:** Im Teilestudio eine Variable anlegen (Feature „Variable“, z. B.
 `#dicke = 5 mm`) und in Maßen verwenden. Das Teil mit dem Lesezeichen an Projekt-FEM schicken, Lager/Lasten festlegen,
-rechnen. Dann Reiter **Studie** → Parameter **„Onshape: #dicke“** → Werte (z. B. `4; 6; 8`) → Studie starten.
+rechnen. Dann links in der Werkzeugleiste **Studie** → Parameter **„Onshape: #dicke“** → Werte (z. B. `4; 6; 8`) → Studie starten.
 Projekt-FEM setzt die Variable in Onshape auf jeden Wert, holt die Geometrie, überträgt Lager/Lasten/Nähte und rechnet;
 zum Schluss steht wieder der alte Wert drin. Ergebnis als Kurve (Spannung, Verformung, Sicherheit, Masse) und CSV.
 Jede Änderung erscheint in der Onshape-Versionsgeschichte. Variablen aus Variablen-Studios werden noch nicht angeboten,
 nur die im Teilestudio selbst.
 
-Falls der Browser das Lesezeichen blockiert: die Onshape-Adresse kopieren und im Dialog „CAD“ bei
-„Adresse des Teilestudios einfügen“ → „Holen“.
+Falls der Browser das Lesezeichen blockiert: die Onshape-Adresse kopieren und in der Bibliothek unten bei
+„oder Adresse einfügen“ → „Holen“.
 
 Bei kostenlosen Onshape-Konten sind alle Dokumente öffentlich – dann ist auch der eingetragene FEM-Eintrag in der
 Beschreibung für alle sichtbar.

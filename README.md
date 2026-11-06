@@ -18,15 +18,16 @@ Bedienung auch im Browser über das Heimnetz.
 |---|---|
 | **Geometrie & Netz** | STEP-Import, automatische Vernetzung (Gmsh, quadratische Tetraeder TET10), feiner an Bohrungen/Radien und in Lastbereichen, Netzgröße per Schieberegler |
 | **Lager** | fest, reibungsfrei/Symmetrie (auch schräge Flächen), Richtungen einzeln, zylindrisch (Bolzen/Gelenk) |
-| **Lasten** | Kraft (Komponenten oder Betrag + Richtung, im Bild ziehbar), Druck, Moment, Lagerlast (Bolzen/Welle), Strömung/Wind – jeweils auf ganzer Fläche oder nur in einem gezeichneten **Wirkbereich** (Kreis, Rechteck, Wellenabschnitt) |
-| **Ergebnisse** | Vergleichsspannung, Verschiebung, Hauptspannungen, Sicherheit, Materialausnutzung, Schnittansicht, Messpunkt, **Verformungsanimation** (Last 0 → 100 %) und **Video-Export** mit Farbskala, Lagerkräfte mit Gleichgewichtskontrolle, Warnungen (Singularität, Fließen, große Verformung) |
+| **Bedienung** | Startseite (Datei, Onshape-Bibliothek, Projekt, zuletzt geöffnet), **Studienbaum** wie im CAD (Teil, Werkstoff, Netz, Lager, Lasten, Verbindungen), grüner **Rechnen**-Knopf mit Liste der offenen Punkte, Ansichtswürfel, Koordinatensystem, Maus-/Trackpad-Steuerung wie SolidWorks, Onshape, Fusion oder Mac-Trackpad |
+| **Lasten** | Kraft (Betrag + Richtung: senkrecht auf die Fläche, X/Y/Z, im Bild ziehen, von einer Fläche übernehmen), Druck, Moment, Bolzenlast, Strömung/Wind – jeweils auf ganzer Fläche oder nur in einem gezeichneten **Wirkbereich** (Kreis, Rechteck, Wellenabschnitt) |
+| **Ergebnisse** | Urteil oben (Nachweis erfüllt / nicht erfüllt), Vergleichsspannung, Verschiebung, Hauptspannungen, Sicherheit, Materialausnutzung; Leiste im Bild: Verformung, **Animation** (Last 0 → 100 %), **Schnitt**, **Iso-Clip** (nur Bereiche über/unter einem Wert), Messen, Min/Max, **Video**; Lagerkräfte mit Gleichgewichtskontrolle, Warnungen (Singularität, Fließen, große Verformung) |
 | **Nachweis & Bericht** | Werkstoffdatenbank (Stahl, Alu, Kunststoffe, Druckwerkstoffe, eigene), Masse, Festigkeitsnachweis mit erforderlichen Sicherheiten, PDF-Bericht, MathPad-Rechenblatt, ParaView-Export |
 | **3D-Druck** | Schichtaufbau mit Werten in und quer zu den Schichten, Aufbaurichtung frei optimieren (≈ 400 Richtungen) inkl. Überhänge, Wände + Infill (Gyroid, Gitter, Waben …), Kalibrierung mit eigenem Zugstab |
 | **Schweißnähte** | Spalte an Blechecken automatisch finden, Stumpf-/Kehlnaht, Nahtkraft und Nachweis nach EN 1993-1-8 (vereinfacht) |
 | **Studien** | Parameterstudie (Netz, Füllgrad, Maße, **Onshape-Variablen**, **SolidCraft-Parameter**), Vergleich mit voriger Version |
 | **Weitere Analysen** | Eigenfrequenzen, Knicken (Lanczos), Leichtbau-Vorschlag (Topologieoptimierung, STL-Export), Stabwerk (Balken, Rahmen, Fachwerke mit IPE-Profilen) |
 | **Geometrie anpassen** | Radien/Bohrungen ändern, Material per Skizze hinzufügen oder entfernen, Ergebnis mit vorher vergleichen |
-| **CAD-Anbindung** | Onshape (Lesezeichen + API), SolidWorks (Makro), Fusion (Add-in), SolidCraft (live), NX, Solid Edge, „Senden an“ für jedes CAD – Ergebnis zurück ins CAD |
+| **CAD-Anbindung** | Onshape (**Bibliothek** mit Vorschaubildern, Lesezeichen, API), SolidWorks (Makro), Fusion (Add-in), SolidCraft (live), NX, Solid Edge, „Senden an“ für jedes CAD – Ergebnis zurück ins CAD |
 | **Heimnetz** | starker PC rechnet, Laptop/Arbeits-PC bedient im Browser – ohne Installation |
 | **Rechenkern** | Rust, direkter Löser (Cholesky) und iterativer Löser (PCG + algebraisches Mehrgitter) bis über 2 Mio. Unbekannte, 56 Lehrbuchprüfungen |
 
@@ -34,21 +35,27 @@ Bedienung auch im Browser über das Heimnetz.
 
 | | |
 |---|---|
+| ![Startseite](docs/bilder/startseite.png) | ![Modell mit Studienbaum](docs/bilder/modell-studienbaum.png) |
+| **Startseite:** Datei öffnen oder hierher ziehen, aus Onshape holen, zuletzt geöffnet mit Vorschaubild | **Modell:** Studienbaum wie im CAD, darunter die Eigenschaften des gewählten Eintrags – hier die Kraft mit Betrag und Richtung als Symbole |
+| ![Onshape-Bibliothek](docs/bilder/onshape-bibliothek.png) | ![Iso-Clip](docs/bilder/iso-clip.png) |
+| **Onshape-Bibliothek:** eigene Dokumente durchsuchen, Teilestudio wählen, holen – ohne Adresse kopieren | **Iso-Clip:** nur die Bereiche über 84 MPa farbig, der Rest grau – wie in SolidWorks Simulation |
 | ![3D-Druck: Wand/Infill im Schnitt](docs/bilder/3d-druck-infill-schnitt.png) | ![Schweißnähte am Blechkasten](docs/bilder/schweissnaehte-blechkasten.png) |
 | **3D-Druck:** Wand (rot) und Gyroid-Infill im Schnitt, Sicherheit getrennt für Wand, Infill und Schichthaftung | **Schweißnähte:** Blechkasten mit vier gefundenen Eckspalten, Nahtkräfte und Nachweis |
 | ![Parameterstudie über eine Onshape-Variable](docs/bilder/studie-onshape-variable.png) | ![Stabwerk: Rahmen](docs/bilder/stabwerk-rahmen.png) |
 | **Onshape-Variable:** `#dicke` 3–8 mm – Projekt-FEM ändert die Variable in Onshape und rechnet jede Variante | **Stabwerk:** eingespannter Rahmen aus IPE 200, Ausnutzung je Stab |
-| ![CAD-Verbindung](docs/bilder/cad-verbindung.png) | |
-| **CAD-Verbindung:** SolidCraft live, Onshape-Schlüssel und Lesezeichen, Einstellungen für die Add-ins | |
+| ![Einstellungen: Maus und Trackpad](docs/bilder/einstellungen-maus.png) | ![CAD-Verbindung](docs/bilder/cad-verbindung.png) |
+| **Maus & Trackpad:** Steuerung wie im gewohnten CAD – drehen um den Punkt unter dem Zeiger, zoomen zum Zeiger | **CAD-Verbindungen:** Onshape-Schlüssel und Lesezeichen, SolidCraft live, Einstellungen für die Add-ins |
 
 ## Schnellstart
 
 1. **Voraussetzungen:** Rust, Node.js und Gmsh (`uv tool install gmsh` oder `brew install gmsh`); unter Linux zusätzlich
    `webkit2gtk-4.1`. Details unter [Bauen](#bauen-und-benutzen).
 2. **Bauen:** `cd app && npm install && npx tauri build --no-bundle` → `target/release/projekt-fem-app`
-3. **Rechnen:** App starten → **STEP-Datei öffnen** (z. B. `Daten/Hebel.step` oder `examples/geometrie/`) → Werkstoff →
-   **Lager hinzufügen** und Flächen anklicken → **Last hinzufügen** → **Rechnen**.
-4. **Aus dem CAD:** oben **„CAD“** – Onshape-Lesezeichen, SolidCraft live; Add-ins für SolidWorks und Fusion in
+3. **Rechnen:** App starten → Startseite **STEP-Datei öffnen** (z. B. `Daten/Hebel.step` oder `examples/geometrie/`) →
+   im Studienbaum **Werkstoff** wählen → bei **Lager** auf „neu“ und Flächen anklicken → bei **Lasten** auf „neu“, Fläche
+   anklicken, Betrag eintragen → **Rechnen** (grün, sobald alles festgelegt ist; sonst nennt der Knopf die offenen Punkte).
+4. **Aus dem CAD:** Startseite **Aus Onshape** (eigene Dokumente durchblättern), Einstellungen (Regler-Symbol oben rechts)
+   › **CAD-Verbindungen** für Onshape-Schlüssel, Lesezeichen und SolidCraft live; Add-ins für SolidWorks und Fusion in
    [`cad-addins`](cad-addins/README.md).
 
 Ein ausführlicher Prüfablauf aller Funktionen steht in [`TESTPROTOKOLL.md`](TESTPROTOKOLL.md), geplante Schritte in
@@ -63,7 +70,7 @@ Geometrie, rechnet automatisch neu und zeigt den Vergleich zur vorigen Version.
 
 | CAD | Weg | Ergebnis zurück | Getestet |
 |---|---|---|---|
-| **Onshape** | Lesezeichen „→ Projekt-FEM“ im Teilestudio (API-Schlüssel in Projekt-FEM) | Teilebeschreibung `[FEM …]` | ✅ mit echtem Onshape, inkl. Studie über Variablen |
+| **Onshape** | Bibliothek in Projekt-FEM (Datei › Aus Onshape) oder Lesezeichen „→ Projekt-FEM“ im Teilestudio (API-Schlüssel in Projekt-FEM) | Teilebeschreibung `[FEM …]` (Export › Ergebnis → Onshape) | ✅ mit echtem Onshape, inkl. Bibliothek und Studie über Variablen |
 | **SolidCraft** | live über den Steuerkanal: folgt jeder Änderung | Parameter `FEM_…` + Design-Eigenschaft | gegen Nachbau des Protokolls |
 | **SolidWorks** | VBA-Makro, zwei Makro-Knöpfe | benutzerdefinierte Eigenschaften (`$PRP:"FEM_Sicherheit"`) | ungetestet |
 | **Autodesk Fusion** | Add-in, Gruppe „Projekt-FEM“ | Benutzerparameter + Attribute | Ablauf mit Platzhaltern |
@@ -72,22 +79,42 @@ Geometrie, rechnet automatisch neu und zeigt den Vergleich zur vorigen Version.
 | **jedes andere** | STEP speichern → „Senden an → An Projekt-FEM“ (Windows) / Schnellaktion (Mac) | – | Mac/Linux-Skript getestet |
 
 Anleitung je Programm: [`cad-addins/README.md`](cad-addins/README.md). CAD auf einem anderen Rechner als Projekt-FEM:
-Heimnetz-Freigabe einschalten, Adresse und Schlüssel stehen im Dialog „CAD“.
+Heimnetz-Freigabe einschalten (Einstellungen › Heimnetz), Adresse und Schlüssel stehen unter Einstellungen › CAD-Verbindungen.
 
 ## Funktionen im Detail
 
 ### Bedienung
 
-STEP öffnen → automatisch vernetzen → Werkstoff wählen → Lager und Lasten per Klick auf CAD-Flächen → Rechnen →
-farbige Ergebnisse mit Verformung, Maximum-Markierung, Messpunkt per Klick, Warnungen und Gleichgewichtskontrolle.
-**Animation** (unter „Verformung“): Die Last steigt von 0 auf 100 % und wieder zurück, Verformung und Farben wachsen
+Aufbau wie in einem CAD-Simulationsmodul:
+
+- **Kopfleiste:** Logo → Startseite, Teilname, **Analyse** (Statik, Eigenfrequenzen, Knicken), **Modell | Ergebnis**,
+  Menüs **Datei** und **Export**, Einstellungen, **Rechnen**. Der Knopf ist grün, sobald alles festgelegt ist; sonst grau
+  und zeigt beim Anklicken die offenen Punkte – ein Klick springt zum passenden Eintrag.
+- **Werkzeugleiste links:** Modell, Geometrie anpassen, Leichtbau, Parameterstudie, Stabwerk.
+- **Studienbaum:** Teil, Werkstoff, Netz, Lager, Lasten, Verbindungen – grüner Punkt = festgelegt, Kreis = offen.
+  Darunter die Eigenschaften des gewählten Eintrags. Lager- und Lastarten als Symbole; eine Kraft hat Betrag und
+  Richtung (Standard: **senkrecht auf die gewählte Fläche**, sonst X/Y/Z, umkehren, Pfeil im Bild ziehen oder Richtung
+  von einer Fläche übernehmen). Seltenes (Komponenten, Teilbereich der Fläche, eigene Werkstoffwerte) liegt unter „Mehr“.
+  Eine farbige Fläche im Bild anklicken wählt das zugehörige Lager bzw. die Last im Baum.
+- **3D-Ansicht:** Ansichtswürfel (Fläche anklicken = Blick senkrecht darauf), Startansicht, Alles zeigen,
+  Koordinatensystem (Achse anklicken = Blick auf die Ebene), Doppelklick auf eine Fläche = Blick senkrecht darauf.
+  Maus und Trackpad unter Einstellungen › **Maus & Trackpad**: wie SolidWorks (Mitte drehen), Onshape (rechts drehen),
+  Fusion (⇧ + Mitte), Mac-Trackpad (zwei Finger drehen, spreizen zoomen, Klick wählt nur) oder einfach (links drehen);
+  gedreht wird um den Punkt unter dem Zeiger, gezoomt zum Zeiger hin.
+- **Ergebnis:** oben das Urteil (grün/rot) mit Sicherheiten, darunter Größe wählen (σv, u, S, mehr), Kennwerte, Details
+  zum Aufklappen. Im Bild die Darstellungsleiste: Verformung aus / 1:1 / überhöht, **Animation**, **Schnitt**,
+  **Iso-Clip** (nur Bereiche über bzw. unter einem Wert farbig), **Messen** (Klick zeigt σv, u und S an der Stelle),
+  Netz, Min/Max, Video. Farbverlauf in Stufen oder fließend, helles oder dunkles Erscheinungsbild: Einstellungen › Darstellung.
+
+**Animation:** Die Last steigt von 0 auf 100 % und wieder zurück, Verformung und Farben wachsen
 mit (½×, 1×, 2× Geschwindigkeit). **Video** speichert zwei Durchläufe als WebM bzw. MP4 mit Bauteilname, Werkstoff,
 Kennwerten, Überhöhung und Farbskala – zum Zeigen und Weitergeben. (In der Linux-Desktop-App kann die Aufnahme je nach
 WebKit-Version fehlen; dann über die Heimnetz-Ansicht in Chrome/Firefox aufnehmen.)
 Projekte speichern/laden (`.fem.json`, im Browser mit eingebetteter STEP-Datei), Fortschrittsanzeige bei großen Netzen.
 
-**Wirkbereich:** Lasten und Lager können statt auf der ganzen Fläche nur auf einem Teil wirken. Den Bereich zieht man
-mit der Maus direkt auf der Fläche auf: Kreis, Rechteck oder Abschnitt einer Welle/Bohrung (axial von–bis, optional
+**Wirkbereich** (bei Lager bzw. Last unter „Mehr“): Lasten und Lager können statt auf der ganzen Fläche nur auf einem
+Teil wirken. Den Bereich zieht man mit der Maus direkt auf der Fläche auf (als Nächstes kommt „Fläche teilen“ mit einer
+Skizze, die an der Fläche ausgerichtet ist): Kreis, Rechteck oder Abschnitt einer Welle/Bohrung (axial von–bis, optional
 nur ein Winkelbereich). Danach lassen sich die Maße als Zahlen anpassen; das Netz wird dort automatisch feiner.
 
 ### 3D-Druck: Schichtaufbau, Aufbaurichtung, Wände und Infill
@@ -295,7 +322,9 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
 4. ✅ **3D-Druck:** Schichtaufbau, Aufbaurichtung, Wände + Infill, Kalibrierung · **Leichtbau** · **Geometrie anpassen**
 5. ✅ **Weitere Analysen:** Stabwerk, Eigenfrequenzen, Knicken, Strömung (überschlägig), Schweißnähte
 6. ✅ **CAD-Anbindung:** Onshape, SolidWorks, Fusion, SolidCraft, NX, Solid Edge, Parameterstudien über CAD-Variablen
-7. **Als Nächstes:** Baugruppen (Werkstoff je Körper, Verbindungen, Kontakt, Schrauben) → Bewegungssimulation mit
+7. ✅ **Neue Oberfläche:** Startseite, Studienbaum, Rechnen-Knopf mit offenen Punkten, Ergebnis-Urteil, Darstellungsleiste
+   (Schnitt, Iso-Clip, Animation), Ansichtswürfel, CAD-Maussteuerung, Onshape-Bibliothek
+8. **Als Nächstes:** „Fläche teilen“ (Skizze auf der Fläche statt Rechteck ziehen) → Baugruppen (Werkstoff je Körper, Verbindungen, Kontakt, Schrauben) → Bewegungssimulation mit
    FEM entlang der Bewegung (z. B. Koppelstange und Bolzen) → Onshape-Konfigurationen, SolidWorks-Konfigurationen,
    DXF → Stabwerk, Slicer-Einstellungen (3MF) übernehmen
 
@@ -334,8 +363,10 @@ crates/fem-core   Rechenkern: element, mesh, gmsh (Vernetzung), model, solver, p
                   Knicken), topopt (Leichtbau), frame (Stabwerk), section, region (Wirkbereiche), geometry (+ .py),
                   validate (Lehrbuchfälle), vtk
 crates/fem-cli    Kommandozeile `projekt-fem` (rechnen, validieren)
-app/              Desktop-App (Tauri 2 + React + three.js); Backend app/src-tauri: Befehle, Heimnetz-Server (server.rs),
-                  CAD-Empfang (cad.rs), Onshape (onshape.rs), SolidCraft (solidcraft.rs)
+app/              Desktop-App (Tauri 2 + React + three.js); Oberfläche app/src: App.jsx (Studienbaum, Ergebnis),
+                  ui/ (Startseite, Menüs, Einstellungen, Onshape-Bibliothek, Symbole), components/ (3D-Ansicht,
+                  Kamerasteuerung); Backend app/src-tauri: Befehle, Heimnetz-Server (server.rs), CAD-Empfang (cad.rs),
+                  Onshape (onshape.rs), SolidCraft (solidcraft.rs)
 cad-addins/       Knöpfe für SolidWorks, Fusion, NX, Solid Edge + „Senden an“ für jedes CAD
 examples/         Beispielfälle (TOML), examples/geometrie: STEP-Testteile (+ .geo-Quellen), z. B. blechkasten.step
 docs/bilder/      Bilder für diese Beschreibung

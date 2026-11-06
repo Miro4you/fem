@@ -179,6 +179,10 @@ fn router(shared: Shared) -> Router {
         .route("/onshape/variables", post(os_variables))
         .route("/onshape/set_variable", post(os_set_variable))
         .route("/onshape/study", post(os_study))
+        .route("/onshape/documents", post(os_documents))
+        .route("/onshape/elements", post(os_elements))
+        .route("/onshape/thumbnail", post(os_thumbnail))
+        .route("/onshape/write_result", post(os_write_result))
         .route("/materials", get(api_materials_get).post(api_materials_set))
         .route("/progress", get(api_progress))
         .route("/upload", post(api_upload))
@@ -396,6 +400,41 @@ async fn os_set_variable(Json(a): Json<OsVar>) -> ApiResult<Response> {
 
 async fn os_study(Json(a): Json<OsVar>) -> ApiResult<Response> {
     sc_blocking(move || crate::onshape::study_value(&a.url, &a.name, &a.expression)).await
+}
+
+#[derive(Deserialize)]
+struct OsQuery {
+    #[serde(default)]
+    q: String,
+}
+
+#[derive(Deserialize)]
+struct OsDoc {
+    did: String,
+    wid: String,
+    #[serde(default)]
+    eid: String,
+    #[serde(default)]
+    href: Option<String>,
+}
+
+async fn os_documents(Json(a): Json<OsQuery>) -> ApiResult<Response> {
+    sc_blocking(move || crate::onshape::documents(&a.q)).await
+}
+
+async fn os_elements(Json(a): Json<OsDoc>) -> ApiResult<Response> {
+    sc_blocking(move || crate::onshape::elements(&a.did, &a.wid)).await
+}
+
+async fn os_thumbnail(Json(a): Json<OsDoc>) -> ApiResult<Response> {
+    sc_blocking(move || crate::onshape::thumbnail(a.href.as_deref(), &a.did, &a.wid, &a.eid)).await
+}
+
+async fn os_write_result(Json(a): Json<OsUrl>) -> ApiResult<Response> {
+    sc_blocking(move || {
+        crate::onshape::write_result(&a.url).map(|(name, text, n)| format!("„{name}“: {text} ({n} Teil{})", if n == 1 { "" } else { "e" }))
+    })
+    .await
 }
 
 // --- SolidCraft ---

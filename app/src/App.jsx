@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  FolderOpen, Save, FileUp, Play, Plus, Trash2, MousePointerClick, Anchor, ArrowDownToLine,
-  TriangleAlert, Download, Grid3x3, Loader2, X, Check, Box as BoxIcon, Layers, CircleGauge, PenLine, Wifi, Copy, Move3d,
-  Spline, SquarePlus, SquareMinus, CircleDot, Wrench, RotateCcw, Cable, Pause, Video,
+  Save, Play, Plus, Trash2, MousePointerClick,
+  TriangleAlert, Download, Grid3x3, Loader2, X, Check, Layers, CircleGauge, PenLine, Wifi, Move3d,
+  Spline, SquarePlus, SquareMinus, CircleDot, Wrench, RotateCcw, Video, ChevronDown, ChevronRight, Grid2x2,
 } from 'lucide-react'
+import StartPage from './ui/StartPage.jsx'
+import Settings from './ui/Settings.jsx'
+import OnshapeLibrary from './ui/OnshapeLibrary.jsx'
+import { Menu, MenuItem, MenuSep } from './ui/Menu.jsx'
+import * as I from './ui/icons.jsx'
+import { usePref, addRecent, NAV_DEFAULT, NAV_PRESETS, DISPLAY_DEFAULT, applyTheme } from './prefs.js'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
 import * as api from './api.js'
@@ -61,7 +67,7 @@ const newSupport = () => ({
   surfaces: [], region: null,
 })
 const newLoad = () => ({
-  id: nextId++, kind: 'force', force: [0, 0, -1000], pressure: 1, moment: [0, 0, 100], surfaces: [], region: null,
+  id: nextId++, kind: 'force', force: [0, 0, -1000], followNormal: true, pressure: 1, moment: [0, 0, 100], surfaces: [], region: null,
   flowDir: [1, 0, 0], medium: 'luft', velocity: '30', cw: '1.2', rhoFluid: '1000',
 })
 
@@ -71,6 +77,34 @@ const LOAD_KINDS = {
   moment: 'Moment',
   bearing: 'Lagerlast (Bolzen/Welle, halber Umfang)',
   flow: 'Strömung / Wind (überschlägig)',
+}
+
+// Auswahl als Symbole: Lagerarten und Lastarten
+const SUPPORT_KINDS = [
+  ['fixed', 'fest', I.IcFixed, 'Fest eingespannt: keine Verschiebung, keine Drehung.'],
+  ['frictionless', 'gleitend', I.IcSlide, 'Gleitend / Symmetrie: senkrecht zur Fläche fest, entlang der Fläche frei – auch auf schrägen Flächen.'],
+  ['cylindrical', 'Bolzen', I.IcPin, 'Bolzen / Gelenk auf einer Bohrung oder Welle: radial und axial fest, Drehung um den Bolzen frei.'],
+  ['axes', 'Richtungen', I.IcAxes, 'Richtungen einzeln sperren: X, Y und Z wählbar.'],
+]
+const SUPPORT_NAME = { fixed: 'fest', frictionless: 'gleitend', cylindrical: 'Bolzen', axes: 'Richtungen' }
+const LOAD_CHOICES = [
+  ['force', 'Kraft', I.IcForce],
+  ['pressure', 'Druck', I.IcPressure],
+  ['moment', 'Moment', I.IcMoment],
+  ['bearing', 'Bolzenlast', I.IcBearing],
+  ['flow', 'Wind', I.IcWind],
+]
+const ANALYSES = {
+  static: ['Statik', 'Spannung, Verformung, Sicherheit'],
+  modal: ['Eigenfrequenzen', 'Schwingformen, Hz'],
+  buckling: ['Knicken', 'Knicklast, Lastfaktor'],
+}
+const baseName = (p) => (p ?? '').split(/[\\/]/).pop()
+const stemOf = (p) => baseName(p).replace(/\.(step|stp)$/i, '')
+// Rundungsrauschen weg (−0, 1e-13)
+const tidy = (x) => {
+  const v = Number(Number(x).toPrecision(6))
+  return Math.abs(v) < 1e-9 ? 0 : v
 }
 
 // Strömung: Staudruck q = ½·ρ·v² [Pa], Druck auf angeströmte Flächen p = q·c_w
@@ -123,7 +157,7 @@ export default function App() {
   const [modes, setModes] = useState(null) // { kind, values, shapes, seconds, sel, animate }
   // CAD-Schnittstelle: Hinweis über eingegangene Teile, automatisch neu rechnen
   const [notice, setNotice] = useState(null)
-  const [cadAuto, setCadAuto] = useState(true)
+  const [cadAuto] = usePref('cadAuto', true)
   // Stabwerk (unabhängig von der STEP-Geometrie)
   const [frame, setFrameRaw] = useState(() => newFrame())
   const [frameResults, setFrameResults] = useState(null)
@@ -163,6 +197,20 @@ export default function App() {
   const [error, setError] = useState(null)
   const [probe, setProbe] = useState(null)
   const sidebar = useRef(null)
+  // Neue Oberfläche: Startseite, Auswahl im Studienbaum, Dialoge, Darstellungsleiste
+  const [home, setHome] = useState(false)
+  const [sel, setSel] = useState('teil')
+  const [dlg, setDlg] = useState(null) // 'settings' | 'settings:cad' | 'onshape'
+  const [todoOpen, setTodoOpen] = useState(null)
+  const [probeOn, setProbeOn] = useState(true)
+  const [minmax, setMinmax] = useState(true)
+  const [iso, setIso] = useState({ on: false, above: true, t: 0.5 })
+  const [detailsOpen, setDetailsOpen] = usePref('detailsOpen', true)
+  const [nav] = usePref('nav', NAV_DEFAULT)
+  const [look] = usePref('display', DISPLAY_DEFAULT)
+  // Herkunft des offenen Teils für „Neue Version holen“ (STEP-Datei, Onshape, SolidCraft, SolidWorks …)
+  const [partSource, setPartSource] = useState(null)
+  useEffect(() => applyTheme(look.theme), [look.theme])
 
   // beim Wechsel Modell/Ergebnis oben beginnen
   useEffect(() => {
@@ -271,9 +319,11 @@ export default function App() {
       setResult(null)
       setResultStale(false)
       setProbe(null)
+      setHome(false)
       if (base) {
         setStepPath(path)
         setView('setup')
+        if (!keepSetup) setSel('teil')
         setGeoStep(null)
         setGeoApplied('[]')
         setGeoInfo(null)
@@ -300,25 +350,88 @@ export default function App() {
   }
 
   async function onOpenStep() {
-    const p = await api.pickStep()
-    if (p) loadGeometry(p, null)
+    try {
+      const p = await api.pickStep()
+      if (p) await openStepPath(p)
+    } catch (e) {
+      setError(String(e))
+    }
   }
+
+  async function openStepPath(p) {
+    const m = await loadGeometry(p, null)
+    if (!m) return
+    setPartSource('STEP-Datei')
+    addRecent({ kind: 'step', path: p, name: baseName(p), info: `${fmt(m.volume / 1000)} cm³` })
+  }
+
+  // zuletzt geöffnet: Datei, Projekt oder Onshape-Teilestudio
+  async function openRecent(r) {
+    if (r.kind === 'step') return openStepPath(r.path)
+    if (r.kind === 'project') return onLoadProject(r.path)
+    if (r.kind === 'onshape') {
+      setBusy('Hole Teilestudio aus Onshape …')
+      setError(null)
+      try {
+        await api.onshapeImport(r.path) // das Teil kommt danach wie aus dem CAD an
+      } catch (e) {
+        setError(String(e))
+      } finally {
+        setBusy(null)
+      }
+    }
+  }
+
+  // Datei auf das Fenster gezogen (Browser: hochladen; Desktop: Pfad vom Fenster)
+  async function onDropFile(f) {
+    try {
+      if (/\.(step|stp)$/i.test(f.name)) {
+        setBusy('Lade Datei …')
+        const p = await api.uploadStepFile(f)
+        setBusy(null)
+        return openStepPath(p)
+      }
+      if (/\.json$/i.test(f.name)) return applyProject(await api.projectFromText(await f.text()))
+      setError('Bitte eine STEP-Datei (.step, .stp) oder ein Projekt (.fem.json) hierher ziehen')
+    } catch (e) {
+      setBusy(null)
+      setError(String(e))
+    }
+  }
+  const dropRef = useRef(null)
+  dropRef.current = (paths) => {
+    const p = paths[0]
+    if (/\.(step|stp)$/i.test(p)) openStepPath(p)
+    else if (/\.json$/i.test(p)) onLoadProject(p)
+  }
+  useEffect(() => api.onFileDrop((paths) => dropRef.current?.(paths)), [])
 
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
     if (!stepPath) return
     const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin }
     try {
-      await api.saveProject(stepPath, data)
+      const p = await api.saveProject(stepPath, data)
+      if (p) addRecent({ kind: 'project', path: p, name: baseName(p), info: result ? `${material.name} · σv ${fmt(result.max_von_mises.value)} MPa` : material.name })
+      if (p) setNotice(`Projekt gespeichert: ${baseName(p)}`)
+      else if (!api.isDesktop) setNotice('Projekt heruntergeladen (mit eingebetteter STEP-Datei)')
     } catch (e) {
       setError(String(e))
     }
   }
 
-  async function onLoadProject() {
+  async function onLoadProject(path = null) {
     try {
-      const d = await api.loadProject()
+      const d = await api.loadProject(path)
       if (!d) return
+      await applyProject(d)
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  async function applyProject(d) {
+    try {
       if (d.format !== 'projekt-fem') throw new Error('Keine Projekt-FEM-Datei')
       const m = await loadGeometry(d.step, d.meshSize, true, true, [])
       if (!m) return
@@ -343,9 +456,12 @@ export default function App() {
       if (d.proof) setProof(d.proof)
       setPartOrigin(d.origin ?? null)
       setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
-      setLoads(d.loads.map((l) => ({ ...newLoad(), ...l, id: nextId++ })))
+      // ältere Projekte: Kraftrichtung fest (nicht der Fläche folgend)
+      setLoads(d.loads.map((l) => ({ ...newLoad(), followNormal: false, ...l, id: nextId++ })))
       setWelds((d.welds ?? []).map((w) => ({ ...newWeld(), ...w, id: nextId++ })))
       setActive(null)
+      setPartSource(d.origin?.includes('/documents/') ? 'Onshape' : 'Projekt')
+      if (d.file) addRecent({ kind: 'project', path: d.file, name: baseName(d.file), info: d.material?.name ?? '' })
     } catch (e) {
       setError(String(e))
     }
@@ -383,13 +499,21 @@ export default function App() {
             if (x.id !== dirPick.id) return x
             const ui = dirUi(x[dirPick.key], x[dirPick.key + 'Ui'])
             const next = { ...ui, ...anglesOf(dir), mag: currentMag(x[dirPick.key], ui) }
-            return { ...x, [dirPick.key + 'Ui']: next, [dirPick.key]: vectorOf(next) }
+            return { ...x, [dirPick.key + 'Ui']: next, [dirPick.key]: vectorOf(next), ...(dirPick.key === 'force' ? { followNormal: false } : {}) }
           }),
         )
         setDirPick(null)
         return
       }
-      if (!active) return
+      if (!active) {
+        // Fläche anklicken = zugehöriges Lager / Last / Naht im Studienbaum wählen
+        const s = supports.find((x) => x.surfaces.includes(tag))
+        if (s) return setSel('s:' + s.id)
+        const l = loads.find((x) => x.surfaces.includes(tag))
+        if (l) return setSel('l:' + l.id)
+        if (welds.some((w) => w.a.includes(tag) || w.b.includes(tag))) return setSel('verb')
+        return
+      }
       if (active.type === 'weldA' || active.type === 'weldB') {
         const k = active.type === 'weldA' ? 'a' : 'b'
         const other = k === 'a' ? 'b' : 'a'
@@ -411,7 +535,7 @@ export default function App() {
       if (active.type === 'support') setSupports(toggle)
       else setLoads(toggle)
     },
-    [active, dirPick, geoPick, bedPick, surfaceInfo, mesh],
+    [active, dirPick, geoPick, bedPick, surfaceInfo, mesh, supports, loads, welds],
   )
 
   const surfaceTint = useCallback(
@@ -420,17 +544,18 @@ export default function App() {
         // Radien/Bohrungen, die geändert werden (Flächennummern vom Zeitpunkt der Auswahl)
         return geoOps.some((o) => o.enabled && o.tags?.includes(tag) && o.mesh === mesh?.positions?.length) ? '#c9a227' : null
       }
+      const hot = (id) => active?.id === id || sel === 's:' + id || sel === 'l:' + id
       for (const l of loads)
-        if (l.surfaces.includes(tag)) return l.region ? LOAD_PALE : active?.id === l.id ? LOAD_ACTIVE : LOAD_COLOR
+        if (l.surfaces.includes(tag)) return l.region ? LOAD_PALE : hot(l.id) ? LOAD_ACTIVE : LOAD_COLOR
       for (const s of supports)
-        if (s.surfaces.includes(tag)) return s.region ? SUPPORT_PALE : active?.id === s.id ? SUPPORT_ACTIVE : SUPPORT_COLOR
+        if (s.surfaces.includes(tag)) return s.region ? SUPPORT_PALE : hot(s.id) ? SUPPORT_ACTIVE : SUPPORT_COLOR
       for (const w of welds) {
         if (w.a.includes(tag)) return WELD_A
         if (w.b.includes(tag)) return WELD_B
       }
       return null
     },
-    [supports, loads, welds, active, view, geoOps, mesh],
+    [supports, loads, welds, active, view, geoOps, mesh, sel],
   )
 
   // --- Schweißnähte -----------------------------------------------------------------
@@ -589,7 +714,7 @@ export default function App() {
           if (x.id !== aim.id) return x
           const ui = dirUi(x[aim.field], x[aim.field + 'Ui'])
           const next = { ...ui, mode: 'dir', mag: currentMag(x[aim.field], ui), ...anglesOf(dir) }
-          return { ...x, [aim.field + 'Ui']: next, [aim.field]: vectorOf(next) }
+          return { ...x, [aim.field + 'Ui']: next, [aim.field]: vectorOf(next), ...(aim.field === 'force' ? { followNormal: false } : {}) }
         }),
       )
     },
@@ -877,33 +1002,94 @@ export default function App() {
   }
 
   // --- Rechnen ---------------------------------------------------------------------
+  // offene Punkte vor dem Rechnen; `sel` = Eintrag im Studienbaum, der dazu gehört
   const problems = useMemo(() => {
     const p = []
-    if (!mesh) p.push('Geometrie öffnen')
-    if (!supports.length) p.push('Mindestens ein Lager anlegen')
+    const add = (text, at) => p.push({ text, sel: at })
+    if (!mesh) add('Geometrie öffnen', 'teil')
+    if (!supports.length) add('Mindestens ein Lager anlegen', 'lager+')
     supports.forEach((s, i) => {
-      if (!s.surfaces.length) p.push(`Lager ${i + 1}: Flächen wählen`)
+      if (!s.surfaces.length) add(`Lager ${i + 1}: Flächen wählen`, 's:' + s.id)
       const f = supportFix(s)
-      if (f.error) p.push(`Lager ${i + 1}: ${f.error}`)
+      if (f.error && s.surfaces.length) add(`Lager ${i + 1}: ${f.error}`, 's:' + s.id)
     })
-    if (!loads.length && analysis !== 'modal') p.push('Mindestens eine Last anlegen')
+    if (!loads.length && analysis !== 'modal') add('Mindestens eine Last anlegen', 'last+')
     welds.forEach((w, i) => {
-      if (!w.a.length || !w.b.length) p.push(`Naht ${i + 1}: Fläche A und Fläche B wählen`)
-      if (w.kind === 'fillet' && !(Number(String(w.throat).replace(',', '.')) > 0)) p.push(`Naht ${i + 1}: a-Maß angeben`)
+      if (!w.a.length || !w.b.length) add(`Naht ${i + 1}: Fläche A und Fläche B wählen`, 'verb')
+      if (w.kind === 'fillet' && !(Number(String(w.throat).replace(',', '.')) > 0)) add(`Naht ${i + 1}: a-Maß angeben`, 'verb')
     })
-    if (analysis === 'modal' && !(Number(material.rho) > 0)) p.push('Für Eigenfrequenzen die Dichte des Werkstoffs angeben')
+    if (analysis === 'modal' && !(Number(material.rho) > 0)) add('Für Eigenfrequenzen die Dichte des Werkstoffs angeben', 'mat')
     loads.forEach((l, i) => {
-      if (!l.surfaces.length) p.push(`Last ${i + 1}: Flächen wählen`)
+      if (!l.surfaces.length) add(`Last ${i + 1}: Flächen wählen`, 'l:' + l.id)
       if (l.kind === 'bearing' && l.surfaces.some((t) => !surfaceInfo.get(t)?.cylinder))
-        p.push(`Last ${i + 1}: Lagerlast nur auf zylindrischen Flächen (Bohrung, Welle)`)
+        add(`Last ${i + 1}: Bolzenlast nur auf zylindrischen Flächen (Bohrung, Welle)`, 'l:' + l.id)
+      const v = l.kind === 'moment' ? l.moment : l.kind === 'flow' ? l.flowDir : l.kind === 'pressure' ? [l.pressure] : l.force
+      if (l.surfaces.length && !(Math.hypot(...v.map(Number)) > 0)) add(`Last ${i + 1}: Betrag angeben`, 'l:' + l.id)
     })
-    for (const [what, items] of [['Lager', supports], ['Last', loads]])
+    for (const [what, items, k] of [['Lager', supports, 's:'], ['Last', loads, 'l:']])
       items.forEach((x, i) => {
-        if (drawing?.id === x.id && !x.region) p.push(`${what} ${i + 1}: Bereich auf die Fläche zeichnen`)
+        if (drawing?.id === x.id && !x.region) add(`${what} ${i + 1}: Bereich auf die Fläche zeichnen`, k + x.id)
       })
     return p
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesh, supports, loads, welds, surfaceInfo, drawing, analysis, material.rho])
+
+  // Kraft „senkrecht auf die Fläche“ folgt den gewählten Flächen
+  useEffect(() => {
+    setLoads((ls) => {
+      let changed = false
+      const out = ls.map((l) => {
+        if (!l.followNormal || l.kind !== 'force') return l
+        const n = loadNormal(l)
+        if (!n) return l
+        const mag = Math.hypot(...l.force.map(Number))
+        if (!mag) return l
+        const f = n.map((v) => tidy(-v * mag))
+        if (f.every((v, k) => Math.abs(v - Number(l.force[k])) <= 1e-6 * mag)) return l
+        changed = true
+        return { ...l, force: f, forceUi: null }
+      })
+      return changed ? out : ls
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loads, surfaceInfo])
+
+  // --- Studienbaum ---------------------------------------------------------------------
+  function selectItem(key) {
+    setSel(key)
+    setDrawing(null)
+    setAim(null)
+    setDirPick(null)
+    setBedPick(false)
+    const id = Number(key.split(':')[1])
+    if (active && active.id !== id) setActive(null)
+    if (view !== 'setup') setView('setup')
+  }
+  function addSupport() {
+    const s = newSupport()
+    setSupports((ss) => [...ss, s])
+    selectItem('s:' + s.id)
+    setActive({ type: 'support', id: s.id })
+  }
+  function addLoad() {
+    const l = newLoad()
+    setLoads((ls) => [...ls, l])
+    selectItem('l:' + l.id)
+    setActive({ type: 'load', id: l.id })
+  }
+  // offener Punkt angeklickt: dorthin springen
+  function jumpTo(at) {
+    setTodoOpen(null)
+    if (at === 'lager+') return addSupport()
+    if (at === 'last+') return addLoad()
+    selectItem(at)
+  }
+  const ready = problems.length === 0 && !busy
+  function run() {
+    setTodoOpen(null)
+    if (analysis === 'static') onSolve()
+    else onModes()
+  }
 
   function buildSetup(mat, sups = supports, lds = loads, wls = welds) {
     const num = (v) => Number(String(v).replace(',', '.'))
@@ -1017,12 +1203,21 @@ export default function App() {
   async function handleIncoming(inc) {
     const cur = stepPath ? stepPath.split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') : null
     const same = mesh && cur === inc.name
+    const recent = inc.origin?.includes('/documents/')
+      ? { kind: 'onshape', path: inc.origin, name: inc.name }
+      : { kind: 'step', path: inc.path, name: inc.name, info: inc.source }
     if (!same) {
-      await loadGeometry(inc.path, null)
+      const m = await loadGeometry(inc.path, null)
+      if (!m) return
       setPartOrigin(inc.origin ?? null)
+      setPartSource(inc.source)
+      addRecent({ ...recent, info: [recent.info, `${fmt(m.volume / 1000)} cm³`].filter(Boolean).join(' · ') })
       setNotice(`${inc.source}: „${inc.name}“ geöffnet – Lager und Lasten festlegen`)
       return
     }
+    addRecent(recent)
+    setPartSource(inc.source)
+    setHome(false)
     setBusy(`${inc.source}: neue Version von „${inc.name}“ übernehmen …`)
     try {
       const ref = currentRefine(meshSize)
@@ -1116,6 +1311,82 @@ export default function App() {
   async function onExportVtu() {
     api.exportVtu(stepPath).catch((e) => setError(String(e)))
   }
+
+  // Bild der aktuellen Ansicht (PNG, weißer Hintergrund)
+  async function onImage() {
+    try {
+      const shot = viewRef.current.snapshot(1800, 'image/png')
+      const blob = await (await fetch(shot.data)).blob()
+      await api.saveBlob(blob, stemOf(stepPath || 'ansicht') + (view === 'result' ? '-ergebnis' : '-modell') + '.png', 'Bild', 'png')
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  // Ergebnis ins CAD zurück: Onshape (Beschreibung der Teile) bzw. SolidCraft (Parameter)
+  async function onResultToCad() {
+    setError(null)
+    try {
+      if (partOrigin?.includes('/documents/')) {
+        setBusy('Schreibe Ergebnis nach Onshape …')
+        setNotice('In Onshape eingetragen – ' + (await api.onshapeWriteResult(partOrigin)))
+      } else if (partSource === 'SolidCraft') {
+        setBusy('Schreibe Ergebnis nach SolidCraft …')
+        setNotice('In SolidCraft eingetragen: ' + (await api.scResult()))
+      }
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // „Neue Version holen“: gleiches Teil neu laden, Lager und Lasten bleiben (Flächen werden zugeordnet)
+  async function reloadPart() {
+    setError(null)
+    try {
+      if (partOrigin?.includes('/documents/')) {
+        setBusy('Hole neue Version aus Onshape …')
+        await api.onshapeImport(partOrigin)
+      } else if (partSource === 'SolidCraft') {
+        setBusy('Hole neue Version aus SolidCraft …')
+        await api.scFetch()
+      } else if (stepPath) {
+        await handleIncoming({ name: stemOf(stepPath), path: stepPath, source: partSource ?? 'STEP-Datei', origin: partOrigin })
+      }
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Tastatur: Esc beendet Auswahl/Zeichnen, Strg+S speichert, Strg+O öffnet
+  const keyRef = useRef(null)
+  keyRef.current = (e) => {
+    const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? '')
+    if (e.key === 'Escape') {
+      if (dlg) return setDlg(null)
+      setActive(null)
+      setDrawing(null)
+      setAim(null)
+      setDirPick(null)
+      setBedPick(false)
+      setGeoPick(false)
+      setTodoOpen(null)
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault()
+      if (stepPath) onSaveProject()
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o' && !typing) {
+      e.preventDefault()
+      onOpenStep()
+    }
+  }
+  useEffect(() => {
+    const on = (e) => keyRef.current?.(e)
+    window.addEventListener('keydown', on)
+    return () => window.removeEventListener('keydown', on)
+  }, [])
 
   // --- Schnitt ------------------------------------------------------------------------
   const cutPlane = useMemo(() => {
@@ -1211,11 +1482,13 @@ export default function App() {
     const cutView = cutData && cutValues && cutPlane ? { ...cutData, values: cutValues, plane: cutPlane } : null
     // lastproportionale Größen wachsen in der Animation mit (Sicherheit nicht)
     const rampColors = ['von_mises', 'disp', 'sigma1', 'sigma3', 'usage'].includes(quantity)
+    // Iso-Clip: nur Bereiche über bzw. unter dem Schwellwert farbig
+    const isoView = iso.on && quantity !== 'shell' ? { above: iso.above, value: min + iso.t * (max - min) } : null
     return {
       values, min, max, imin, imax, reverse, displacement: result.displacement, scale, auto, cut: cutView,
-      animate: anim.on || anim.recording ? 'ramp' : false, animSpeed: anim.speed, rampColors,
+      animate: anim.on || anim.recording ? 'ramp' : false, animSpeed: anim.speed, rampColors, iso: isoView,
     }
-  }, [result, mesh, quantity, deform, diag, cutData, cutPlane, showModes, modes, anim])
+  }, [result, mesh, quantity, deform, diag, cutData, cutPlane, showModes, modes, anim, iso])
 
   // Video der Verformung (zwei Durchläufe) mit Farbskala und Kennwerten
   async function onVideo() {
@@ -1247,14 +1520,14 @@ export default function App() {
     const q = QUANTITIES[quantity]
     const u = q.unit ? ' ' + q.unit : ''
     const m = []
-    if (quantity === 'shell') {
+    if (quantity === 'shell' || !minmax) {
       /* keine Markierung */
     } else if (FIELD_OF[quantity]?.[1]) m.push({ node: display.imin, label: `Min ${fmt(display.min)}` })
     else if (quantity === 'sigma3') m.push({ node: display.imin, label: `Min ${fmt(display.min)}${u}` })
     else m.push({ node: display.imax, label: `Max ${fmt(display.max)}${u}` })
     if (probe) m.push({ node: probe.node, label: `${fmt(display.values[probe.node])}${u}`, probe: true })
     return m
-  }, [display, quantity, probe])
+  }, [display, quantity, probe, minmax])
 
   const mode = view === 'result' && display ? 'result' : 'setup'
   // aktueller Stand für asynchrone Abläufe (Bericht)
@@ -1466,677 +1739,1402 @@ export default function App() {
     }
   }
   const fileName = stepPath?.split(/[\\/]/).pop()
+  const modelView = view === 'setup' || view === 'result'
+  const showStart = home || (!mesh && view !== 'frame')
+  const isOnshape = !!partOrigin?.includes('/documents/')
+  const canResultToCad = !!result && !resultStale && (isOnshape || partSource === 'SolidCraft')
+  const meshPending = !!mesh && (Number(meshSize) !== Number(mesh.mesh_size.toPrecision(3)) || JSON.stringify(currentRefine(meshSize)) !== meshRefineKey)
+  const itemState = (key) => (problems.some((p) => p.sel === key) ? 'todo' : 'ok')
+  const facesText = (n) => (n === 0 ? 'keine Fläche' : n === 1 ? '1 Fläche' : `${n} Flächen`)
+
+  function switchView(v) {
+    setActive(null)
+    setAim(null)
+    setDirPick(null)
+    setDrawing(null)
+    setBedPick(false)
+    setGeoPick(false)
+    setTodoOpen(null)
+    setHome(false)
+    setView(v)
+  }
+
+  const exportGeo = () => api.exportStep(geoStep, stemOf(stepPath || 'geometrie') + '_geaendert.step').catch((e) => setError(String(e)))
+  const exportTopo = () => api.exportTopoStl(topo.threshold, stemOf(stepPath || 'bauteil') + '_leichtbau.stl').catch((e) => setError(String(e)))
+  async function videoFromMenu() {
+    if (view !== 'result') {
+      setView('result')
+      await new Promise((r) => setTimeout(r, 400))
+    }
+    onVideo()
+  }
+
+  // Liste „Noch offen“ am Rechnen-Knopf schließen, wenn daneben geklickt wird
+  useEffect(() => {
+    if (!todoOpen) return
+    const off = (e) => !e.target.closest?.('.run-box') && setTodoOpen(null)
+    window.addEventListener('pointerdown', off)
+    return () => window.removeEventListener('pointerdown', off)
+  }, [todoOpen])
+
+  // Rechnen-Knopf: grün, wenn alles festgelegt ist; sonst grau und nennt die offenen Punkte
+  const runButton = (where) => (
+    <div className="run-box">
+      <button
+        className={'btn run ' + (ready ? 'go' : 'wait')}
+        disabled={!!busy}
+        title={ready ? 'Bereit zum Rechnen' : 'Noch offen: ' + problems.map((p) => p.text).join(' · ')}
+        onClick={() => (ready ? run() : setTodoOpen(todoOpen === where ? null : where))}
+      >
+        <I.IcPlay size={12} /> Rechnen
+      </button>
+      {todoOpen === where && !ready && (
+        <div className="menu right todo-pop" role="menu">
+          <div className="todo-title">Noch offen – anklicken:</div>
+          {problems.map((p) => (
+            <button key={p.text} className="mi" onClick={() => jumpTo(p.sel)}>
+              <span>{p.text}</span>
+              <ChevronRight size={14} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  // --- Richtung und Betrag einer Last (Kraft, Moment, Strömung) -----------------------------------
+  function dirEditor(l, field, { unit = '', normal = null, axisPreset = null, noMag = false } = {}) {
+    const upd = (patch) => setLoads((ls) => ls.map((x) => (x.id === l.id ? { ...x, ...patch } : x)))
+    const vec = l[field].map(Number)
+    const mag = Math.hypot(...vec)
+    const u = mag ? vec.map((v) => v / mag) : null
+    const follow = field === 'force' && l.kind === 'force' && !!l.followNormal
+    const ax = !follow && u ? [0, 1, 2].find((k) => Math.abs(Math.abs(u[k]) - 1) < 1e-6) : undefined
+    const m = noMag ? 1 : mag || (field === 'moment' ? 100 : 1000)
+    const setDir = (d) => upd({ [field]: d.map((c) => tidy(c * m)), [field + 'Ui']: null, ...(field === 'force' ? { followNormal: false } : {}) })
+    const pickAxis = (k) => {
+      const d = [0, 0, 0]
+      d[k] = ax === k ? -Math.sign(u[k]) : k === 2 ? -1 : 1
+      setDir(d)
+    }
+    const aiming = aim?.id === l.id && aim.field === field
+    const picking = dirPick?.id === l.id && dirPick.key === field
+    let text
+    if (follow) text = normal ? 'drückt senkrecht auf die gewählte Fläche' : 'senkrecht auf die Fläche – sobald eine ebene Fläche gewählt ist'
+    else if (!u) text = 'Richtung wählen'
+    else if (ax != null) text = `in Richtung ${u[ax] > 0 ? '+' : '−'}${'XYZ'[ax]}`
+    else {
+      const a = anglesOf(u)
+      text = `schräg: Winkel in XY ${fmt(Number(a.a))}°, Neigung ${fmt(Number(a.b))}°`
+    }
+    if (field === 'moment' && u) text = 'Drehachse ' + text.replace('in Richtung ', '') + ' (Drehsinn nach der rechten Hand)'
+    if (field === 'flowDir' && u) text = 'Strömung ' + text
+    return (
+      <div className="dir-editor">
+        {!noMag && (
+          <label className="field">
+            <span>Betrag</span>
+            <NumInput
+              value={mag}
+              unit={unit}
+              onChange={(v) => upd({ [field]: (u ?? (follow && normal) ?? (field === 'moment' ? [0, 0, 1] : [0, 0, -1])).map((c) => tidy(c * v)), [field + 'Ui']: null })}
+            />
+          </label>
+        )}
+        <div className="field">
+          <span>{field === 'moment' ? 'Drehachse' : field === 'flowDir' ? 'Strömungsrichtung' : 'Richtung'}</span>
+          <div className="dir-row">
+            {field === 'force' && l.kind === 'force' && (
+              <button
+                className={'dir' + (follow ? ' on' : '')}
+                title="senkrecht auf die gewählte Fläche"
+                aria-label="senkrecht auf die gewählte Fläche"
+                onClick={() => upd({ followNormal: true, forceUi: null, ...(normal ? { force: normal.map((c) => tidy(c * m)) } : {}) })}
+              >
+                <I.IcNormal />
+              </button>
+            )}
+            {['X', 'Y', 'Z'].map((a, k) => (
+              <button
+                key={a}
+                className={'dir' + (ax === k ? ' on' : '')}
+                title={ax === k ? 'nochmal klicken: Gegenrichtung' : `in ${a}-Richtung`}
+                onClick={() => pickAxis(k)}
+              >
+                {ax === k ? (u[k] > 0 ? '+' : '−') : ''}
+                {a}
+              </button>
+            ))}
+            {axisPreset && (
+              <button className="dir wide" title="um die Achse der gewählten Bohrung/Welle (Torsion)" onClick={() => setDir(axisPreset)}>
+                ⟳ Achse
+              </button>
+            )}
+            <button className="dir" title="Richtung umkehren" aria-label="Richtung umkehren" disabled={!u} onClick={() => setDir(u.map((c) => -c))}>
+              <I.IcFlip />
+            </button>
+            <button
+              className={'dir' + (aiming ? ' on' : '')}
+              title="Pfeil im Bild ziehen (rastet in 5°-Schritten ein, ⇧ = stufenlos)"
+              aria-label="Pfeil im Bild ziehen"
+              onClick={() => startAim(l.id, field)}
+            >
+              <I.IcDrag />
+            </button>
+            {field !== 'flowDir' && (
+              <button
+                className={'dir' + (picking ? ' on' : '')}
+                title="Richtung von einer Fläche übernehmen: senkrecht darauf bzw. entlang der Bohrungsachse"
+                aria-label="Richtung von einer Fläche übernehmen"
+                onClick={() => {
+                  setActive(null)
+                  setDrawing(null)
+                  setAim(null)
+                  setDirPick(picking ? null : { id: l.id, key: field })
+                }}
+              >
+                <I.IcFacePick />
+              </button>
+            )}
+          </div>
+          <p className="hint">{text}</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Flächen eines Lagers/einer Last: Anzahl, Farbe, Auswahl ein/aus
+  const facesCard = (item, type, color) => {
+    const on = active?.id === item.id
+    const n = item.surfaces.length
+    const cyl = n > 0 && item.surfaces.every((t) => surfaceInfo.get(t)?.cylinder)
+    return (
+      <div className={'faces' + (on ? ' on' : '')}>
+        <span className="swatch" style={{ background: color }} />
+        <span className="grow">
+          {on && !n ? 'Flächen im Bild anklicken' : facesText(n)}
+          {cyl ? (n === 1 ? ' (Bohrung/Welle)' : ' (zylindrisch)') : ''}
+        </span>
+        <button
+          className={'btn small' + (on ? ' primary' : '')}
+          onClick={() => {
+            setDrawing(null)
+            setAim(null)
+            setDirPick(null)
+            setActive(on ? null : { type, id: item.id })
+          }}
+        >
+          {on ? 'Fertig' : n ? 'Flächen ändern' : 'Flächen wählen'}
+        </button>
+      </div>
+    )
+  }
+
+  function loadSummary(l) {
+    const mag = (v) => Math.hypot(...v.map(Number))
+    const axis = (v) => {
+      const m = mag(v)
+      const k = m ? [0, 1, 2].find((i) => Math.abs(Math.abs(Number(v[i])) / m - 1) < 1e-6) : undefined
+      return k == null ? 'schräg' : `${Number(v[k]) > 0 ? '+' : '−'}${'XYZ'[k]}`
+    }
+    if (l.kind === 'pressure') return `Druck ${fmt(Number(l.pressure))} MPa`
+    if (l.kind === 'moment') return `Moment ${fmt(mag(l.moment))} N·m · ${axis(l.moment)}`
+    if (l.kind === 'flow') return `Wind ${fmt(Number(l.velocity))} m/s · ${axis(l.flowDir)}`
+    if (l.kind === 'bearing') return `Bolzenlast ${fmt(mag(l.force))} N · ${axis(l.force)}`
+    return `Kraft ${fmt(mag(l.force))} N · ${l.followNormal ? 'senkrecht auf Fläche' : axis(l.force)}`
+  }
+
+  // --- Eigenschaften des gewählten Eintrags ---------------------------------------------------------
+  function renderProps() {
+    if (!mesh) return null
+    if (sel === 'mat') {
+      const num = (v, u) => (v === '' || v == null || !Number.isFinite(Number(v)) ? '–' : `${fmt(Number(v))} ${u}`)
+      return (
+        <>
+          <PropsHead title="Werkstoff" />
+          <select
+            value={[...MATERIALS, ...userMaterials].some((m) => m.name === material.name) ? material.name : ''}
+            onChange={(e) => {
+              const m = [...userMaterials, ...MATERIALS].find((x) => x.name === e.target.value)
+              setMaterial(m ? { ...materialFromPreset(m, material.buildDir), infill: material.infill ?? { ...DEFAULT_INFILL } } : { ...material, name: 'Benutzerdefiniert' })
+            }}
+          >
+            {MATERIAL_GROUPS.map((g) => (
+              <optgroup key={g} label={g}>
+                {MATERIALS.filter((m) => m.group === g).map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+            {userMaterials.length > 0 && (
+              <optgroup label="Eigene Werkstoffe">
+                {userMaterials.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <option value="">Benutzerdefiniert</option>
+          </select>
+          <div className="card kv-grid">
+            <Stat label="E" value={num(material.E, 'MPa')} />
+            <Stat label="Re / Rp0,2" value={num(material.yield, 'MPa')} />
+            <Stat label="Rm" value={num(material.tensile, 'MPa')} />
+            <Stat label="Dichte" value={num(material.rho, 'g/cm³')} />
+          </div>
+          <div className="field">
+            <span>Erforderlich (leer = nicht prüfen)</span>
+            <div className="grid3">
+              <NumField label="Sicherheit Fließen" value={proof.sF} onChange={(v) => setProof({ ...proof, sF: v })} />
+              <NumField label="Sicherheit Bruch" value={proof.sB} onChange={(v) => setProof({ ...proof, sB: v })} />
+              <NumField label="Verformung max." unit="mm" value={proof.uMax} onChange={(v) => setProof({ ...proof, uMax: v })} />
+            </div>
+          </div>
+          <p className="hint">Typisch: Stahl statisch 1,5 / 2,0; Kunststoff- und Druckteile eher 2–3.</p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={!!material.layered}
+              onChange={(e) => setMaterial({ ...material, layered: e.target.checked, name: material.layered === e.target.checked ? material.name : 'Benutzerdefiniert' })}
+            />
+            3D-Druck: Schichten und Infill berücksichtigen
+          </label>
+          {material.layered && (
+            <PrintOrientation
+              material={material}
+              setMaterial={(m) => setMaterial(m)}
+              picking={bedPick}
+              onPick={() => {
+                setActive(null)
+                setDrawing(null)
+                setGeoPick(false)
+                setBedPick(!bedPick)
+              }}
+              canCompare={problems.length === 0 && !busy}
+              onCompare={onCompareOrientations}
+              orientations={orientations?.key === orientationKey() ? orientations.rows : null}
+              hasResult={!!result}
+              onScan={async () => {
+                try {
+                  setBusy('Bewerte Aufbaurichtungen …')
+                  return await api.orientationScan(materialPayload(material))
+                } catch (e) {
+                  setError(String(e))
+                  return null
+                } finally {
+                  setBusy(null)
+                }
+              }}
+              onUse={(d) => {
+                const m = { ...material, buildDir: d }
+                setMaterial(m)
+                onSolve(m)
+              }}
+            />
+          )}
+          {material.layered && <InfillFields material={material} setMaterial={setMaterial} />}
+          <More title="Werte ändern, eigenen Werkstoff speichern" open={material.name === 'Benutzerdefiniert' || !!material.layered}>
+            <MaterialFields material={material} setMaterial={setMaterial} />
+            <div className="row mat-actions">
+              <button className="link" onClick={saveUserMaterial}>
+                <Save size={13} /> Als eigenen Werkstoff speichern
+              </button>
+              {userMaterials.some((m) => m.name === material.name) && (
+                <button className="link" onClick={() => deleteUserMaterial(material.name)}>
+                  <Trash2 size={13} /> löschen
+                </button>
+              )}
+            </div>
+            <Calibration material={material} setMaterial={setMaterial} />
+          </More>
+        </>
+      )
+    }
+    if (sel === 'netz') {
+      return (
+        <>
+          <PropsHead title="Netz" />
+          <div className="row">
+            <label className="field grow">
+              <span>Elementgröße</span>
+              <div className="input-unit">
+                <input value={meshSize} onChange={(e) => setMeshSize(e.target.value.replace(',', '.'))} inputMode="decimal" />
+                <em>mm</em>
+              </div>
+            </label>
+            <button className={'btn' + (meshPending ? ' primary' : '')} onClick={() => loadGeometry(geoStep ?? stepPath, meshSize, true, !geoStep)}>
+              <Grid3x3 size={15} /> Neu vernetzen
+            </button>
+          </div>
+          <MeshSlider mesh={mesh} diag={diag} value={meshSize} onChange={setMeshSize} />
+          <div className="card">
+            <Stat label="Aktuelles Netz" value={`${mesh.elements.toLocaleString('de-DE')} Elemente`} />
+            <Stat label="Unbekannte" value={(3 * mesh.nodes).toLocaleString('de-DE')} />
+          </div>
+          {meshPending && <p className="hint warn-text">Geändert – „Neu vernetzen“, damit das Netz zur Einstellung passt.</p>}
+          <label className="check">
+            <input type="checkbox" checked={showMesh} onChange={(e) => setShowMesh(e.target.checked)} /> Netz anzeigen
+          </label>
+          <More title="Feiner an Lager- und Lastbereichen">
+            <label className="check">
+              <input type="checkbox" checked={refineRegions} onChange={(e) => setRefineRegions(e.target.checked)} /> Netz in gezeichneten Wirkbereichen
+              automatisch verfeinern
+            </label>
+            <p className="hint">An Bohrungen und Radien wird immer automatisch feiner vernetzt (TET10, quadratische Elemente).</p>
+          </More>
+        </>
+      )
+    }
+    if (sel === 'verb') {
+      return (
+        <WeldSection
+          welds={welds}
+          setWelds={setWelds}
+          gaps={gaps}
+          setGaps={setGaps}
+          active={active}
+          setActive={(a) => {
+            setDrawing(null)
+            setActive(a)
+          }}
+          onFind={onFindGaps}
+        />
+      )
+    }
+    const s = sel.startsWith('s:') ? supports.find((x) => 's:' + x.id === sel) : null
+    if (s) {
+      const i = supports.indexOf(s)
+      const upd = (patch) => setSupports((ss) => ss.map((x) => (x.id === s.id ? { ...x, ...patch } : x)))
+      const f = supportFix(s)
+      const cy = { radial: true, axial: true, tangential: false, ...s.cyl }
+      return (
+        <>
+          <PropsHead
+            title={`Lager ${i + 1}`}
+            onDelete={() => {
+              setSupports(supports.filter((x) => x.id !== s.id))
+              setActive(null)
+              setDrawing(null)
+              setSel('teil')
+            }}
+          />
+          <div className="choices c4">
+            {SUPPORT_KINDS.map(([k, lab, Icon]) => (
+              <button key={k} className={'choice' + (s.kind === k ? ' on' : '')} onClick={() => upd({ kind: k })}>
+                <Icon size={26} />
+                {lab}
+              </button>
+            ))}
+          </div>
+          <p className="hint">{SUPPORT_KINDS.find((x) => x[0] === s.kind)?.[3]}</p>
+          {s.kind === 'cylindrical' && (
+            <div className="checks">
+              {[['radial', 'radial fest'], ['axial', 'axial fest'], ['tangential', 'Drehung gesperrt']].map(([k, lab]) => (
+                <label key={k} className="check">
+                  <input type="checkbox" checked={cy[k]} onChange={(e) => upd({ cyl: { ...cy, [k]: e.target.checked } })} />
+                  {lab}
+                </label>
+              ))}
+              {!cy.tangential && <p className="hint">Ein zweites Lager muss die Drehung um den Bolzen verhindern.</p>}
+            </div>
+          )}
+          {s.kind === 'axes' && (
+            <div className="dir-row">
+              {['x', 'y', 'z'].map((a) => (
+                <button key={a} className={'dir' + (s.axes[a] ? ' on' : '')} title={`${a.toUpperCase()} ${s.axes[a] ? 'gesperrt' : 'frei'}`} onClick={() => upd({ axes: { ...s.axes, [a]: !s.axes[a] } })}>
+                  {a.toUpperCase()}
+                </button>
+              ))}
+              <span className="hint">markiert = gesperrt</span>
+            </div>
+          )}
+          {facesCard(s, 'support', SUPPORT_COLOR)}
+          {f.error && s.surfaces.length > 0 && <p className="error-text">{f.error}</p>}
+          <More title="Nur ein Teil der Fläche (Bereich zeichnen)" open={!!s.region}>
+            <RegionEditor
+              item={s}
+              cyl={selectionCylinder(s.surfaces, surfaceInfo)}
+              drawing={drawing?.id === s.id ? drawing : null}
+              onStart={(shape) => startDrawing('support', s, shape)}
+              onCancel={() => setDrawing(null)}
+              onChange={(region) => updateItem('support', s.id, { region })}
+            />
+          </More>
+        </>
+      )
+    }
+    const l = sel.startsWith('l:') ? loads.find((x) => 'l:' + x.id === sel) : null
+    if (l) {
+      const i = loads.indexOf(l)
+      const upd = (patch) => setLoads((ls) => ls.map((x) => (x.id === l.id ? { ...x, ...patch } : x)))
+      const n = loadNormal(l)
+      const cyl = selectionCylinder(l.surfaces, surfaceInfo)
+      const p = Number(l.pressure)
+      const vecField = l.kind === 'moment' ? 'moment' : l.kind === 'flow' ? 'flowDir' : 'force'
+      return (
+        <>
+          <PropsHead
+            title={`Last ${i + 1}`}
+            onDelete={() => {
+              setLoads(loads.filter((x) => x.id !== l.id))
+              setActive(null)
+              setAim(null)
+              setDrawing(null)
+              setSel('teil')
+            }}
+          />
+          <div className="choices c5">
+            {LOAD_CHOICES.map(([k, lab, Icon]) => (
+              <button key={k} className={'choice' + (l.kind === k ? ' on' : '')} title={LOAD_KINDS[k]} onClick={() => upd({ kind: k })}>
+                <Icon size={26} />
+                {lab}
+              </button>
+            ))}
+          </div>
+          {l.kind === 'force' && dirEditor(l, 'force', { unit: 'N', normal: n ? n.map((v) => -v) : null })}
+          {l.kind === 'bearing' && (
+            <>
+              {dirEditor(l, 'force', { unit: 'N' })}
+              <p className="hint">Kraft, mit der Bolzen bzw. Welle auf die Bohrung drückt. Sie wirkt nur auf der Hälfte, gegen die gedrückt wird (Druck ∝ cos φ).</p>
+            </>
+          )}
+          {l.kind === 'moment' && (
+            <>
+              {dirEditor(l, 'moment', { unit: 'N·m', axisPreset: cyl?.axis ?? null })}
+              <p className="hint">Wirkt um den Schwerpunkt des Bereichs, verteilt wie bei einem starren Anschlussteil.</p>
+            </>
+          )}
+          {l.kind === 'pressure' && (
+            <>
+              <label className="field">
+                <span>Betrag</span>
+                <NumInput value={Math.abs(p)} unit="MPa" onChange={(v) => upd({ pressure: (p < 0 ? -1 : 1) * v })} />
+              </label>
+              <div className="segmented small">
+                <button className={p >= 0 ? 'on' : ''} onClick={() => upd({ pressure: Math.abs(p) })}>
+                  drückt auf die Fläche
+                </button>
+                <button className={p < 0 ? 'on' : ''} onClick={() => upd({ pressure: -Math.abs(p) })}>
+                  zieht (Sog)
+                </button>
+              </div>
+              <p className="hint">1 MPa = 1 N/mm² = 10 bar. Wirkt immer senkrecht auf jede gewählte Fläche.</p>
+            </>
+          )}
+          {l.kind === 'flow' && (
+            <>
+              <div className="grid3">
+                <label className="field">
+                  <span>Medium</span>
+                  <select value={l.medium ?? 'luft'} onChange={(e) => upd({ medium: e.target.value })}>
+                    {Object.entries(MEDIA).map(([k, [lab]]) => (
+                      <option key={k} value={k}>
+                        {lab}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <NumField label="Geschwindigkeit" unit="m/s" value={l.velocity} onChange={(v) => upd({ velocity: v })} />
+                <NumField label="c_w" value={l.cw} onChange={(v) => upd({ cw: v })} />
+              </div>
+              {l.medium === 'eigen' && <NumField label="Dichte" unit="kg/m³" value={l.rhoFluid} onChange={(v) => upd({ rhoFluid: v })} />}
+              {dirEditor(l, 'flowDir', { noMag: true })}
+              <p className="hint">
+                Staudruck × c_w = {fmt(flowPressurePa(l))} Pa auf alle angeströmten Flächen. Überschlägig (keine Sogseite); c_w z. B. Platte quer 1,2, Zylinder
+                1,0, Kugel 0,5.
+              </p>
+            </>
+          )}
+          {facesCard(l, 'load', LOAD_ACTIVE)}
+          {l.kind === 'flow' && (
+            <button className="link" onClick={() => upd({ surfaces: (mesh?.surfaces ?? []).map((x) => x.tag) })}>
+              Alle Außenflächen wählen
+            </button>
+          )}
+          <More title="Mehr: Komponenten, nur Teil der Fläche" open={!!l.region}>
+            {l.kind !== 'pressure' && (
+              <VectorInput
+                item={l}
+                field={vecField}
+                labels={l.kind === 'moment' ? ['Mx', 'My', 'Mz'] : l.kind === 'flow' ? ['x', 'y', 'z'] : ['Fx', 'Fy', 'Fz']}
+                unit={l.kind === 'moment' ? 'N·m' : l.kind === 'flow' ? '' : 'N'}
+                upd={(patch) => upd({ ...patch, ...(vecField === 'force' ? { followNormal: false } : {}) })}
+                picking={false}
+                onPick={() => {}}
+                aiming={false}
+                onAimToggle={null}
+                presets={[]}
+              />
+            )}
+            <RegionEditor
+              item={l}
+              cyl={cyl}
+              drawing={drawing?.id === l.id ? drawing : null}
+              onStart={(shape) => startDrawing('load', l, shape)}
+              onCancel={() => setDrawing(null)}
+              onChange={(region) => upd({ region })}
+            />
+          </More>
+        </>
+      )
+    }
+    // Teil
+    const dims = mesh.bbox[1].map((v, k) => v - mesh.bbox[0][k])
+    const rho = Number(material.rho)
+    return (
+      <>
+        <PropsHead title="Teil" />
+        <div className="card">
+          <Stat label="Name" value={stemOf(fileName)} />
+          <Stat label="Quelle" value={partSource ?? 'STEP-Datei'} />
+          <Stat label="Volumen" value={`${fmt(mesh.volume / 1000)} cm³`} />
+          {rho > 0 && <Stat label="Masse" value={`${fmt((mesh.volume / 1000) * rho)} g`} />}
+          <Stat label="Abmessungen" value={dims.map((v) => fmt(v)).join(' × ') + ' mm'} />
+          <Stat label="Flächen" value={mesh.surfaces.length} />
+        </div>
+        <div className="row wrap">
+          <button className="btn" disabled title="Kommt bald: eine Fläche mit Linie, Rechteck oder Kreis teilen – Lager und Lasten wirken dann auf eine Teilfläche">
+            <I.IcSplit /> Fläche teilen … <span className="soon">bald</span>
+          </button>
+          <button className="btn" onClick={reloadPart} disabled={!!busy} title="Teil neu laden – Lager und Lasten bleiben erhalten">
+            <RotateCcw size={14} /> Neue Version holen
+          </button>
+        </div>
+        <p className="hint">
+          Nur ein Teil einer Fläche soll Lager oder Last tragen? Beim Lager bzw. bei der Last unter „Mehr“ einen Bereich zeichnen.
+        </p>
+        <div className="row wrap">
+          <button className="link" onClick={onOpenStep}>
+            Andere STEP-Datei öffnen …
+          </button>
+          <button className="link" onClick={() => setDlg('onshape')}>
+            Aus Onshape …
+          </button>
+        </div>
+      </>
+    )
+  }
+
+  const SUPPORT_ICON = Object.fromEntries(SUPPORT_KINDS.map(([k, , Icon]) => [k, Icon]))
+  const LOAD_ICON = Object.fromEntries(LOAD_CHOICES.map(([k, , Icon]) => [k, Icon]))
+
+  const modelPanel = mesh && (
+    <>
+      <div className="tree-head">
+        <span>Studie · {ANALYSES[analysis][0]}</span>
+        {analysis !== 'static' && (
+          <label className="mini-count" title="Anzahl der Formen">
+            <input value={modeCount} onChange={(e) => setModeCount(e.target.value)} /> Formen
+          </label>
+        )}
+        <span className="spacer" />
+        {runButton('tree')}
+      </div>
+      <div className="tree" role="tree">
+        <TreeRow icon={I.IcPart} title="Teil" sum={[partSource ?? 'STEP-Datei', `${mesh.surfaces.length} Flächen`].join(' · ')} state="ok" on={sel === 'teil'} onClick={() => selectItem('teil')} />
+        <TreeRow
+          icon={I.IcMaterial}
+          title="Werkstoff"
+          sum={material.name + (Number(proof.sF) > 0 ? ` · Nachweis S ≥ ${fmt(Number(proof.sF))}` : '')}
+          state={itemState('mat')}
+          on={sel === 'mat'}
+          onClick={() => selectItem('mat')}
+        />
+        <TreeRow
+          icon={I.IcMesh}
+          title="Netz"
+          sum={`${fmt(mesh.mesh_size)} mm · ${mesh.elements.toLocaleString('de-DE')} Elemente`}
+          state={meshPending ? 'todo' : 'ok'}
+          on={sel === 'netz'}
+          onClick={() => selectItem('netz')}
+        />
+        <TreeGroup icon={I.IcSupportTree} color={SUPPORT_COLOR} title="Lager" count={supports.length} onAdd={addSupport} addTitle="Lager hinzufügen" />
+        {supports.map((s, i) => (
+          <TreeRow
+            key={s.id}
+            sub
+            icon={SUPPORT_ICON[s.kind]}
+            color={SUPPORT_COLOR}
+            title={`Lager ${i + 1}`}
+            sum={`${SUPPORT_NAME[s.kind]} · ${facesText(s.surfaces.length)}${s.region ? ' (Bereich)' : ''}`}
+            state={itemState('s:' + s.id)}
+            on={sel === 's:' + s.id}
+            onClick={() => selectItem('s:' + s.id)}
+          />
+        ))}
+        <TreeGroup icon={I.IcForce} color={LOAD_COLOR} title="Lasten" count={loads.length} onAdd={addLoad} addTitle="Last hinzufügen" />
+        {loads.map((l, i) => (
+          <TreeRow
+            key={l.id}
+            sub
+            icon={LOAD_ICON[l.kind]}
+            color={l.kind === 'moment' ? MOMENT_COLOR : LOAD_COLOR}
+            title={`Last ${i + 1}`}
+            sum={loadSummary(l)}
+            state={itemState('l:' + l.id)}
+            on={sel === 'l:' + l.id}
+            onClick={() => selectItem('l:' + l.id)}
+          />
+        ))}
+        <TreeRow
+          icon={I.IcLink}
+          title="Verbindungen"
+          muted={!welds.length}
+          sum={welds.length ? `${welds.length} ${welds.length > 1 ? 'Schweißnähte' : 'Schweißnaht'}` : 'optional – Schweißnähte an Blechen'}
+          state={welds.length ? itemState('verb') : null}
+          on={sel === 'verb'}
+          onClick={() => selectItem('verb')}
+        />
+      </div>
+      <div className="props">{renderProps()}</div>
+    </>
+  )
+
+  const probeQ = QUANTITIES[quantity]
+  const probeVals = probe && result && display && !display.modal
+    ? {
+        vm: result.von_mises[probe.node],
+        u: Math.hypot(result.displacement[3 * probe.node], result.displacement[3 * probe.node + 1], result.displacement[3 * probe.node + 2]),
+        s: result.utilization ? 1 / Math.max(result.utilization[probe.node], 1e-12) : null,
+      }
+    : null
 
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
-          <BoxIcon size={18} strokeWidth={2.2} />
+        <button className="brand" onClick={() => setHome(true)} title="Startseite">
+          <I.IcPart size={18} />
           <span>Projekt-FEM</span>
-          {fileName && <span className="file">{fileName}</span>}
-        </div>
-        <div className="segmented">
-          <button className={view === 'setup' ? 'on' : ''} onClick={() => setView('setup')}>
-            Modell
-          </button>
-          <button className={view === 'geometry' ? 'on' : ''} disabled={!mesh} onClick={() => { setActive(null); setAim(null); setDirPick(null); setDrawing(null); setView('geometry') }}>
-            Geometrie{geoOps.some((o) => o.enabled) ? ` (${geoOps.filter((o) => o.enabled).length})` : ''}
-          </button>
-          <button className={view === 'study' ? 'on' : ''} disabled={!mesh} onClick={() => { setActive(null); setDrawing(null); setView('study') }}>
-            Studie
-          </button>
-          <button className={view === 'frame' ? 'on' : ''} onClick={() => { setActive(null); setDrawing(null); setView('frame') }}>
-            Stabwerk
-          </button>
-          <button className={view === 'result' ? 'on' : ''} disabled={!result && !modes} onClick={() => setView('result')}>
-            Ergebnis{resultStale && result ? ' (veraltet)' : ''}
-          </button>
-        </div>
-        <div className="actions">
-          <CadButton onError={(e) => setError(String(e))} />
-          {api.isDesktop ? (
-            <ShareButton onError={(e) => setError(String(e))} />
-          ) : (
-            <span className="remote-badge" title="Die Rechnung läuft auf dem Rechner, auf dem Projekt-FEM die Heimnetz-Freigabe hat">
-              <Wifi size={14} /> Rechnet auf {window.location.hostname}
-            </span>
-          )}
-          <button className="btn ghost" onClick={onLoadProject}>
-            <FolderOpen size={15} /> Projekt öffnen
-          </button>
-          <button className="btn ghost" onClick={onSaveProject} disabled={!stepPath}>
-            <Save size={15} /> Speichern
-          </button>
-        </div>
+        </button>
+        {!showStart && modelView && mesh && (
+          <>
+            {fileName && (
+              <span className="file" title={stepPath}>
+                {stemOf(fileName)}
+              </span>
+            )}
+            <Menu label={<><span className="muted">Analyse:</span> {ANALYSES[analysis][0]}</>} className="btn" title="Analyseart wählen">
+              {Object.entries(ANALYSES).map(([k, [lab, sub]]) => (
+                <MenuItem key={k} onClick={() => setAnalysis(k)} sub={sub} hint={analysis === k ? '✓' : null}>
+                  {lab}
+                </MenuItem>
+              ))}
+            </Menu>
+            <div className="segmented">
+              <button className={view === 'setup' ? 'on' : ''} onClick={() => switchView('setup')}>
+                Modell
+              </button>
+              <button className={view === 'result' ? 'on' : ''} disabled={!result && !modes} onClick={() => switchView('result')}>
+                Ergebnis{resultStale && result ? ' (veraltet)' : ''}
+              </button>
+            </div>
+          </>
+        )}
+        {!showStart && !modelView && <span className="file">{{ geometry: 'Geometrie anpassen', topo: 'Leichtbau', study: 'Parameterstudie', frame: 'Stabwerk' }[view]}</span>}
+        <span className="spacer" />
+        {!api.isDesktop && (
+          <span className="remote-badge" title="Die Rechnung läuft auf dem Rechner, auf dem Projekt-FEM die Heimnetz-Freigabe hat">
+            <Wifi size={14} /> Rechnet auf {window.location.hostname}
+          </span>
+        )}
+        <Menu label="Datei" align="right">
+          <MenuItem onClick={onOpenStep} hint="Strg+O" disabled={gmsh === null}>
+            STEP-Datei öffnen …
+          </MenuItem>
+          <MenuItem onClick={() => setDlg('onshape')} disabled={gmsh === null}>
+            Aus Onshape-Bibliothek …
+          </MenuItem>
+          <MenuItem onClick={() => onLoadProject()} disabled={gmsh === null}>
+            Projekt öffnen …
+          </MenuItem>
+          <MenuSep />
+          <MenuItem onClick={onSaveProject} hint="Strg+S" disabled={!stepPath}>
+            Projekt speichern …
+          </MenuItem>
+          <MenuSep />
+          <MenuItem onClick={() => switchView('frame')}>Stabwerk</MenuItem>
+          <MenuItem onClick={() => setHome(true)}>Startseite</MenuItem>
+        </Menu>
+        <Menu label="Export" align="right">
+          <MenuItem onClick={onReport} disabled={!result || resultStale}>
+            Bericht als PDF
+          </MenuItem>
+          <MenuItem onClick={videoFromMenu} disabled={!result || resultStale || showModes || showStart}>
+            Video der Verformung
+          </MenuItem>
+          <MenuItem onClick={onImage} disabled={!mesh || showStart || view === 'frame'}>
+            Bild der Ansicht (PNG)
+          </MenuItem>
+          <MenuSep />
+          <MenuItem
+            onClick={onResultToCad}
+            disabled={!canResultToCad}
+            sub={isOnshape ? 'Beschreibung der Teile' : partSource === 'SolidCraft' ? 'Parameter FEM_…' : 'für Teile aus Onshape oder SolidCraft'}
+          >
+            Ergebnis → {partSource === 'SolidCraft' ? 'SolidCraft' : 'Onshape'}
+          </MenuItem>
+          <MenuItem onClick={onExportMathpad} disabled={!result || resultStale}>
+            MathPad-Rechenblatt
+          </MenuItem>
+          <MenuItem onClick={onExportVtu} disabled={!result}>
+            ParaView (.vtu)
+          </MenuItem>
+          <MenuSep />
+          <MenuItem onClick={exportGeo} disabled={!geoStep}>
+            Geänderte Geometrie (STEP)
+          </MenuItem>
+          <MenuItem onClick={exportTopo} disabled={!topo}>
+            Leichtbau-Form (STL)
+          </MenuItem>
+        </Menu>
+        <button className="btn ghost icon" title="Einstellungen" aria-label="Einstellungen" onClick={() => setDlg('settings')}>
+          <I.IcSliders />
+        </button>
+        {!showStart && modelView && mesh && runButton('head')}
       </header>
 
       <div className="main">
-        <aside className="sidebar" ref={sidebar}>
-          {gmsh === null && (
-            <div className="notice warn">
-              <TriangleAlert size={16} />
-              <div>
-                Gmsh wurde nicht gefunden. Installieren mit <code>uv tool install gmsh</code> (Linux/Mac) oder{' '}
-                <code>brew install gmsh</code> (Mac), dann neu starten.
-              </div>
-            </div>
-          )}
-
-          {view === 'setup' ? (
-            <>
-              <Section n={1} title="Geometrie" done={!!mesh}>
-                <button className="btn primary wide" onClick={onOpenStep} disabled={!gmsh}>
-                  <FileUp size={15} /> STEP-Datei öffnen
+        {showStart ? (
+          <StartPage
+            gmsh={gmsh}
+            onOpenStep={onOpenStep}
+            onOnshape={() => setDlg('onshape')}
+            onProject={() => onLoadProject()}
+            onFrame={() => switchView('frame')}
+            onRecent={openRecent}
+            onDropFile={onDropFile}
+            current={mesh ? stemOf(fileName) : null}
+            onBack={() => setHome(false)}
+          />
+        ) : (
+          <>
+            <nav className="rail" aria-label="Werkzeuge">
+              {[
+                ['Modell', 'Modell und Ergebnis', I.IcPart, modelView, () => switchView(modelView ? view : 'setup'), false],
+                ['Geometrie', 'Geometrie anpassen (Radien, Bohrungen, Material hinzu/weg)', I.IcWrench, view === 'geometry', () => switchView('geometry'), !mesh],
+                ['Leichtbau', 'Leichtbau-Vorschlag (Topologieoptimierung)', I.IcFeather, view === 'topo', () => switchView('topo'), !mesh],
+                ['Studie', 'Parameterstudie', I.IcChart, view === 'study', () => switchView('study'), !mesh],
+                ['Stabwerk', 'Stabwerk: Balken, Rahmen, Fachwerke', I.IcTruss, view === 'frame', () => switchView('frame'), false],
+              ].map(([short, title, Icon, on, click, dis]) => (
+                <button key={short} className={'rail-btn' + (on ? ' on' : '')} title={title} aria-label={title} disabled={dis} onClick={click}>
+                  <Icon size={20} />
+                  <span>{short}</span>
                 </button>
-                {mesh && (
-                  <div className="stats">
-                    <Stat label="Volumen" value={`${fmt(mesh.volume / 1000)} cm³`} />
-                    <Stat label="Abmessungen" value={fmtVec(mesh.bbox[1].map((v, k) => v - mesh.bbox[0][k])) + ' mm'} />
-                    <Stat label="Flächen" value={mesh.surfaces.length} />
-                  </div>
-                )}
-              </Section>
+              ))}
+            </nav>
 
-              {mesh && (
-                <Section n={2} title="Netz" done>
-                  <div className="row">
-                    <label className="field grow">
-                      <span>Elementgröße</span>
-                      <div className="input-unit">
-                        <input value={meshSize} onChange={(e) => setMeshSize(e.target.value)} inputMode="decimal" />
-                        <em>mm</em>
-                      </div>
-                    </label>
-                    <button
-                      className={'btn' + (Number(meshSize) !== Number(mesh.mesh_size.toPrecision(3)) || JSON.stringify(currentRefine(meshSize)) !== meshRefineKey ? ' primary' : '')}
-                      onClick={() => loadGeometry(geoStep ?? stepPath, meshSize, true, !geoStep)}
-                    >
-                      <Grid3x3 size={15} /> Neu vernetzen
-                    </button>
-                  </div>
-                  <MeshSlider mesh={mesh} diag={diag} value={meshSize} onChange={setMeshSize} />
-                  <p className="hint">
-                    {mesh.elements.toLocaleString('de-DE')} Elemente (TET10), {mesh.nodes.toLocaleString('de-DE')} Knoten. An Bohrungen und
-                    Radien wird automatisch feiner vernetzt.
-                  </p>
-                  <label className="check">
-                    <input type="checkbox" checked={showMesh} onChange={(e) => setShowMesh(e.target.checked)} /> Netz anzeigen
-                  </label>
-                  <label className="check">
-                    <input type="checkbox" checked={refineRegions} onChange={(e) => setRefineRegions(e.target.checked)} /> Netz in Wirkbereichen
-                    automatisch verfeinern
-                  </label>
-                  {JSON.stringify(currentRefine(meshSize)) !== meshRefineKey && (
-                    <p className="hint warn-text">Wirkbereiche oder Füllung geändert – „Neu vernetzen“, damit das Netz dort passend fein wird.</p>
-                  )}
-                </Section>
-              )}
-
-              {mesh && (
-                <Section n={3} title="Werkstoff" done>
-                  <select
-                    value={[...MATERIALS, ...userMaterials].some((m) => m.name === material.name) ? material.name : ''}
-                    onChange={(e) => {
-                      const m = [...userMaterials, ...MATERIALS].find((x) => x.name === e.target.value)
-                      setMaterial(m ? { ...materialFromPreset(m, material.buildDir), infill: material.infill ?? { ...DEFAULT_INFILL } } : { ...material, name: 'Benutzerdefiniert' })
-                    }}
-                  >
-                    {MATERIAL_GROUPS.map((g) => (
-                      <optgroup key={g} label={g}>
-                        {MATERIALS.filter((m) => m.group === g).map((m) => (
-                          <option key={m.name} value={m.name}>
-                            {m.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                    {userMaterials.length > 0 && (
-                      <optgroup label="Eigene Werkstoffe">
-                        {userMaterials.map((m) => (
-                          <option key={m.name} value={m.name}>
-                            {m.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    <option value="">Benutzerdefiniert</option>
-                  </select>
-                  <MaterialFields material={material} setMaterial={setMaterial} />
-                  <div className="row mat-actions">
-                    <button className="link" onClick={saveUserMaterial}>
-                      <Save size={13} /> Als eigenen Werkstoff speichern
-                    </button>
-                    {userMaterials.some((m) => m.name === material.name) && (
-                      <button className="link" onClick={() => deleteUserMaterial(material.name)}>
-                        <Trash2 size={13} /> löschen
-                      </button>
-                    )}
-                  </div>
-                  <ProofFields proof={proof} setProof={setProof} />
-                  <Calibration material={material} setMaterial={setMaterial} />
-                  <label className="check">
-                    <input type="checkbox" checked={!!material.layered} onChange={(e) => setMaterial({ ...material, layered: e.target.checked, name: material.layered === e.target.checked ? material.name : 'Benutzerdefiniert' })} />
-                    3D-Druck: Schichtaufbau berücksichtigen
-                  </label>
-                  {material.layered && (
-                    <PrintOrientation
+            <aside className={'sidebar' + (view === 'setup' ? ' flush' : '')} ref={sidebar}>
+              {view === 'setup' && modelPanel}
+              {view === 'result' &&
+                (showModes ? (
+                  <ModesPanel modes={modes} setModes={setModes} loads={loads} />
+                ) : (
+                  result && (
+                    <ResultSidebar
+                      result={result}
                       material={material}
-                      setMaterial={(m) => setMaterial(m)}
-                      picking={bedPick}
-                      onPick={() => { setActive(null); setDrawing(null); setGeoPick(false); setBedPick(!bedPick) }}
-                      canCompare={problems.length === 0 && !busy}
-                      onCompare={onCompareOrientations}
-                      orientations={orientations?.key === orientationKey() ? orientations.rows : null}
-                      hasResult={!!result}
-                      onScan={async () => {
-                        try {
-                          setBusy('Bewerte Aufbaurichtungen …')
-                          return await api.orientationScan(materialPayload(material))
-                        } catch (e) {
-                          setError(String(e))
-                          return null
-                        } finally {
-                          setBusy(null)
-                        }
-                      }}
-                      onUse={(d) => { const m = { ...material, buildDir: d }; setMaterial(m); onSolve(m) }}
+                      proof={proof}
+                      quantity={quantity}
+                      setQuantity={setQuantity}
+                      stale={resultStale}
+                      canRerun={ready}
+                      onRerun={run}
+                      reference={reference}
+                      current={summary(result, mesh, geoStep ? 'Geändert' : 'Aktuell')}
+                      onPin={() => setReference(summary(result, mesh, geoStep ? 'Geändert' : 'Vorher'))}
+                      onUnpin={() => setReference(null)}
+                      detailsOpen={detailsOpen}
+                      setDetailsOpen={setDetailsOpen}
                     />
-                  )}
-                  {material.layered && <InfillFields material={material} setMaterial={setMaterial} />}
-                </Section>
-              )}
-
-              {mesh && (
-                <Section n={4} title="Lager" done={supports.length > 0 && supports.every((s) => s.surfaces.length)}>
-                  {supports.map((s, i) => {
-                    const f = supportFix(s)
-                    const isActive = active?.id === s.id
-                    return (
-                      <div key={s.id} className={'item' + (isActive ? ' active support' : '')}>
-                        <div className="item-head">
-                          <Anchor size={14} color={SUPPORT_ACTIVE} />
-                          <strong>Lager {i + 1}</strong>
-                          <span className="spacer" />
-                          <button className="icon-btn" title="Löschen" onClick={() => { setSupports(supports.filter((x) => x.id !== s.id)); if (isActive) setActive(null) }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                        <select value={s.kind} onChange={(e) => setSupports(supports.map((x) => (x.id === s.id ? { ...x, kind: e.target.value } : x)))}>
-                          <option value="fixed">Fest eingespannt</option>
-                          <option value="frictionless">Reibungsfreie Auflage / Symmetrie</option>
-                          <option value="axes">Richtungen einzeln sperren</option>
-                          <option value="cylindrical">Zylindrische Lagerung (Bolzen/Gelenk)</option>
-                        </select>
-                        {s.kind === 'cylindrical' && (
-                          <>
-                            <div className="row axes">
-                              {[['radial', 'radial fest'], ['axial', 'axial fest'], ['tangential', 'Drehung gesperrt']].map(([k, lab]) => (
-                                <label key={k} className="check">
-                                  <input
-                                    type="checkbox"
-                                    checked={{ radial: true, axial: true, tangential: false, ...s.cyl }[k]}
-                                    onChange={(e) => setSupports(supports.map((x) => (x.id === s.id ? { ...x, cyl: { radial: true, axial: true, tangential: false, ...x.cyl, [k]: e.target.checked } } : x)))}
-                                  />
-                                  {lab}
-                                </label>
-                              ))}
-                            </div>
-                            <p className="hint">
-                              Bohrung oder Bolzen wählen. Standard = Gelenk: Das Bauteil bleibt am Bolzen, kann sich aber um die Achse drehen
-                              {!(s.cyl?.tangential ?? false) && ' – ein zweites Lager muss die Drehung verhindern'}.
-                            </p>
-                          </>
-                        )}
-                        {s.kind === 'frictionless' && (
-                          <p className="hint">Senkrecht zur Fläche gesperrt, entlang der Fläche frei – auch auf schrägen Flächen.</p>
-                        )}
-                        {s.kind === 'axes' && (
-                          <div className="row axes">
-                            {['x', 'y', 'z'].map((a) => (
-                              <label key={a} className="check">
-                                <input type="checkbox" checked={s.axes[a]} onChange={(e) => setSupports(supports.map((x) => (x.id === s.id ? { ...x, axes: { ...x.axes, [a]: e.target.checked } } : x)))} />
-                                {a} gesperrt
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                        <RegionEditor
-                          item={s}
-                          cyl={selectionCylinder(s.surfaces, surfaceInfo)}
-                          drawing={drawing?.id === s.id ? drawing : null}
-                          onStart={(shape) => startDrawing('support', s, shape)}
-                          onCancel={() => setDrawing(null)}
-                          onChange={(region) => updateItem('support', s.id, { region })}
-                        />
-                        <PickButton active={isActive} count={s.surfaces.length} onClick={() => { setDrawing(null); setActive(isActive ? null : { type: 'support', id: s.id }) }} />
-                        {f.error && s.surfaces.length > 0 && <p className="error-text">{f.error}</p>}
-                      </div>
-                    )
-                  })}
-                  <button className="btn wide" onClick={() => { const s = newSupport(); setSupports([...supports, s]); setActive({ type: 'support', id: s.id }) }}>
-                    <Plus size={15} /> Lager hinzufügen
-                  </button>
-                </Section>
-              )}
-
-              {mesh && (
-                <Section n={5} title="Lasten" done={loads.length > 0 && loads.every((l) => l.surfaces.length)}>
-                  {loads.map((l, i) => {
-                    const isActive = active?.id === l.id
-                    const upd = (patch) => setLoads(loads.map((x) => (x.id === l.id ? { ...x, ...patch } : x)))
-                    const n = loadNormal(l)
-                    const cyl = selectionCylinder(l.surfaces, surfaceInfo)
-                    return (
-                      <div key={l.id} className={'item' + (isActive ? ' active load' : '')}>
-                        <div className="item-head">
-                          <ArrowDownToLine size={14} color={LOAD_ACTIVE} />
-                          <strong>Last {i + 1}</strong>
-                          <span className="spacer" />
-                          <button className="icon-btn" title="Löschen" onClick={() => { setLoads(loads.filter((x) => x.id !== l.id)); if (isActive) setActive(null) }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                        <select value={l.kind} onChange={(e) => upd({ kind: e.target.value })}>
-                          {Object.entries(LOAD_KINDS).map(([k, v]) => (
-                            <option key={k} value={k}>
-                              {v}
-                            </option>
-                          ))}
-                        </select>
-                        {l.kind === 'moment' ? (
-                          <>
-                            <VectorInput
-                              item={l}
-                              field="moment"
-                              labels={['Mx', 'My', 'Mz']}
-                              unit="N·m"
-                              upd={upd}
-                              picking={dirPick?.id === l.id && dirPick.key === 'moment'}
-                              onPick={() => { setActive(null); setDrawing(null); setAim(null); setDirPick(dirPick ? null : { id: l.id, key: 'moment' }) }}
-                              aiming={aim?.id === l.id && aim.field === 'moment'}
-                              onAimToggle={() => startAim(l.id, 'moment')}
-                              presets={cyl ? [['um die Wellenachse (Torsion)', cyl.axis]] : []}
-                            />
-                            <p className="hint">Wirkt um den Schwerpunkt des Bereichs, linear verteilt wie bei einem starren Anschlussteil. Drehsinn nach der rechten Hand.</p>
-                          </>
-                        ) : l.kind === 'flow' ? (
-                          <>
-                            <div className="grid3">
-                              <label className="field">
-                                <span>Medium</span>
-                                <select value={l.medium ?? 'luft'} onChange={(e) => upd({ medium: e.target.value })}>
-                                  {Object.entries(MEDIA).map(([k, [lab]]) => (
-                                    <option key={k} value={k}>
-                                      {lab}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <NumField label="Geschwindigkeit" unit="m/s" value={l.velocity} onChange={(v) => upd({ velocity: v })} />
-                              <NumField label="c_w" value={l.cw} onChange={(v) => upd({ cw: v })} />
-                            </div>
-                            {l.medium === 'eigen' && <NumField label="Dichte" unit="kg/m³" value={l.rhoFluid} onChange={(v) => upd({ rhoFluid: v })} />}
-                            <VectorInput
-                              item={l}
-                              field="flowDir"
-                              labels={['x', 'y', 'z']}
-                              unit=""
-                              upd={upd}
-                              picking={false}
-                              onPick={() => {}}
-                              aiming={aim?.id === l.id && aim.field === 'flowDir'}
-                              onAimToggle={() => startAim(l.id, 'flowDir')}
-                              presets={[]}
-                            />
-                            <button className="link" onClick={() => upd({ surfaces: (mesh?.surfaces ?? []).map((x) => x.tag) })}>
-                              Alle Außenflächen wählen
-                            </button>
-                            <p className="hint">
-                              Staudruck × c_w = {fmt(flowPressurePa(l))} Pa auf alle angeströmten Flächen (Richtung = Strömungsrichtung). Überschlägig: keine Sogseite,
-                              keine Umströmung; c_w z. B. Platte quer 1,2, Zylinder 1,0, Kugel 0,5. Für genaue Strömungslasten wäre eine CFD-Rechnung nötig.
-                            </p>
-                          </>
-                        ) : l.kind === 'bearing' ? (
-                          <>
-                            <VectorInput
-                              item={l}
-                              field="force"
-                              labels={['Fx', 'Fy', 'Fz']}
-                              unit="N"
-                              upd={upd}
-                              picking={dirPick?.id === l.id && dirPick.key === 'force'}
-                              onPick={() => { setActive(null); setDrawing(null); setAim(null); setDirPick(dirPick ? null : { id: l.id, key: 'force' }) }}
-                              aiming={aim?.id === l.id && aim.field === 'force'}
-                              onAimToggle={() => startAim(l.id, 'force')}
-                              presets={[]}
-                            />
-                            <p className="hint">Kraft, mit der Bolzen bzw. Lager auf das Bauteil drücken. Sie wirkt nur auf der Hälfte, gegen die gedrückt wird (Druck ∝ cos φ).</p>
-                          </>
-                        ) : l.kind === 'force' ? (
-                          <>
-                            <VectorInput
-                              item={l}
-                              field="force"
-                              labels={['Fx', 'Fy', 'Fz']}
-                              unit="N"
-                              upd={upd}
-                              picking={dirPick?.id === l.id && dirPick.key === 'force'}
-                              onPick={() => { setActive(null); setDrawing(null); setAim(null); setDirPick(dirPick ? null : { id: l.id, key: 'force' }) }}
-                              aiming={aim?.id === l.id && aim.field === 'force'}
-                              onAimToggle={() => startAim(l.id, 'force')}
-                              presets={n ? [['senkrecht auf die gewählte Fläche', n.map((v) => -v)]] : []}
-                            />
-                          </>
-                        ) : (
-                          <NumField label="Druck (positiv = drückt auf die Fläche)" unit="MPa" value={l.pressure} onChange={(v) => upd({ pressure: v })} />
-                        )}
-                        <RegionEditor
-                          item={l}
-                          cyl={cyl}
-                          drawing={drawing?.id === l.id ? drawing : null}
-                          onStart={(shape) => startDrawing('load', l, shape)}
-                          onCancel={() => setDrawing(null)}
-                          onChange={(region) => upd({ region })}
-                        />
-                        <PickButton active={isActive} count={l.surfaces.length} onClick={() => { setDrawing(null); setActive(isActive ? null : { type: 'load', id: l.id }) }} />
-                      </div>
-                    )
-                  })}
-                  <button className="btn wide" onClick={() => { const l = newLoad(); setLoads([...loads, l]); setActive({ type: 'load', id: l.id }) }}>
-                    <Plus size={15} /> Last hinzufügen
-                  </button>
-                </Section>
-              )}
-
-              {mesh && (
-                <WeldSection
-                  welds={welds}
-                  setWelds={setWelds}
-                  gaps={gaps}
-                  setGaps={setGaps}
-                  active={active}
-                  setActive={(a) => { setDrawing(null); setActive(a) }}
-                  onFind={onFindGaps}
+                  )
+                ))}
+              {view === 'frame' && (
+                <FrameSidebar
+                  frame={frame}
+                  setFrame={setFrame}
+                  results={frameResults}
+                  onSolve={onFrameSolve}
+                  busy={!!busy}
+                  display={frameDisplay}
+                  setDisplay={setFrameDisplay}
+                  onSave={() =>
+                    api
+                      .saveBlob(new Blob([JSON.stringify({ format: 'projekt-fem-stabwerk', version: 1, ...frame }, null, 2)], { type: 'application/json' }), 'stabwerk.stab.json', 'Stabwerk', 'json')
+                      .catch((e) => setError(String(e)))
+                  }
+                  onOpen={async () => {
+                    try {
+                      const d = await api.openJson('Stabwerk', 'json')
+                      if (!d) return
+                      if (d.format !== 'projekt-fem-stabwerk') throw new Error('Keine Stabwerk-Datei')
+                      const { format, version, ...rest } = d // eslint-disable-line no-unused-vars
+                      setFrame({ ...newFrame(), ...rest })
+                    } catch (e) {
+                      setError(String(e))
+                    }
+                  }}
                 />
               )}
+              {view === 'study' && (
+                <StudyPanel
+                  study={study}
+                  setStudy={setStudy}
+                  params={studyParams}
+                  rows={studyRows}
+                  canRun={problems.length === 0 && !busy}
+                  onRun={runStudy}
+                  onCsv={exportStudyCsv}
+                  note={
+                    osVars?.error
+                      ? `Onshape-Variablen nicht abrufbar: ${osVars.error}`
+                      : Array.isArray(osVars) && !osVars.length
+                        ? 'Das Onshape-Teilestudio hat keine Variablen. In Onshape eine Variable anlegen (Feature „Variable“, z. B. #dicke) und im Maß verwenden.'
+                        : null
+                  }
+                />
+              )}
+              {view === 'geometry' && (
+                <GeometryPanel
+                  ops={geoOps}
+                  setOps={setGeoOps}
+                  pending={geoPending}
+                  info={geoInfo}
+                  warnings={geoWarnings}
+                  picking={geoPick}
+                  onPick={() => {
+                    setDrawing(null)
+                    setGeoPick(!geoPick)
+                  }}
+                  drawing={drawing?.type === 'geo' ? drawing : null}
+                  onDraw={(op) => {
+                    setGeoPick(false)
+                    setDrawing({ type: 'geo', id: op.id, shape: op.shape })
+                  }}
+                  onCancelDraw={() => setDrawing(null)}
+                  onApply={onApplyGeometry}
+                  busy={!!busy}
+                  modified={!!geoStep}
+                  onExport={exportGeo}
+                  mesh={mesh}
+                />
+              )}
+              {view === 'topo' && (
+                <TopoSection
+                  topo={topo}
+                  setTopo={setTopo}
+                  onTopo={onTopo}
+                  onTopoThreshold={onTopoThreshold}
+                  canTopo={supports.length > 0 && loads.length > 0 && problems.length === 0}
+                  onTopoStl={exportTopo}
+                />
+              )}
+            </aside>
 
-              {mesh && (
-                <div className="solve">
-                  <div className="row analysis-row">
-                    <div className="segmented small">
-                      {[['static', 'Statik'], ['modal', 'Eigenfrequenzen'], ['buckling', 'Knicken']].map(([k, l]) => (
-                        <button key={k} className={analysis === k ? 'on' : ''} onClick={() => setAnalysis(k)}>
-                          {l}
-                        </button>
-                      ))}
-                    </div>
-                    {analysis !== 'static' && (
-                      <label className="field mini">
-                        <div className="input-unit">
-                          <input value={modeCount} onChange={(e) => setModeCount(e.target.value)} title="Anzahl Moden" />
-                          <em>Moden</em>
-                        </div>
-                      </label>
-                    )}
+            <section className={'stage' + (view === 'frame' ? ' is-frame' : '')}>
+              {view === 'frame' && <FrameView frame={frame} results={frameResults} display={frameDisplay} />}
+              <Viewport
+                ref={viewRef}
+                mesh={mesh}
+                mode={mode}
+                surfaceTint={surfaceTint}
+                pickable={view === 'setup' || (geoPick && view === 'geometry')}
+                layers={material.layered && mode !== 'result' ? { dir: material.buildDir ?? [0, 0, 1] } : null}
+                onPick={onPick}
+                result={display}
+                showMesh={showMesh}
+                arrows={view === 'setup' ? arrows : []}
+                markers={mode === 'result' ? markers : []}
+                onProbe={probeOn ? setProbe : null}
+                drawing={view === 'setup' || view === 'geometry' ? drawing?.shape : null}
+                planeNormal={planeNormal}
+                onDraw={onDraw}
+                overlays={overlays}
+                topoShape={(view === 'geometry' || view === 'topo') && topo?.show ? topo.surface : null}
+                aim={view === 'setup' ? aimView : null}
+                onAim={onAim}
+                nav={nav}
+                look={look}
+              />
+              {aim && aimView && view === 'setup' && (
+                <div className="pick-hint aim-bar">
+                  <Move3d size={15} />
+                  <span>Griff am Pfeil ziehen</span>
+                  <div className="segmented small">
+                    {[['free', 'Frei'], ['xy', 'XY'], ['yz', 'YZ'], ['xz', 'XZ']].map(([k, lab]) => (
+                      <button key={k} className={aim.plane === k ? 'on' : ''} onClick={() => setAim({ ...aim, plane: k })} title={k === 'free' ? 'Frei im Raum' : `nur in der Ebene ${lab}`}>
+                        {lab}
+                      </button>
+                    ))}
                   </div>
-                  <button className="btn primary wide big" disabled={problems.length > 0 || !!busy} onClick={() => (analysis === 'static' ? onSolve() : onModes())}>
-                    <Play size={16} /> {analysis === 'static' ? 'Rechnen' : analysis === 'modal' ? 'Eigenfrequenzen rechnen' : 'Knicklasten rechnen'}
+                  <span className="aim-angle">{aimAngleText(aimView.dir, aim.plane)}</span>
+                  <span className="muted small">Umschalt = stufenlos</span>
+                  <button className="btn small" onClick={() => setAim(null)}>
+                    <Check size={14} /> Fertig
                   </button>
-                  {analysis === 'buckling' && <p className="hint">Knicklast = Lastfaktor × aufgebrachte Lasten (lineares Beulen/Knicken, ohne Imperfektionen).</p>}
-                  <label className="check">
-                    <input type="checkbox" checked={cadAuto} onChange={(e) => setCadAuto(e.target.checked)} /> Neue Version aus dem CAD automatisch neu rechnen
-                  </label>
-                  {problems.length > 0 && (
-                    <ul className="todo">
-                      {problems.map((p) => (
-                        <li key={p}>{p}</li>
-                      ))}
-                    </ul>
-                  )}
                 </div>
               )}
-            </>
-          ) : view === 'frame' ? (
-            <FrameSidebar
-              frame={frame}
-              setFrame={setFrame}
-              results={frameResults}
-              onSolve={onFrameSolve}
-              busy={!!busy}
-              display={frameDisplay}
-              setDisplay={setFrameDisplay}
-              onSave={() => api.saveBlob(new Blob([JSON.stringify({ format: 'projekt-fem-stabwerk', version: 1, ...frame }, null, 2)], { type: 'application/json' }), 'stabwerk.stab.json', 'Stabwerk', 'json').catch((e) => setError(String(e)))}
-              onOpen={async () => {
-                try {
-                  const d = await api.openJson('Stabwerk', 'json')
-                  if (!d) return
-                  if (d.format !== 'projekt-fem-stabwerk') throw new Error('Keine Stabwerk-Datei')
-                  const { format, version, ...rest } = d // eslint-disable-line no-unused-vars
-                  setFrame({ ...newFrame(), ...rest })
-                } catch (e) {
-                  setError(String(e))
-                }
-              }}
-            />
-          ) : view === 'study' ? (
-            <StudyPanel
-              study={study}
-              setStudy={setStudy}
-              params={studyParams}
-              rows={studyRows}
-              canRun={problems.length === 0 && !busy}
-              onRun={runStudy}
-              onCsv={exportStudyCsv}
-              note={
-                osVars?.error
-                  ? `Onshape-Variablen nicht abrufbar: ${osVars.error}`
-                  : Array.isArray(osVars) && !osVars.length
-                    ? 'Das Onshape-Teilestudio hat keine Variablen. In Onshape eine Variable anlegen (Feature „Variable“, z. B. #dicke) und im Maß verwenden.'
-                    : null
-              }
-            />
-          ) : view === 'geometry' ? (
-            <GeometryPanel
-              ops={geoOps}
-              setOps={setGeoOps}
-              pending={geoPending}
-              info={geoInfo}
-              warnings={geoWarnings}
-              picking={geoPick}
-              onPick={() => { setDrawing(null); setGeoPick(!geoPick) }}
-              drawing={drawing?.type === 'geo' ? drawing : null}
-              onDraw={(op) => { setGeoPick(false); setDrawing({ type: 'geo', id: op.id, shape: op.shape }) }}
-              onCancelDraw={() => setDrawing(null)}
-              onApply={onApplyGeometry}
-              busy={!!busy}
-              modified={!!geoStep}
-              topo={topo}
-              setTopo={setTopo}
-              onTopo={onTopo}
-              onTopoThreshold={onTopoThreshold}
-              canTopo={supports.length > 0 && loads.length > 0 && problems.length === 0}
-              onTopoStl={() => api.exportTopoStl(topo.threshold, (stepPath ?? 'bauteil').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') + '_leichtbau.stl').catch((e) => setError(String(e)))}
-              onExport={() => api.exportStep(geoStep, (stepPath ?? 'geometrie').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') + '_geaendert.step').catch((e) => setError(String(e)))}
-              mesh={mesh}
-            />
-          ) : showModes ? (
-            <ModesPanel modes={modes} setModes={setModes} loads={loads} />
-          ) : (
-            result && (
-              <ResultPanel
-                result={result}
-                material={material}
-                quantity={quantity}
-                setQuantity={setQuantity}
-                deform={deform}
-                setDeform={setDeform}
-                display={display}
-                showMesh={showMesh}
-                setShowMesh={setShowMesh}
-                stale={resultStale}
-                onExport={onExportVtu}
-                onReport={onReport}
-                anim={anim}
-                setAnim={setAnim}
-                onVideo={onVideo}
-                onMathpad={onExportMathpad}
-                cut={cut}
-                setCut={setCut}
-                proof={proof}
-                reference={reference}
-                current={summary(result, mesh, geoStep ? 'Geändert' : 'Aktuell')}
-                onPin={() => setReference(summary(result, mesh, geoStep ? 'Geändert' : 'Vorher'))}
-                onUnpin={() => setReference(null)}
-              />
-            )
-          )}
-        </aside>
-
-        <section className="stage">
-          {view === 'frame' && <FrameView frame={frame} results={frameResults} display={frameDisplay} />}
-          {!mesh && !busy && view !== 'frame' && (
-            <div className="empty">
-              <Layers size={40} strokeWidth={1.4} />
-              <h2>Bauteil öffnen</h2>
-              <p>STEP-Datei aus deinem CAD laden (Einheit mm). Danach Werkstoff, Lager und Lasten festlegen und rechnen.</p>
-              <button className="btn primary" onClick={onOpenStep} disabled={!gmsh}>
-                <FileUp size={15} /> STEP-Datei öffnen
-              </button>
-            </div>
-          )}
-          <Viewport
-            ref={viewRef}
-            mesh={mesh}
-            mode={mode}
-            surfaceTint={surfaceTint}
-            pickable={((!!active || !!dirPick || bedPick) && view === 'setup') || (geoPick && view === 'geometry')}
-            layers={material.layered && mode !== 'result' ? { dir: material.buildDir ?? [0, 0, 1] } : null}
-            onPick={onPick}
-            result={display}
-            showMesh={showMesh}
-            arrows={view === 'setup' ? arrows : []}
-            markers={mode === 'result' ? markers : []}
-            onProbe={setProbe}
-            drawing={view === 'setup' || view === 'geometry' ? drawing?.shape : null}
-            planeNormal={planeNormal}
-            onDraw={onDraw}
-            overlays={overlays}
-            topoShape={view === 'geometry' && topo?.show ? topo.surface : null}
-            aim={view === 'setup' ? aimView : null}
-            onAim={onAim}
-          />
-          {aim && aimView && view === 'setup' && (
-            <div className="pick-hint aim-bar">
-              <Move3d size={15} />
-              <span>Griff am Pfeil ziehen</span>
-              <div className="segmented small">
-                {[['free', 'Frei'], ['xy', 'XY'], ['yz', 'YZ'], ['xz', 'XZ']].map(([k, lab]) => (
-                  <button key={k} className={aim.plane === k ? 'on' : ''} onClick={() => setAim({ ...aim, plane: k })} title={k === 'free' ? 'Frei im Raum' : `nur in der Ebene ${lab}`}>
-                    {lab}
+              {dirPick && view === 'setup' && (
+                <div className="pick-hint">
+                  <MousePointerClick size={15} />
+                  Fläche anklicken: Richtung senkrecht darauf (ebene Fläche) oder entlang der Achse (Bohrung/Welle)
+                  <button className="btn small" onClick={() => setDirPick(null)}>
+                    <X size={14} /> Abbrechen
                   </button>
-                ))}
-              </div>
-              <span className="aim-angle">{aimAngleText(aimView.dir, aim.plane)}</span>
-              <span className="muted small">Umschalt = stufenlos</span>
-              <button className="btn small" onClick={() => setAim(null)}>
-                <Check size={14} /> Fertig
-              </button>
-            </div>
-          )}
-          {dirPick && view === 'setup' && (
-            <div className="pick-hint">
-              <MousePointerClick size={15} />
-              Fläche anklicken: Richtung senkrecht darauf (ebene Fläche) oder entlang der Achse (Bohrung/Welle)
-              <button className="btn small" onClick={() => setDirPick(null)}>
-                <X size={14} /> Abbrechen
-              </button>
-            </div>
-          )}
-          {bedPick && view === 'setup' && (
-            <div className="pick-hint">
-              <MousePointerClick size={15} />
-              Fläche anklicken, die auf dem Druckbett liegt
-              <button className="btn small" onClick={() => setBedPick(false)}>
-                <X size={14} /> Abbrechen
-              </button>
-            </div>
-          )}
-          {geoPick && view === 'geometry' && (
-            <div className="pick-hint">
-              <MousePointerClick size={15} />
-              Radius- oder Bohrungsfläche anklicken
-              <button className="btn small" onClick={() => setGeoPick(false)}>
-                <X size={14} /> Abbrechen
-              </button>
-            </div>
-          )}
-          {drawing && (view === 'setup' || view === 'geometry') && (
-            <div className="pick-hint">
-              <PenLine size={15} />
-              {drawing.shape === 'band'
-                ? 'Auf der Welle/Bohrung drücken und entlang der Achse ziehen (quer ziehen = nur ein Winkelbereich)'
-                : `${SHAPES[drawing.shape]} auf die Fläche zeichnen: drücken und ziehen`}
-              <button className="btn small" onClick={() => setDrawing(null)}>
-                <X size={14} /> Abbrechen
-              </button>
-            </div>
-          )}
-          {active && view === 'setup' && (
-            <div className="pick-hint">
-              <MousePointerClick size={15} />
-              Flächen anklicken, um sie {active.type === 'support' ? 'dem Lager' : 'der Last'} hinzuzufügen oder zu entfernen
-              <button className="btn small" onClick={() => setActive(null)}>
-                <Check size={14} /> Fertig
-              </button>
-            </div>
-          )}
-          {mode === 'result' && display && (
-            <Legend display={display} quantity={display.modal ? { label: modes.kind === 'modal' ? 'Schwingform' : 'Knickform', unit: '', hint: 'relativ' } : QUANTITIES[quantity]} />
-          )}
-          {mode === 'result' && probe && display && (
-            <div className="probe">
-              <button className="icon-btn" onClick={() => setProbe(null)}>
-                <X size={14} />
-              </button>
-              <div className="probe-title">Messpunkt</div>
-              <div>{QUANTITIES[quantity].label}: <strong>{fmt(display.values[probe.node])} {QUANTITIES[quantity].unit}</strong></div>
-              <div className="muted">bei {fmtVec([0, 1, 2].map((k) => mesh.positions[3 * probe.node + k]))} mm (unverformt)</div>
-            </div>
-          )}
-          {busy && (
-            <div className="busy">
-              <Loader2 size={22} className="spin" />
-              <div className="busy-text">
-                <div>{busy}</div>
-                {progressInfo && <div className="busy-detail">{progressInfo.text}</div>}
-                {progressInfo?.fraction != null && (
-                  <div className="progress-bar">
-                    <div style={{ width: `${Math.round(100 * progressInfo.fraction)}%` }} />
+                </div>
+              )}
+              {bedPick && view === 'setup' && (
+                <div className="pick-hint">
+                  <MousePointerClick size={15} />
+                  Fläche anklicken, die auf dem Druckbett liegt
+                  <button className="btn small" onClick={() => setBedPick(false)}>
+                    <X size={14} /> Abbrechen
+                  </button>
+                </div>
+              )}
+              {geoPick && view === 'geometry' && (
+                <div className="pick-hint">
+                  <MousePointerClick size={15} />
+                  Radius- oder Bohrungsfläche anklicken
+                  <button className="btn small" onClick={() => setGeoPick(false)}>
+                    <X size={14} /> Abbrechen
+                  </button>
+                </div>
+              )}
+              {drawing && (view === 'setup' || view === 'geometry') && (
+                <div className="pick-hint">
+                  <PenLine size={15} />
+                  {drawing.shape === 'band'
+                    ? 'Auf der Welle/Bohrung drücken und entlang der Achse ziehen (quer ziehen = nur ein Winkelbereich)'
+                    : `${SHAPES[drawing.shape]} auf die Fläche zeichnen: drücken und ziehen`}
+                  <button className="btn small" onClick={() => setDrawing(null)}>
+                    <X size={14} /> Abbrechen
+                  </button>
+                </div>
+              )}
+              {active && view === 'setup' && (
+                <div className="pick-hint">
+                  <MousePointerClick size={15} />
+                  {active.type === 'weldA' || active.type === 'weldB'
+                    ? `Fläche ${active.type === 'weldA' ? 'A' : 'B'} der Naht anklicken`
+                    : `Flächen anklicken, um sie ${active.type === 'support' ? 'dem Lager' : 'der Last'} hinzuzufügen oder zu entfernen`}
+                  <button className="btn small primary" onClick={() => setActive(null)}>
+                    <Check size={14} /> Fertig
+                  </button>
+                </div>
+              )}
+              {mode === 'result' && display && (
+                <Legend display={display} quantity={display.modal ? { label: modes.kind === 'modal' ? 'Schwingform' : 'Knickform', unit: '', hint: 'relativ' } : QUANTITIES[quantity]} />
+              )}
+              {mode === 'result' && probe && display && !display.modal && (
+                <div className="probe">
+                  <button className="icon-btn" onClick={() => setProbe(null)} aria-label="Messpunkt schließen">
+                    <X size={14} />
+                  </button>
+                  <div className="probe-title">Messpunkt</div>
+                  <div>
+                    {probeQ.label}:{' '}
+                    <strong>
+                      {display.reverse && display.values[probe.node] >= 10 ? '≥ 10' : fmt(display.values[probe.node])} {probeQ.unit}
+                    </strong>
                   </div>
-                )}
-              </div>
+                  {probeVals && (
+                    <div className="muted">
+                      σv {fmt(probeVals.vm)} MPa · u {fmt(probeVals.u)} mm{probeVals.s != null ? ` · S ${probeVals.s >= 10 ? '≥ 10' : fmt(probeVals.s)}` : ''}
+                    </div>
+                  )}
+                  <div className="muted">bei {fmtVec([0, 1, 2].map((k) => mesh.positions[3 * probe.node + k]))} mm (unverformt)</div>
+                </div>
+              )}
+
+              {view === 'setup' && mesh && !drawing && !aim && !dirPick && !bedPick && (
+                <div className="float-bar">
+                  <div className="tb" role="toolbar" aria-label="Modell">
+                    <button className="btn small" disabled title="Kommt bald: eine Fläche mit Linie, Rechteck oder Kreis teilen">
+                      <I.IcSplit /> Fläche teilen <span className="soon">bald</span>
+                    </button>
+                    <button className={'btn small' + (showMesh ? ' on' : '')} onClick={() => setShowMesh(!showMesh)}>
+                      <Grid2x2 size={14} /> Netz
+                    </button>
+                    <span className="div" />
+                    <span className="tb-hint">{NAV_PRESETS[nav.preset]?.help}</span>
+                    <button className="btn small ghost" title="Maus und Trackpad einstellen" aria-label="Maus und Trackpad einstellen" onClick={() => setDlg('settings:nav')}>
+                      <I.IcSliders size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {mode === 'result' && display && !display.modal && (
+                <div className="float-bar">
+                  <div className="tb" role="toolbar" aria-label="Darstellung">
+                    <span className="tb-label">Verformung</span>
+                    <div className="segmented small">
+                      <button className={deform === 'off' ? 'on' : ''} onClick={() => setDeform('off')}>
+                        aus
+                      </button>
+                      <button className={deform === 'true' ? 'on' : ''} onClick={() => setDeform('true')} title="maßstäblich">
+                        1:1
+                      </button>
+                      <button className={deform === 'auto' ? 'on' : ''} onClick={() => setDeform('auto')} title="überhöht, damit man sie sieht">
+                        ×{fmt(display.auto)}
+                      </button>
+                    </div>
+                    <button className={'btn small' + (anim.on ? ' on' : '')} onClick={() => setAnim({ ...anim, on: !anim.on })} title="Last von 0 auf 100 % steigern und zurück">
+                      {anim.on ? <I.IcPause size={12} /> : <I.IcPlay size={12} />} Animation
+                    </button>
+                    {anim.on && (
+                      <div className="segmented small">
+                        {[[0.5, '½×'], [1, '1×'], [2, '2×']].map(([v, lab]) => (
+                          <button key={v} className={anim.speed === v ? 'on' : ''} onClick={() => setAnim({ ...anim, speed: v })}>
+                            {lab}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <span className="div" />
+                    <button className={'btn small' + (cut.on ? ' on' : '')} onClick={() => setCut({ ...cut, on: !cut.on })} title="Schnitt: ins Bauteil schauen">
+                      <I.IcCut /> Schnitt
+                    </button>
+                    <button
+                      className={'btn small' + (iso.on ? ' on' : '')}
+                      disabled={quantity === 'shell'}
+                      onClick={() => setIso({ ...iso, on: !iso.on })}
+                      title="Iso-Clip: nur Bereiche über (oder unter) einem Wert farbig zeigen"
+                    >
+                      <I.IcIso /> Iso-Clip
+                    </button>
+                    <button
+                      className={'btn small' + (probeOn ? ' on' : '')}
+                      onClick={() => {
+                        setProbeOn(!probeOn)
+                        setProbe(null)
+                      }}
+                      title="Messen: auf das Bauteil klicken zeigt die Werte an dieser Stelle"
+                    >
+                      <I.IcProbe /> Messen
+                    </button>
+                    <button className={'btn small' + (showMesh ? ' on' : '')} onClick={() => setShowMesh(!showMesh)}>
+                      Netz
+                    </button>
+                    <button className={'btn small' + (minmax ? ' on' : '')} onClick={() => setMinmax(!minmax)} title="Größt-/Kleinstwert markieren">
+                      Min/Max
+                    </button>
+                    <button className="btn small" disabled={anim.recording} onClick={onVideo} title="Video der Verformung mit Farbskala speichern" aria-label="Video speichern">
+                      {anim.recording ? <Loader2 size={14} className="spin" /> : <Video size={14} />}
+                    </button>
+                    {cut.on && (
+                      <div className="tb-row">
+                        <span className="tb-label">Schnittebene</span>
+                        <div className="segmented small">
+                          {['X', 'Y', 'Z'].map((a, k) => (
+                            <button key={a} className={cut.axis === k ? 'on' : ''} onClick={() => setCut({ ...cut, axis: k })}>
+                              {a}
+                            </button>
+                          ))}
+                        </div>
+                        <input type="range" className="slim-range grow" min={0} max={100} step={0.5} value={cut.pos} aria-label="Lage der Schnittebene" onChange={(e) => setCut({ ...cut, pos: Number(e.target.value) })} />
+                        <button className="btn small" onClick={() => setCut({ ...cut, flip: !cut.flip })}>
+                          ⇄ Seite
+                        </button>
+                      </div>
+                    )}
+                    {iso.on && quantity !== 'shell' && (
+                      <div className="tb-row">
+                        <span className="tb-label">Zeige nur {QUANTITIES[quantity].label}</span>
+                        <div className="segmented small">
+                          <button className={iso.above ? 'on' : ''} onClick={() => setIso({ ...iso, above: true })}>
+                            über
+                          </button>
+                          <button className={!iso.above ? 'on' : ''} onClick={() => setIso({ ...iso, above: false })}>
+                            unter
+                          </button>
+                        </div>
+                        <input type="range" className="slim-range grow" min={0} max={1} step={0.005} value={iso.t} aria-label="Schwellwert" onChange={(e) => setIso({ ...iso, t: Number(e.target.value) })} />
+                        <b className="tb-val">
+                          {fmt(display.min + iso.t * (display.max - display.min))} {QUANTITIES[quantity].unit}
+                        </b>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {mode === 'result' && display?.modal && (
+                <div className="float-bar">
+                  <div className="tb" role="toolbar" aria-label="Darstellung">
+                    <button className={'btn small' + (modes.animate ? ' on' : '')} onClick={() => setModes({ ...modes, animate: !modes.animate })}>
+                      {modes.animate ? <I.IcPause size={12} /> : <I.IcPlay size={12} />} Animation
+                    </button>
+                    <button className={'btn small' + (showMesh ? ' on' : '')} onClick={() => setShowMesh(!showMesh)}>
+                      Netz
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          </>
+        )}
+
+        {busy && (
+          <div className="busy">
+            <Loader2 size={22} className="spin" />
+            <div className="busy-text">
+              <div>{busy}</div>
+              {progressInfo && <div className="busy-detail">{progressInfo.text}</div>}
+              {progressInfo?.fraction != null && (
+                <div className="progress-bar">
+                  <div style={{ width: `${Math.round(100 * progressInfo.fraction)}%` }} />
+                </div>
+              )}
             </div>
-          )}
-          {notice && (
-            <div className="toast notice-toast">
-              <Check size={16} />
-              <span>{notice}</span>
-              <button className="icon-btn" onClick={() => setNotice(null)}>
-                <X size={14} />
-              </button>
-            </div>
-          )}
-          {error && (
-            <div className="toast error">
-              <TriangleAlert size={16} />
-              <span>{error}</span>
-              <button className="icon-btn" onClick={() => setError(null)}>
-                <X size={14} />
-              </button>
-            </div>
-          )}
-        </section>
+          </div>
+        )}
+        {notice && (
+          <div className="toast notice-toast">
+            <Check size={16} />
+            <span>{notice}</span>
+            <button className="icon-btn" onClick={() => setNotice(null)} aria-label="Schließen">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        {error && (
+          <div className="toast error">
+            <TriangleAlert size={16} />
+            <span>{error}</span>
+            <button className="icon-btn" onClick={() => setError(null)} aria-label="Schließen">
+              <X size={14} />
+            </button>
+          </div>
+        )}
       </div>
+
+      {dlg === 'onshape' && <OnshapeLibrary onClose={() => setDlg(null)} onError={(e) => setError(String(e))} />}
+      {dlg?.startsWith('settings') && <Settings tab={dlg.split(':')[1] ?? 'nav'} onClose={() => setDlg(null)} onError={(e) => setError(String(e))} />}
+    </div>
+  )
+}
+
+// --- Bausteine der neuen Oberfläche ---------------------------------------------------------------
+
+function PropsHead({ title, onDelete }) {
+  return (
+    <div className="props-head">
+      <h3>{title}</h3>
+      <span className="spacer" />
+      {onDelete && (
+        <button className="icon-btn" title="Löschen" aria-label={`${title} löschen`} onClick={onDelete}>
+          <Trash2 size={15} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Eintrag im Studienbaum: Symbol, Titel, Kurzfassung, Status (grün = fertig, Kreis = offen)
+function TreeRow({ icon: Icon, color, title, sum, state, on, onClick, sub, muted }) {
+  return (
+    <button className={'ti' + (on ? ' on' : '') + (sub ? ' sub' : '') + (muted ? ' muted' : '')} role="treeitem" aria-selected={on} onClick={onClick}>
+      <Icon size={sub ? 16 : 18} style={{ color: color ?? undefined }} />
+      <span className="ti-text">
+        <b>{title}</b>
+        {sum && <span className="sum">{sum}</span>}
+      </span>
+      {state ? <span className={'dot ' + state} title={state === 'ok' ? 'festgelegt' : 'noch offen'} /> : <span />}
+    </button>
+  )
+}
+
+function TreeGroup({ icon: Icon, color, title, count, onAdd, addTitle }) {
+  return (
+    <div className="tg">
+      <Icon size={18} style={{ color }} />
+      <b>
+        {title}
+        {count ? ` (${count})` : ''}
+      </b>
+      {!count && <span className="sum">noch keins</span>}
+      <span className="spacer" />
+      <button className="btn small add" onClick={onAdd} title={addTitle} aria-label={addTitle}>
+        <Plus size={14} /> neu
+      </button>
+    </div>
+  )
+}
+
+// aufklappbarer Bereich für seltener gebrauchte Einstellungen
+function More({ title, open: initial = false, children }) {
+  const [open, setOpen] = useState(initial)
+  return (
+    <div className={'more' + (open ? ' open' : '')}>
+      <button className="more-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {title}
+      </button>
+      {open && <div className="more-body">{children}</div>}
+    </div>
+  )
+}
+
+// Zahl mit Einheit; Komma oder Punkt; meldet nur gültige Zahlen
+function NumInput({ value, unit, onChange }) {
+  const [text, setText] = useState(null)
+  const shown = text ?? (Number.isFinite(value) ? String(Number(Number(value).toPrecision(6))).replace('.', ',') : '')
+  return (
+    <div className="input-unit">
+      <input
+        value={shown}
+        inputMode="decimal"
+        onFocus={() => setText(shown)}
+        onBlur={() => setText(null)}
+        onChange={(e) => {
+          setText(e.target.value)
+          const v = Number(e.target.value.replace(',', '.'))
+          if (e.target.value.trim() !== '' && Number.isFinite(v) && v >= 0) onChange(v)
+        }}
+      />
+      {unit && <em>{unit}</em>}
+    </div>
+  )
+}
+
+// Ergebnis: Urteil oben (grün/rot), Größe wählen, Kennwerte, Details zum Aufklappen
+function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, canRerun, onRerun, reference, current, onPin, onUnpin, detailsOpen, setDetailsOpen }) {
+  const rho = Number(material.rho)
+  const massG = rho > 0 ? (result.solid_volume / 1000) * rho : null
+  const rows = proofRows(result, proof)
+  const wrows = weldRows(result, material)
+  const weldBad = wrows.some((w) => w.util != null && w.util > 1)
+  const sf = result.safety
+  const hasYield = material.yield !== '' && material.yield != null
+  let tone
+  let title
+  const lines = []
+  if (rows.length) {
+    const ok = rows.every((r) => r[3] <= 1) && !weldBad
+    tone = ok ? 'good' : 'bad'
+    title = ok ? 'Nachweis erfüllt' : 'Nachweis nicht erfüllt'
+    for (const [lab, have, need] of rows)
+      lines.push(
+        lab === 'Verformung' ? (
+          <>
+            Verformung <b>{fmt(have)} mm</b>, zulässig {fmt(need)} mm
+          </>
+        ) : (
+          <>
+            {lab === 'Bruch (Rm)' ? 'Bruch' : hasYield ? 'Fließen' : 'Festigkeit'} <b>S = {fmt(have)}</b>, nötig {fmt(need)}
+          </>
+        ),
+      )
+    if (weldBad) lines.push(<>Schweißnaht überlastet – siehe unten</>)
+  } else if (sf != null) {
+    tone = sf >= 1.5 ? 'good' : sf >= 1 ? 'ok' : 'bad'
+    title = `Sicherheit S = ${fmt(sf)}`
+    lines.push(sf < 1 ? 'Festigkeit überschritten' : 'ohne Nachweis – erforderliche Sicherheit beim Werkstoff angeben')
+  } else {
+    tone = 'neutral'
+    title = 'Ergebnis'
+    lines.push('Für Sicherheit und Nachweis Re oder Rm beim Werkstoff angeben')
+  }
+  const basis = result.governing
+    ? `mit Schichtaufbau, maßgeblich: ${result.governing}`
+    : hasYield
+      ? `gegen Fließen, Re = ${fmt(Number(material.yield))} MPa`
+      : material.tensile !== '' && material.tensile != null
+        ? `gegen Bruch, Rm = ${fmt(Number(material.tensile))} MPa`
+        : ''
+  const singular = result.warnings.some((w) => w.includes('direkt an einem Lager'))
+  const avail = (k) => !(FIELD_OF[k] && FIELD_OF[k][0] !== 'von_mises' && !result[FIELD_OF[k][0]] && !['sigma1', 'sigma3'].includes(k))
+  const chips = [['von_mises', 'σv Spannung'], ['disp', 'u Verformung'], ...(result.utilization ? [['safety', 'S Sicherheit']] : [])]
+  const more = Object.keys(QUANTITIES).filter((k) => !chips.some((c) => c[0] === k) && avail(k))
+  const loadMag = Math.hypot(...result.total_load) || 1
+  const balance = Math.hypot(...result.total_load.map((v, k) => v + result.total_reaction[k]))
+  return (
+    <div className="result-side">
+      {stale && (
+        <div className="notice warn">
+          <TriangleAlert size={16} />
+          <div>
+            Modell geändert – das Ergebnis gehört zum vorherigen Stand.{' '}
+            {canRerun && (
+              <button className="link inline" onClick={onRerun}>
+                Neu rechnen
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      <div className={'verdict ' + tone}>
+        {tone === 'good' ? <Check size={22} /> : tone === 'neutral' ? <CircleGauge size={22} /> : <TriangleAlert size={22} />}
+        <div>
+          <div className="verdict-title">{title}</div>
+          {lines.map((l, i) => (
+            <div key={i}>{l}</div>
+          ))}
+          <div className="verdict-basis">
+            {material.name}
+            {basis ? ` · ${basis}` : ''}
+          </div>
+          {singular && <div className="verdict-basis">Spitze direkt an einem Lager – dort nicht bewerten (siehe Details)</div>}
+        </div>
+      </div>
+      <WeldCard result={result} material={material} />
+      <div className="chips" role="group" aria-label="Ergebnisgröße">
+        {chips.map(([k, lab]) => (
+          <button key={k} className={'chip' + (quantity === k ? ' on' : '')} onClick={() => setQuantity(k)}>
+            {lab}
+          </button>
+        ))}
+        {more.length > 0 && (
+          <select className={'chip' + (more.includes(quantity) ? ' on' : '')} value={more.includes(quantity) ? quantity : ''} onChange={(e) => e.target.value && setQuantity(e.target.value)} aria-label="weitere Größen">
+            <option value="">mehr …</option>
+            {more.map((k) => (
+              <option key={k} value={k}>
+                {QUANTITIES[k].label}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      <div className="card">
+        <Stat label="max. Vergleichsspannung σv" value={`${fmt(result.max_von_mises.value)} MPa`} />
+        <Stat label="max. Verformung" value={`${fmt(result.max_displacement.value)} mm`} />
+        {massG != null && <Stat label="Masse" value={massG >= 1000 ? `${fmt(massG / 1000)} kg` : `${fmt(massG)} g`} />}
+      </div>
+      {reference && !stale ? (
+        <Compare reference={reference} current={current} onUnpin={onUnpin} />
+      ) : (
+        !reference && (
+          <button className="link" onClick={onPin}>
+            Ergebnis zum Vergleichen merken
+          </button>
+        )
+      )}
+      <button className="more-head" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>
+        {detailsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Details: Lagerkräfte, Hinweise, Rechnung
+      </button>
+      {detailsOpen && (
+        <div className="card details">
+          <Stat label="Hauptspannung σ1 / σ3" value={`${fmt(result.max_sigma1.value)} / ${fmt(result.min_sigma3.value)} MPa`} />
+          {result.safety_break != null && hasYield && Math.abs(result.safety_break - (sf ?? 0)) > 1e-6 && <Stat label="Sicherheit gegen Bruch" value={`S = ${fmt(result.safety_break)}`} />}
+          {result.reactions.map((r, i) => (
+            <Stat key={i} label={`Lagerkraft Lager ${i + 1}`} value={fmtVec(clean(r, loadMag)) + ' N'} />
+          ))}
+          <Stat label="Gleichgewicht" value={balance < 1e-6 * loadMag ? 'erfüllt' : `Abweichung ${fmt(balance)} N`} />
+          <Stat
+            label="Rechnung"
+            value={`${result.equations.toLocaleString('de-DE')} Unbekannte · ${fmt(result.seconds)} s${result.iterations != null ? ` · ${result.iterations} Iterationen` : ''}`}
+          />
+          {result.warnings.map((w) => (
+            <div key={w} className="detail-warn">
+              <TriangleAlert size={14} />
+              <span>{w}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="hint">Tipp: Auf das Bauteil klicken zeigt die Werte an dieser Stelle (Messen).</p>
     </div>
   )
 }
@@ -2194,153 +3192,6 @@ function Compare({ reference, current, onUnpin }) {
   )
 }
 
-function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, onReport, onMathpad, reference, current, onPin, onUnpin, cut, setCut, proof, anim, setAnim, onVideo }) {
-  const rho = Number(material.rho)
-  const massG = rho > 0 ? (result.solid_volume / 1000) * rho : null
-  const sf = result.safety
-  const sfClass = sf == null ? '' : sf >= 1.5 ? 'good' : sf >= 1 ? 'ok' : 'bad'
-  const balance = Math.hypot(...result.total_load.map((v, k) => v + result.total_reaction[k]))
-  const loadMag = Math.hypot(...result.total_load) || 1
-  return (
-    <>
-      {stale && (
-        <div className="notice warn">
-          <TriangleAlert size={16} />
-          <div>Das Modell wurde geändert. Das Ergebnis gehört noch zum vorherigen Stand – neu rechnen.</div>
-        </div>
-      )}
-      {reference && !stale ? (
-        <Compare reference={reference} current={current} onUnpin={onUnpin} />
-      ) : (
-        !reference && (
-          <button className="link" onClick={onPin}>
-            Dieses Ergebnis zum Vergleichen merken
-          </button>
-        )
-      )}
-      {sf != null && (
-        <div className={'safety ' + sfClass}>
-          <CircleGauge size={22} />
-          <div>
-            <div className="safety-value">S = {fmt(sf)}</div>
-            <div className="safety-text">
-              {result.governing
-                ? `Sicherheit mit Schichtaufbau (${material.name}, Aufbaurichtung ${dirName(material.buildDir ?? [0, 0, 1])}) – maßgeblich: ${result.governing}`
-                : material.yield !== '' && material.yield != null
-                  ? `Sicherheit gegen Fließen (${material.name}, Re = ${fmt(Number(material.yield))} MPa)`
-                  : `Sicherheit gegen Bruch (${material.name}, Rm = ${fmt(Number(material.tensile))} MPa)`}
-              {sf < 1 ? ' – Festigkeit überschritten' : ''}
-              {result.safety_break != null && material.yield !== '' && material.yield != null && Math.abs(result.safety_break - sf) > 1e-6 && (
-                <div>gegen Bruch (Rm): S = {fmt(result.safety_break)}</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      <ProofCard result={result} proof={proof} />
-      <WeldCard result={result} material={material} />
-      <div className="card">
-        {massG != null && <Stat label="Masse" value={massG >= 1000 ? `${fmt(massG / 1000)} kg` : `${fmt(massG)} g`} />}
-        <Stat label="max. Vergleichsspannung" value={`${fmt(result.max_von_mises.value)} MPa`} />
-        <Stat label="max. Verschiebung" value={`${fmt(result.max_displacement.value)} mm`} />
-        <Stat label="größte Hauptspannung σ1" value={`${fmt(result.max_sigma1.value)} MPa`} />
-        <Stat label="kleinste Hauptspannung σ3" value={`${fmt(result.min_sigma3.value)} MPa`} />
-      </div>
-      {result.warnings.map((w) => (
-        <div key={w} className="notice warn">
-          <TriangleAlert size={16} />
-          <div>{w}</div>
-        </div>
-      ))}
-
-      <h3 className="sub">Darstellung</h3>
-      <div className="quantities">
-        {Object.entries(QUANTITIES).map(([k, q]) => (
-          <button key={k} className={'q' + (quantity === k ? ' on' : '')} disabled={FIELD_OF[k] && FIELD_OF[k][0] !== 'von_mises' && !result[FIELD_OF[k][0]] && !['sigma1', 'sigma3'].includes(k)} onClick={() => setQuantity(k)}>
-            <span>{q.label}</span>
-            <em>{q.hint}</em>
-          </button>
-        ))}
-      </div>
-      <div className="field">
-        <span>Verformung</span>
-        <div className="segmented small">
-          <button className={deform === 'off' ? 'on' : ''} onClick={() => setDeform('off')}>Aus</button>
-          <button className={deform === 'true' ? 'on' : ''} onClick={() => setDeform('true')}>Echt 1:1</button>
-          <button className={deform === 'auto' ? 'on' : ''} onClick={() => setDeform('auto')}>
-            Überhöht{display?.auto ? ` ×${fmt(display.auto)}` : ''}
-          </button>
-        </div>
-      </div>
-      <div className="anim-row">
-        <button className={'btn small' + (anim.on ? ' on' : '')} onClick={() => setAnim({ ...anim, on: !anim.on })} title="Last von 0 auf 100 % steigern und zurück">
-          {anim.on ? <Pause size={13} /> : <Play size={13} />} {anim.on ? 'Anhalten' : 'Animation'}
-        </button>
-        <div className="segmented small">
-          {[[0.5, '½×'], [1, '1×'], [2, '2×']].map(([v, l]) => (
-            <button key={v} className={anim.speed === v ? 'on' : ''} onClick={() => setAnim({ ...anim, speed: v })}>
-              {l}
-            </button>
-          ))}
-        </div>
-        <button className="btn small" disabled={anim.recording} onClick={onVideo} title="Video der Verformung mit Farbskala speichern">
-          {anim.recording ? <Loader2 size={13} className="spin" /> : <Video size={13} />} {anim.recording ? 'Nimmt auf …' : 'Video'}
-        </button>
-      </div>
-      <label className="check">
-        <input type="checkbox" checked={showMesh} onChange={(e) => setShowMesh(e.target.checked)} /> Netz anzeigen
-      </label>
-      <div className="cut-box">
-        <label className="check">
-          <input type="checkbox" checked={cut.on} onChange={(e) => setCut({ ...cut, on: e.target.checked })} /> Schnitt (ins Bauteil schauen)
-        </label>
-        {cut.on && (
-          <>
-            <div className="row">
-              <div className="segmented small">
-                {['X', 'Y', 'Z'].map((a, k) => (
-                  <button key={a} className={cut.axis === k ? 'on' : ''} onClick={() => setCut({ ...cut, axis: k })}>
-                    {a}
-                  </button>
-                ))}
-              </div>
-              <button className="btn small" onClick={() => setCut({ ...cut, flip: !cut.flip })}>
-                ⇄ Seite
-              </button>
-            </div>
-            <input type="range" className="slim-range" min={0} max={100} step={0.5} value={cut.pos} onChange={(e) => setCut({ ...cut, pos: Number(e.target.value) })} />
-          </>
-        )}
-      </div>
-      <p className="hint">Auf das Bauteil klicken, um den Wert an einer Stelle abzulesen.</p>
-
-      <h3 className="sub">Lagerkräfte</h3>
-      <div className="card">
-        {result.reactions.map((r, i) => (
-          <Stat key={i} label={`Lager ${i + 1}`} value={fmtVec(clean(r, loadMag)) + ' N'} />
-        ))}
-        <Stat
-          label="Gleichgewicht"
-          value={balance < 1e-6 * loadMag ? 'erfüllt' : `Abweichung ${fmt(balance)} N`}
-        />
-      </div>
-      <p className="hint">
-        {result.equations.toLocaleString('de-DE')} Unbekannte, gerechnet in {fmt(result.seconds)} s
-        {result.iterations != null && ` (iterativer Löser, ${result.iterations} Iterationen)`}
-      </p>
-      <button className="btn wide primary" onClick={onReport} disabled={stale}>
-        <Download size={15} /> Bericht als PDF
-      </button>
-      <button className="btn wide" onClick={onMathpad} disabled={stale}>
-        <Download size={15} /> Nach MathPad (.mathpad)
-      </button>
-      <button className="btn wide" onClick={onExport}>
-        <Download size={15} /> Ergebnis für ParaView exportieren (.vtu)
-      </button>
-    </>
-  )
-}
-
 // Rundungsrauschen (z. B. 3e-9 N bei 1500 N Last, iterativer Löser ~1e-7) als 0 anzeigen
 function clean(v, ref) {
   return v.map((x) => (Math.abs(x) < 1e-6 * ref ? 0 : x))
@@ -2356,10 +3207,13 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
   }
   const open = gaps.list?.filter((c) => !has(c)) ?? []
   return (
-    <Section n={6} title="Schweißnähte (optional)" done={welds.length > 0 && welds.every((w) => w.a.length && w.b.length)}>
+    <>
+      <div className="props-head">
+        <h3>Verbindungen</h3>
+      </div>
       <p className="hint">
-        Für gekantete Bleche mit Spalt an den Ecken (werden später geschweißt) oder getrennte Teile: Fläche A – meist die schmale
-        Stirnfläche – wird über den Spalt fest mit Fläche B verbunden.
+        Schweißnähte für gekantete Bleche mit Spalt an den Ecken (werden später geschweißt) oder getrennte Teile: Fläche A – meist die schmale
+        Stirnfläche – wird über den Spalt fest mit Fläche B verbunden. Später auch Kontakte und Schrauben in Baugruppen.
       </p>
       <div className="row">
         <label className="field">
@@ -2428,23 +3282,12 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
         )
       })}
       <button className="btn wide" onClick={() => { const w = newWeld(); setWelds([...welds, w]); setActive({ type: 'weldA', id: w.id }) }}>
-        <Plus size={15} /> Naht hinzufügen
+        <Plus size={15} /> Naht von Hand (Fläche A und B anklicken)
       </button>
-    </Section>
+    </>
   )
 }
 
-function Section({ n, title, done, children }) {
-  return (
-    <section className="section">
-      <h2>
-        <span className={'step' + (done ? ' done' : '')}>{done ? <Check size={12} strokeWidth={3} /> : n}</span>
-        {title}
-      </h2>
-      {children}
-    </section>
-  )
-}
 
 function Stat({ label, value }) {
   return (
@@ -2712,21 +3555,6 @@ function MaterialFields({ material: m, setMaterial }) {
   )
 }
 
-// Festigkeitsnachweis: erforderliche Sicherheiten, zulässige Verformung
-function ProofFields({ proof, setProof }) {
-  const set = (k) => (v) => setProof({ ...proof, [k]: v })
-  return (
-    <div className="print-orient">
-      <span className="mat-head">Festigkeitsnachweis – erforderlich:</span>
-      <div className="grid3">
-        <NumField label="Sicherheit Fließen" value={proof.sF} onChange={set('sF')} />
-        <NumField label="Sicherheit Bruch" value={proof.sB} onChange={set('sB')} />
-        <NumField label="Verformung max." unit="mm" value={proof.uMax} onChange={set('uMax')} />
-      </div>
-      <p className="hint">Typisch: Stahl statisch 1,5 / 2,0; Kunststoff- und Druckteile eher 2–3. Leer = nicht prüfen.</p>
-    </div>
-  )
-}
 
 function proofRows(result, proof) {
   const rows = []
@@ -2806,42 +3634,6 @@ function WeldCard({ result, material }) {
   )
 }
 
-function ProofCard({ result, proof }) {
-  const rows = proofRows(result, proof)
-  if (!rows.length) return null
-  const ok = rows.every((r) => r[3] <= 1)
-  return (
-    <div className={'proof ' + (ok ? 'good' : 'bad')}>
-      <div className="item-head">
-        {ok ? <Check size={15} /> : <TriangleAlert size={15} />}
-        <strong>Festigkeitsnachweis {ok ? 'erfüllt' : 'nicht erfüllt'}</strong>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th />
-            <th>vorhanden</th>
-            <th>erforderlich</th>
-            <th>Ausnutzung</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([lab, have, need, a]) => (
-            <tr key={lab}>
-              <td>{lab}</td>
-              <td>{lab === 'Verformung' ? `${fmt(have)} mm` : `S = ${fmt(have)}`}</td>
-              <td>{lab === 'Verformung' ? `≤ ${fmt(need)} mm` : `≥ ${fmt(need)}`}</td>
-              <td className={a <= 1 ? 'good' : 'bad'}>{(100 * a).toFixed(0)} %</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {result.warnings.some((w) => w.includes('direkt an einem Lager')) && (
-        <p className="hint">Achtung: Die höchste Spannung liegt an einem Lager (Singularität) – dort ist der Nachweis nicht aussagekräftig.</p>
-      )}
-    </div>
-  )
-}
 
 // Werte aus einem eigenen Zugversuch übernehmen (Rm, Rp0,2, E)
 function Calibration({ material, setMaterial }) {
@@ -3168,7 +3960,7 @@ function TopoSection({ topo, setTopo, onTopo, onTopoThreshold, canTopo, onTopoSt
   )
 }
 
-function GeometryPanel({ ops, setOps, pending, info, warnings, picking, onPick, drawing, onDraw, onCancelDraw, onApply, busy, modified, onExport, mesh, topo, setTopo, onTopo, onTopoThreshold, canTopo, onTopoStl }) {
+function GeometryPanel({ ops, setOps, pending, info, warnings, picking, onPick, drawing, onDraw, onCancelDraw, onApply, busy, modified, onExport, mesh }) {
   const upd = (id, patch) => setOps(ops.map((o) => (o.id === id ? { ...o, ...patch } : o)))
   const addSketch = (op, shape) => {
     const o = newSketchOp(op, shape)
@@ -3319,7 +4111,6 @@ function GeometryPanel({ ops, setOps, pending, info, warnings, picking, onPick, 
         )}
         {mesh && <p className="hint">{mesh.elements.toLocaleString('de-DE')} Elemente im aktuellen Netz.</p>}
       </div>
-      <TopoSection topo={topo} setTopo={setTopo} onTopo={onTopo} onTopoThreshold={onTopoThreshold} canTopo={canTopo} onTopoStl={onTopoStl} />
     </>
   )
 }
@@ -3347,8 +4138,8 @@ function MeshSlider({ mesh, diag, value, onChange }) {
     <div className="mesh-slider">
       <input type="range" min={0} max={1000} value={t} onChange={(e) => onChange(String(niceSize(toH(Number(e.target.value)))))} />
       <div className="slider-labels">
-        <span>grob</span>
-        <span>fein</span>
+        <span>grob, schnell</span>
+        <span>fein, genau</span>
       </div>
       {Number(value) > 0 && Math.abs(h - mesh.mesh_size) > 1e-9 && (
         <p className={'hint' + (unknowns > 3e6 ? ' warn-text' : '')}>
@@ -3466,7 +4257,7 @@ function VectorInput({ item, field, labels, unit, upd, picking, onPick, presets,
           </p>
         </>
       )}
-      <div className="dir-links">
+      {onAimToggle && <div className="dir-links">
         <button className={'link' + (aiming ? ' on' : '')} onClick={onAimToggle}>
           <Move3d size={13} /> {aiming ? 'Ausrichten beenden' : 'Im Bild ausrichten (Pfeil ziehen)'}
         </button>
@@ -3485,320 +4276,7 @@ function VectorInput({ item, field, labels, unit, upd, picking, onPick, presets,
             Richtung: {lab}
           </button>
         ))}
-      </div>
-    </div>
-  )
-}
-
-// Lesezeichen für die Lesezeichenleiste (React lässt javascript:-Links nicht zu → Attribut direkt setzen)
-function Bookmarklet({ code, children }) {
-  return (
-    <a
-      className="bookmarklet"
-      ref={(el) => el?.setAttribute('href', code)}
-      onClick={(e) => {
-        e.preventDefault()
-        window.alert('In die Lesezeichenleiste des Browsers ziehen (nicht anklicken). Danach im offenen Onshape-Teilestudio anklicken.')
-      }}
-      title="In die Lesezeichenleiste ziehen"
-    >
-      {children}
-    </a>
-  )
-}
-
-const bookmarkletCode = (base, key, path) =>
-  `javascript:void(window.open('${base}/${path}?k=${key}&url='+encodeURIComponent(location.href),'projekt-fem','width=600,height=420'))`
-
-// CAD-Verbindung: Add-ins, Onshape-Schlüssel und -Lesezeichen
-// SolidCraft: live mitlaufen, holen, Ergebnis zurück (Steuerkanal auf dem rechnenden Rechner)
-function SolidCraftLink({ onError }) {
-  const [st, setSt] = useState(null)
-  const [busy, setBusy] = useState(null)
-  const [msg, setMsg] = useState(null)
-  useEffect(() => {
-    let stop = false
-    const tick = async () => {
-      try {
-        const s = await api.scStatus()
-        if (!stop) setSt(s)
-      } catch {
-        /* ältere Gegenstelle */
-      }
-      if (!stop) setTimeout(tick, 2000)
-    }
-    tick()
-    return () => {
-      stop = true
-    }
-  }, [])
-  const run = async (label, f) => {
-    setBusy(label)
-    setMsg(null)
-    try {
-      const r = await f()
-      return r
-    } catch (e) {
-      setMsg(String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-  if (!st) return null
-  const time = st.last_sync ? new Date(st.last_sync).toLocaleTimeString('de-DE') : null
-  return (
-    <>
-      <div className="cad-section">
-        <strong>SolidCraft</strong>
-        <span className={st.connected ? 'ok-text' : 'warn-text'}>
-          {st.connected ? (st.live ? ' verbunden, läuft mit' : ' gefunden') : ' nicht erreichbar'}
-        </span>
-      </div>
-      <p className="hint">
-        Projekt-FEM folgt dem offenen SolidCraft-Design: Nach jeder Änderung (Maß, Feature) wird die neue Version übernommen und neu
-        gerechnet. SolidCraft muss auf dem rechnenden Rechner laufen (Einstellungen › Assistent › „Let AI agents connect“ an, Standard).
-      </p>
-      <label className="check">
-        <input type="checkbox" checked={st.live} disabled={!!busy} onChange={(e) => { const on = e.target.checked; setSt({ ...st, live: on }); run('', async () => setSt(await api.scLive(on))) }} />
-        Live mitlaufen{st.name ? ` – „${st.name}“` : ''}
-        {time ? ` (zuletzt ${time})` : ''}
-      </label>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={st.auto_result}
-          onChange={(e) => run('', async () => { await api.scAuto(e.target.checked); setSt({ ...st, auto_result: e.target.checked }) })}
-        />
-        Ergebnis nach jeder Rechnung in SolidCraft eintragen
-      </label>
-      <div className="row">
-        <button className="btn" disabled={!st.connected || !!busy} onClick={() => run('holen', async () => { const inc = await api.scFetch(); setMsg(`„${inc.name}“ geholt – wird geöffnet`) })}>
-          {busy === 'holen' ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Jetzt holen
-        </button>
-        <button className="btn" disabled={!st.connected || !!busy} onClick={() => run('ergebnis', async () => setMsg('In SolidCraft eingetragen (Parameter FEM_…): ' + (await api.scResult())))}>
-          {busy === 'ergebnis' ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Ergebnis → SolidCraft
-        </button>
-      </div>
-      {(msg || (st.message && st.live)) && <p className="hint cad-msg">{msg ?? st.message}</p>}
-    </>
-  )
-}
-
-function CadButton({ onError }) {
-  const [open, setOpen] = useState(false)
-  const [info, setInfo] = useState(null)
-  const [net, setNet] = useState(null)
-  const [access, setAccess] = useState('')
-  const [secret, setSecret] = useState('')
-  const [url, setUrl] = useState('')
-  const [busy, setBusy] = useState(null)
-  const [msg, setMsg] = useState(null)
-  useEffect(() => {
-    if (!open) return
-    api.cadInfo().then(setInfo).catch(onError)
-    if (api.isDesktop) api.serverStatus().then(setNet).catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
-  const saveKeys = async (a, s) => {
-    try {
-      const ok = await api.onshapeSetKeys(a, s)
-      setInfo({ ...info, onshape: ok })
-      setAccess('')
-      setSecret('')
-      setMsg(ok ? 'Onshape-Schlüssel gespeichert' : 'Onshape-Schlüssel entfernt')
-    } catch (e) {
-      onError(e)
-    }
-  }
-  const fetchUrl = async () => {
-    setBusy('Hole Teilestudio aus Onshape …')
-    setMsg(null)
-    try {
-      const inc = await api.onshapeImport(url)
-      setMsg(`„${inc.name}“ geholt – wird geöffnet`)
-      setUrl('')
-    } catch (e) {
-      setMsg(String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-  // Einstellungsdatei für Add-ins auf einem anderen Rechner (Desktop: nur mit Heimnetz-Freigabe)
-  const remoteBase = info && (api.isDesktop ? net?.running && net.urls?.[0] && new URL(net.urls[0]).origin : info.web)
-  const remote = remoteBase ? `adresse = ${remoteBase}/api/cad\nschluessel = ${info.key}` : null
-  const [copied, setCopied] = useState(false)
-  const copySettings = () => {
-    navigator.clipboard?.writeText(remote + '\n')
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-  // Adressen, unter denen die Lesezeichen Projekt-FEM erreichen
-  const targets = []
-  if (info) {
-    if (api.isDesktop) {
-      targets.push(['dieser Rechner', `http://127.0.0.1:${info.localPort}/cad`])
-      if (net?.running && net.urls?.[0]) targets.push(['andere Rechner im Heimnetz', new URL(net.urls[0]).origin + '/api/cad'])
-    } else targets.push([null, info.web + '/api/cad'])
-  }
-  return (
-    <div className="share">
-      <button className="btn ghost" onClick={() => setOpen(!open)} title="Verbindung zu SolidCraft, Onshape, Fusion 360, SolidWorks, NX, Solid Edge">
-        <Cable size={15} /> CAD
-      </button>
-      {open && (
-        <div className="share-panel cad-panel">
-          <div className="item-head">
-            <strong>CAD-Verbindung</strong>
-            <span className="spacer" />
-            <button className="icon-btn" onClick={() => setOpen(false)}>
-              <X size={14} />
-            </button>
-          </div>
-          <p className="hint">
-            Knöpfe im CAD: <b>In Projekt-FEM rechnen</b> schickt das aktive Teil hierher (gleiches Teil: Lager und Lasten bleiben, es
-            wird neu gerechnet), <b>Ergebnis holen</b> trägt Sicherheit, Spannung, Verformung und Masse als Eigenschaften ins Teil ein.
-            Add-ins für Fusion 360, SolidWorks, NX und Solid Edge: Ordner <code>cad-addins</code> im Projekt, Anleitung dort.
-          </p>
-          {api.isDesktop && net && !net.running && (
-            <p className="hint">CAD auf einem anderen Rechner? Dann zusätzlich die Heimnetz-Freigabe einschalten.</p>
-          )}
-          {remote && (
-            <>
-              <p className="hint">
-                {api.isDesktop ? 'CAD auf einem anderen Rechner im Heimnetz' : 'CAD auf diesem Rechner'}: Datei{' '}
-                <code>projekt-fem-cad.txt</code> im Benutzerordner anlegen ({api.isDesktop ? 'dort' : 'hier'}), Inhalt:
-              </p>
-              <div className="share-url">
-                <code className="cad-settings">{remote}</code>
-                <button className="icon-btn" title="Kopieren" onClick={copySettings}>
-                  {copied ? <Check size={14} /> : <Copy size={14} />}
-                </button>
-              </div>
-            </>
-          )}
-          <SolidCraftLink onError={onError} />
-          <div className="cad-section">
-            <strong>Onshape</strong>
-            {info && (
-              <span className={info.onshape ? 'ok-text' : 'warn-text'}>
-                {info.onshape ? ' API-Schlüssel hinterlegt' : ' API-Schlüssel fehlen'}
-              </span>
-            )}
-          </div>
-          <p className="hint">
-            Schlüssel anlegen unter <code>dev-portal.onshape.com</code> → API keys (Rechte: lesen, für „Ergebnis → Onshape“ auch
-            schreiben). Sie bleiben auf dem rechnenden Rechner.
-          </p>
-          <div className="grid2">
-            <label className="field">
-              <span>Access Key</span>
-              <input value={access} onChange={(e) => setAccess(e.target.value)} autoComplete="off" />
-            </label>
-            <label className="field">
-              <span>Secret Key</span>
-              <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" />
-            </label>
-          </div>
-          <div className="row">
-            <button className="btn" disabled={!access.trim() || !secret.trim()} onClick={() => saveKeys(access, secret)}>
-              <Check size={14} /> Speichern
-            </button>
-            {info?.onshape && (
-              <button className="btn ghost" onClick={() => saveKeys('', '')}>
-                <Trash2 size={14} /> Entfernen
-              </button>
-            )}
-          </div>
-          {info?.onshape && (
-            <>
-              <p className="hint">Lesezeichen in die Lesezeichenleiste ziehen, dann im offenen Onshape-Teilestudio anklicken:</p>
-              {targets.map(([label, base]) => (
-                <div key={base} className="bookmarks">
-                  {label && <span className="hint">{label}:</span>}
-                  <Bookmarklet code={bookmarkletCode(base, info.key, 'onshape')}>→ Projekt-FEM</Bookmarklet>
-                  <Bookmarklet code={bookmarkletCode(base, info.key, 'onshape_result')}>FEM-Ergebnis → Onshape</Bookmarklet>
-                </div>
-              ))}
-              <label className="field">
-                <span>oder Adresse des Teilestudios einfügen</span>
-                <div className="row">
-                  <input value={url} placeholder="https://cad.onshape.com/documents/…" onChange={(e) => setUrl(e.target.value)} />
-                  <button className="btn" disabled={!url.trim() || !!busy} onClick={fetchUrl}>
-                    {busy ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Holen
-                  </button>
-                </div>
-              </label>
-            </>
-          )}
-          {msg && <p className="hint cad-msg">{msg}</p>}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Heimnetz-Freigabe: Oberfläche für andere Rechner im Browser bereitstellen
-function ShareButton({ onError }) {
-  const [open, setOpen] = useState(false)
-  const [st, setSt] = useState(null)
-  const [copied, setCopied] = useState(null)
-  useEffect(() => {
-    api.serverStatus().then(setSt).catch(() => {})
-  }, [open])
-  const run = (p) => p.then(setSt).catch(onError)
-  const copy = (u) => {
-    navigator.clipboard?.writeText(u)
-    setCopied(u)
-    setTimeout(() => setCopied(null), 1500)
-  }
-  return (
-    <div className="share">
-      <button className={'btn ghost' + (st?.running ? ' share-on' : '')} onClick={() => setOpen(!open)}>
-        <Wifi size={15} /> Heimnetz{st?.running ? ': an' : ''}
-      </button>
-      {open && st && (
-        <div className="share-panel">
-          <div className="item-head">
-            <strong>Im Heimnetz freigeben</strong>
-            <span className="spacer" />
-            <button className="icon-btn" onClick={() => setOpen(false)}>
-              <X size={14} />
-            </button>
-          </div>
-          <p className="hint">
-            Andere Rechner (Laptop, Arbeits-PC) öffnen Projekt-FEM dann im Browser. Gerechnet wird auf diesem Rechner. Der Link
-            enthält einen Zugangsschlüssel – nur an eigene Geräte geben.
-          </p>
-          <label className="check">
-            <input type="checkbox" checked={st.running} onChange={(e) => run(e.target.checked ? api.serverStart() : api.serverStop())} />
-            Freigabe aktiv (Port {st.port})
-          </label>
-          <label className="check">
-            <input type="checkbox" checked={st.autostart} onChange={(e) => run(api.serverConfigure({ autostart: e.target.checked }))} />
-            Beim Start von Projekt-FEM automatisch freigeben
-          </label>
-          {st.running && (
-            <>
-              <div className="share-urls">
-                {st.urls.map((u) => (
-                  <div key={u} className="share-url">
-                    <code>{u}</code>
-                    <button className="icon-btn" title="Kopieren" onClick={() => copy(u)}>
-                      {copied === u ? <Check size={14} /> : <Copy size={14} />}
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <p className="hint">
-                Der erste Link funktioniert meist überall im Heimnetz. Falls nicht: Firewall auf diesem Rechner für Port {st.port} öffnen.
-              </p>
-            </>
-          )}
-          <button className="link" onClick={() => window.confirm('Neuer Schlüssel – bisherige Links und Lesezeichen funktionieren dann nicht mehr. Fortfahren?') && run(api.serverConfigure({ newKey: true }))}>
-            Neuen Zugangsschlüssel erzeugen
-          </button>
-        </div>
-      )}
+      </div>}
     </div>
   )
 }
@@ -3884,12 +4362,3 @@ function RegionEditor({ item, cyl, drawing, onStart, onCancel, onChange }) {
   )
 }
 
-function PickButton({ active, count, onClick }) {
-  return (
-    <button className={'btn pick' + (active ? ' on' : '')} onClick={onClick}>
-      <MousePointerClick size={14} />
-      {active ? 'Auswahl beenden' : 'Flächen wählen'}
-      <span className="count">{count === 1 ? '1 Fläche' : `${count} Flächen`}</span>
-    </button>
-  )
-}

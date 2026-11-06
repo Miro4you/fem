@@ -1,19 +1,33 @@
 import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { CadControls } from './CadControls.js'
-import { Box, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react'
-import { bandTexture, BANDS, cssBandColor } from '../colormap.js'
+import { BANDS, cssBandColor, resultTexture } from '../colormap.js'
+import { IcHome, IcFit } from '../ui/icons.jsx'
 import { regionGrid } from '../region.js'
 
 const BASE = new THREE.Color('#b9c0c8')
 
 // Ansichtsrichtungen (Blickrichtung zum Ziel hin, z zeigt nach oben)
 const VIEWS = {
-  iso: { dir: [1, -1.25, 0.85], icon: Box, title: 'Isometrisch' },
-  front: { dir: [0, -1, 0], icon: ArrowUp, title: 'Vorne (−y)' },
-  right: { dir: [1, 0, 0], icon: ArrowRight, title: 'Rechts (+x)' },
-  top: { dir: [0, 0, 1], icon: ArrowDown, title: 'Oben (+z)' },
+  iso: { dir: [1, -1.25, 0.85], up: [0, 0, 1] },
+  front: { dir: [0, -1, 0], up: [0, 0, 1] },
+  back: { dir: [0, 1, 0], up: [0, 0, 1] },
+  right: { dir: [1, 0, 0], up: [0, 0, 1] },
+  left: { dir: [-1, 0, 0], up: [0, 0, 1] },
+  top: { dir: [0, 0, 1], up: [0, 1, 0] },
+  bottom: { dir: [0, 0, -1], up: [0, -1, 0] },
 }
+
+// Flächen des Ansichtswürfels: Normale n, rechts r und oben u so, wie man die Fläche von außen sieht
+const CUBE = [
+  { name: 'OBEN', n: [0, 0, 1], r: [1, 0, 0], u: [0, 1, 0], view: 'top' },
+  { name: 'UNTEN', n: [0, 0, -1], r: [1, 0, 0], u: [0, -1, 0], view: 'bottom' },
+  { name: 'VORNE', n: [0, -1, 0], r: [1, 0, 0], u: [0, 0, 1], view: 'front' },
+  { name: 'HINTEN', n: [0, 1, 0], r: [-1, 0, 0], u: [0, 0, 1], view: 'back' },
+  { name: 'RECHTS', n: [1, 0, 0], r: [0, 1, 0], u: [0, 0, 1], view: 'right' },
+  { name: 'LINKS', n: [-1, 0, 0], r: [0, -1, 0], u: [0, 0, 1], view: 'left' },
+]
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 export default function Viewport({
   mesh,
@@ -34,6 +48,8 @@ export default function Viewport({
   onAim,
   layers,
   topoShape,
+  nav,
+  look,
   ref,
 }) {
   const host = useRef(null)
@@ -42,6 +58,9 @@ export default function Viewport({
   cb.current = { onPick, onProbe, pickable, mode, drawing, planeNormal, onDraw, aim, onAim }
   const [hoverTag, setHoverTag] = useState(null)
   const [labels, setLabels] = useState([])
+  // Kamera-Achsen (rechts, oben, zum Betrachter) für Ansichtswürfel und Koordinatensystem
+  const [cam, setCam] = useState([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+  const fitRef = useRef(null)
 
   // Bild des aktuellen Zustands (für den Bericht), weißer Hintergrund
   useImperativeHandle(ref, () => ({
@@ -116,7 +135,7 @@ export default function Viewport({
       })
     },
 
-    snapshot(width = 1400) {
+    snapshot(width = 1400, type = 'image/jpeg') {
       const s = ctx.current
       s.renderer.render(s.scene, s.camera)
       const src = s.renderer.domElement
@@ -141,7 +160,7 @@ export default function Viewport({
             if (yy > y1) y1 = yy
           }
         }
-      if (x1 <= x0 || y1 <= y0) return { data: c.toDataURL('image/jpeg', 0.9), width, height: h }
+      if (x1 <= x0 || y1 <= y0) return { data: c.toDataURL(type, 0.9), width, height: h }
       const pad = Math.round(0.04 * width)
       x0 = Math.max(0, x0 - pad)
       y0 = Math.max(0, y0 - pad)
@@ -154,7 +173,7 @@ export default function Viewport({
       g2.fillStyle = '#ffffff'
       g2.fillRect(0, 0, out.width, out.height)
       g2.drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height)
-      return { data: out.toDataURL('image/jpeg', 0.9), width: out.width, height: out.height }
+      return { data: out.toDataURL(type, 0.9), width: out.width, height: out.height }
     },
   }))
 
@@ -298,7 +317,7 @@ export default function Viewport({
     const state = {
       renderer, scene, camera, controls, dirty: true, raf: 0,
       group: new THREE.Group(), surf: null, edges: null, wire: null, ghost: null, arrows: new THREE.Group(),
-      texture: bandTexture(), labelNodes: [], overlays: new THREE.Group(), aimGroup: new THREE.Group(), aimHandle: null,
+      textures: { bands: resultTexture(true), smooth: resultTexture(false) }, labelNodes: [], overlays: new THREE.Group(), aimGroup: new THREE.Group(), aimHandle: null,
       bed: new THREE.Group(),
       cutMesh: null,
       clip: new THREE.Plane(new THREE.Vector3(0, 0, -1), 0),
@@ -310,6 +329,7 @@ export default function Viewport({
     scene.add(state.aimGroup)
     scene.add(state.group)
     scene.add(state.arrows)
+    state.texture = state.textures.bands
     ctx.current = state
 
     const resize = () => {
@@ -330,6 +350,9 @@ export default function Viewport({
         state.dirty = false
         renderer.render(scene, camera)
         updateLabels()
+        const q = camera.quaternion
+        const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((a) => new THREE.Vector3(...a).applyQuaternion(q).toArray())
+        setCam((old) => (old.every((v, i) => v.every((x, k) => Math.abs(x - axes[i][k]) < 1e-4)) ? old : axes))
       }
     }
     const updateLabels = () => {
@@ -386,7 +409,17 @@ export default function Viewport({
         setHoverTag(h ? state.triSurface[h.faceIndex] : null)
       })
     }
+    // Doppelklick auf eine Fläche: Blick senkrecht darauf
+    const onDbl = (ev) => {
+      const h = hit(ev)
+      if (!h) return
+      const tag = state.triSurface[h.faceIndex]
+      const n = new THREE.Vector3(...(cb.current.planeNormal?.(tag) ?? h.face.normal.toArray())).normalize()
+      if (n.dot(camera.position.clone().sub(h.point)) < 0) n.negate()
+      fitRef.current?.(n.toArray())
+    }
     const canvas = renderer.domElement
+    canvas.addEventListener('dblclick', onDbl)
     canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('pointerup', onUp)
     canvas.addEventListener('pointermove', onMove)
@@ -400,6 +433,26 @@ export default function Viewport({
       el.removeChild(canvas)
     }
   }, [])
+
+  // --- Navigation (Maus/Trackpad) -------------------------------------------
+  useEffect(() => {
+    if (nav) ctx.current.controls.setConfig(nav)
+  }, [nav])
+
+  // --- Farbverlauf: Stufen oder fließend ----------------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    s.texture = look?.bands === false ? s.textures.smooth : s.textures.bands
+    if (s.resultMat) {
+      s.resultMat.map = s.texture
+      s.resultMat.needsUpdate = true
+    }
+    if (s.cutMesh) {
+      s.cutMesh.material.map = s.texture
+      s.cutMesh.material.needsUpdate = true
+    }
+    s.dirty = true
+  }, [look?.bands, mesh])
 
   // --- Netz aufbauen ---------------------------------------------------------
   useEffect(() => {
@@ -468,6 +521,8 @@ export default function Viewport({
       new THREE.LineBasicMaterial({ color: 0x6b7280, transparent: true, opacity: 0.45 }),
     )
     s.group.add(s.edges, s.wire, s.ghost)
+    const [lo, hi] = mesh.bbox
+    s.controls.center = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2)
     fitView('iso')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesh])
@@ -533,10 +588,10 @@ export default function Viewport({
       line.geometry.attributes.position.needsUpdate = true
       line.geometry.computeBoundingSphere()
     }
-    s.ghost.visible = mode === 'result' && scale > 0
+    s.ghost.visible = mode === 'result' && scale > 0 && look?.ghost !== false
     s.wire.visible = !!showMesh
     s.dirty = true
-  }, [mesh, mode, result, showMesh])
+  }, [mesh, mode, result, showMesh, look?.ghost])
 
   useEffect(() => {
     const s = ctx.current
@@ -644,7 +699,7 @@ export default function Viewport({
         let t = Math.min(Math.max((c.values[i] - result.min) / span, 0), 1)
         if (result.reverse) t = 1 - t
         uv[2 * i] = t * (1 - 1e-4) + 0.5e-4
-        uv[2 * i + 1] = 0.5
+        uv[2 * i + 1] = isoV(c.values[i], result.iso, span)
       }
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
@@ -792,32 +847,42 @@ export default function Viewport({
     s.dirty = true
   }, [markers, mode, result])
 
-  function fitView(name) {
+  // Blick aus Richtung `dir` (zum Betrachter hin), ganzes Bauteil im Bild
+  function fitDir(dir, up = null) {
     const s = ctx.current
     if (!mesh) return
     const [lo, hi] = mesh.bbox
     const center = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2)
     const radius = new THREE.Vector3(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]).length() / 2
     const dist = (radius / Math.sin(THREE.MathUtils.degToRad(s.camera.fov / 2))) * 1.08
-    const dir = new THREE.Vector3(...VIEWS[name].dir).normalize()
-    const up = name === 'top' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1)
-    s.controls.setView(center, dir, dist, up)
+    const d = new THREE.Vector3(...dir).normalize()
+    let u = up ? new THREE.Vector3(...up) : new THREE.Vector3(0, 0, 1)
+    if (Math.abs(u.clone().normalize().dot(d)) > 0.98) u = new THREE.Vector3(0, 1, 0)
+    s.controls.setView(center, d, dist, u)
     s.dirty = true
   }
+  function fitView(name) {
+    fitDir(VIEWS[name].dir, VIEWS[name].up)
+  }
+  fitRef.current = (dir) => fitDir(dir)
 
   return (
     <div className="viewport">
       <div ref={host} className="viewport-canvas" style={{ cursor: aim ? 'default' : drawing && hoverTag != null ? 'crosshair' : pickable && hoverTag != null ? 'pointer' : 'default' }} />
       {mesh && (
-        <div className="view-buttons">
-          {Object.entries(VIEWS).map(([k, v]) => (
-            <button key={k} className="icon-btn" title={v.title} onClick={() => fitView(k)}>
-              <v.icon size={16} />
+        <div className="view-nav">
+          <ViewCube cam={cam} onView={fitView} />
+          <div className="view-buttons">
+            <button className="icon-btn" title="Isometrisch (Startansicht)" aria-label="Isometrische Ansicht" onClick={() => fitView('iso')}>
+              <IcHome />
             </button>
-          ))}
+            <button className="icon-btn" title="Alles zeigen" aria-label="Alles zeigen" onClick={() => fitDir(cam[2], cam[1])}>
+              <IcFit />
+            </button>
+          </div>
         </div>
       )}
-      {mesh && <div className="mouse-help">Links ziehen: drehen · Rechts/Mitte ziehen: verschieben · Rad: zoomen (zur Maus)</div>}
+      {mesh && <Triad cam={cam} onView={fitView} />}
       {labels.filter((l) => l.visible).map((l, i) => (
         <div key={i} className="marker" style={{ left: l.x, top: l.y }}>
           <span className="marker-dot" />
@@ -828,16 +893,93 @@ export default function Viewport({
   )
 }
 
+// Ansichtswürfel: dreht mit der Kamera; Fläche anklicken = Blick senkrecht darauf
+function ViewCube({ cam, onView }) {
+  const [R, U, B] = cam
+  const S = 28
+  const C = 50
+  const P = (w) => [C + S * dot3(w, R), C - S * dot3(w, U)]
+  const faces = CUBE.map((f) => ({ ...f, depth: dot3(f.n, B) }))
+    .filter((f) => f.depth > 0.01)
+    .sort((a, b) => a.depth - b.depth)
+  return (
+    <svg className="view-cube" width={2 * C} height={2 * C} viewBox={`0 0 ${2 * C} ${2 * C}`} role="group" aria-label="Ansichtswürfel">
+      {faces.map((f) => {
+        const corner = (sr, su) => P(f.n.map((v, k) => v + sr * f.r[k] + su * f.u[k]))
+        const pts = [corner(1, 1), corner(-1, 1), corner(-1, -1), corner(1, -1)]
+        const [ex, ey] = P(f.n)
+        const a = S * dot3(f.r, R)
+        const b = -S * dot3(f.r, U)
+        const c = -S * dot3(f.u, R)
+        const d = S * dot3(f.u, U)
+        return (
+          <g key={f.name} className="vc-face" onClick={() => onView(f.view)} role="button" aria-label={`Ansicht ${f.name.toLowerCase()}`}>
+            <title>{`Ansicht ${f.name.toLowerCase()}`}</title>
+            <polygon points={pts.map((p) => p.join(',')).join(' ')} style={{ fillOpacity: 0.55 + 0.45 * f.depth }} />
+            <text transform={`matrix(${a} ${b} ${c} ${d} ${ex} ${ey})`} fontSize="0.34" textAnchor="middle" dominantBaseline="central">
+              {f.name}
+            </text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+// Koordinatensystem unten links: X rot, Y grün, Z blau; Achse anklicken = Blick auf die Ebene senkrecht dazu
+function Triad({ cam, onView }) {
+  const [R, U, B] = cam
+  const C = 46
+  const L = 30
+  const axes = [
+    { k: 'X', e: [1, 0, 0], cls: 'ax-x', view: 'right', t: 'Blick auf die YZ-Ebene (von rechts)' },
+    { k: 'Y', e: [0, 1, 0], cls: 'ax-y', view: 'front', t: 'Blick auf die XZ-Ebene (von vorne)' },
+    { k: 'Z', e: [0, 0, 1], cls: 'ax-z', view: 'top', t: 'Blick auf die XY-Ebene (von oben)' },
+  ]
+    .map((a) => ({ ...a, x: C + L * dot3(a.e, R), y: C - L * dot3(a.e, U), depth: dot3(a.e, B) }))
+    .sort((a, b) => a.depth - b.depth)
+  return (
+    <svg className="triad" width={2 * C} height={2 * C} viewBox={`0 0 ${2 * C} ${2 * C}`} role="group" aria-label="Koordinatensystem">
+      {axes.map((a) => {
+        const dx = a.x - C
+        const dy = a.y - C
+        const len = Math.hypot(dx, dy) || 1
+        const lx = C + (dx * (len + 9)) / len
+        const ly = C + (dy * (len + 9)) / len
+        return (
+          <g key={a.k} className={'ax ' + a.cls} onClick={() => onView(a.view)} style={{ opacity: a.depth < -0.2 ? 0.55 : 1 }}>
+            <title>{a.t}</title>
+            <line x1={C} y1={C} x2={a.x} y2={a.y} />
+            <circle cx={a.x} cy={a.y} r={2.6} />
+            <circle cx={lx} cy={ly} r={10} className="ax-hit" />
+            <text x={lx} y={ly} textAnchor="middle" dominantBaseline="central">
+              {a.k}
+            </text>
+          </g>
+        )
+      })}
+      <circle cx={C} cy={C} r={3} className="ax-o" />
+    </svg>
+  )
+}
+
+// Iso-Clip: Texturzeile über (v > 0,5: Farbe) bzw. unter dem Schwellwert (grau); linear, damit die Grenze im Dreieck stimmt
+function isoV(value, iso, span) {
+  if (!iso) return 0.75
+  return 0.5 + 0.49 * Math.max(-1, Math.min(1, ((iso.above ? 1 : -1) * (value - iso.value)) / span))
+}
+
 // Oberfläche und Kanten mit Verformung (scale · disp) versetzen
 // Ergebnisfarben (Texturkoordinate je Ecke); k = Lastanteil (Animation), Werte wachsen linear mit der Last
 function paintResult(s, result, k) {
   const uv = s.surf.geometry.attributes.uv.array
   const span = result.max - result.min || 1
   for (let v = 0; v < s.vertNode.length; v++) {
-    let t = Math.min(Math.max((k * result.values[s.vertNode[v]] - result.min) / span, 0), 1)
+    const val = k * result.values[s.vertNode[v]]
+    let t = Math.min(Math.max((val - result.min) / span, 0), 1)
     if (result.reverse) t = 1 - t
     uv[2 * v] = t * (1 - 1e-4) + 0.5e-4
-    uv[2 * v + 1] = 0.5
+    uv[2 * v + 1] = isoV(val, result.iso, span)
   }
   s.surf.geometry.attributes.uv.needsUpdate = true
 }

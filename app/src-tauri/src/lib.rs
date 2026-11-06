@@ -346,6 +346,29 @@ async fn onshape_import(url: String) -> Result<cad::Incoming, String> {
 }
 
 #[tauri::command]
+async fn onshape_documents(q: String) -> Result<Vec<onshape::Document>, String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::documents(&q)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn onshape_elements(did: String, wid: String) -> Result<Vec<onshape::Element>, String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::elements(&did, &wid)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn onshape_thumbnail(href: Option<String>, did: String, wid: String, eid: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::thumbnail(href.as_deref(), &did, &wid, &eid)).await.map_err(|e| e.to_string())?
+}
+
+/// Ergebniswerte in die Beschreibung der Teile des Onshape-Teilestudios schreiben → kurzer Text
+#[tauri::command]
+async fn onshape_write_result(url: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::write_result(&url).map(|(name, text, n)| format!("„{name}“: {text} ({n} Teil{})", if n == 1 { "" } else { "e" })))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn progress(state: tauri::State<'_, AppState>) -> Option<ProgressView> {
     progress_impl(state.inner())
 }
@@ -1081,6 +1104,10 @@ pub fn run() {
             onshape_variables,
             onshape_set_variable,
             onshape_study,
+            onshape_documents,
+            onshape_elements,
+            onshape_thumbnail,
+            onshape_write_result,
             load_user_materials,
             save_user_materials,
             open_step,

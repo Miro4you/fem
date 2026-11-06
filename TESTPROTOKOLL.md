@@ -6,7 +6,7 @@ Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 56 von 
 **So ausfüllen:** Jeden Punkt durchgehen, abhaken wenn es passt, sonst Anmerkung dazuschreiben (was du gemacht hast,
 was passiert ist, gern mit Screenshot). Die Datei oder ein Foto des ausgedruckten PDFs kannst du mir einfach schicken.
 
-**Wichtigste Punkte zuerst:** 0 (Starten), 1 + 1a (Grundablauf, Animation), 15.2–15.5a (Onshape), 16 (Schweißnähte,
+**Wichtigste Punkte zuerst:** 0 (Starten), **0a (neue Oberfläche, besonders Maus/Trackpad)**, 1 + 1a (Grundablauf, Animation), 15.2–15.5a (Onshape), 16 (Schweißnähte,
 besonders 16.6 mit deinem SolidWorks-Blech), 15.10 (SolidWorks). Der Rest nach Lust und Zeit.
 
 Testteile: `Daten/Hebel.step` (Rechteckaufnahme = Flächen 1, 2, 3, 11; Bohrung Ø8 = 13) und
@@ -19,27 +19,49 @@ Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 0.1 | Pull Request #1 auf GitHub zusammenführen („Merge“), dann im Ordner `FEM`: `git checkout main && git pull` | neuester Stand (`git log --oneline -1` zeigt die Verformungsanimation oder neuer) | [ ] |
+| 0.1 | Im Ordner `FEM`: `git fetch && git checkout claude/stoic-maxwell-rtmn09 && git pull` (oder nach dem Zusammenführen des nächsten Pull Requests `git checkout main && git pull`) | `git log --oneline -1` zeigt „Neue Oberfläche …“ oder neuer | [ ] |
 | 0.2 | `cd app && npm install` (neu: PDF-Bibliothek jsPDF) | ohne Fehler | [ ] |
 | 0.3 | `npx tauri build --no-bundle` (lädt beim ersten Mal neue Rust-Bibliotheken, Internet nötig) | baut durch, `target/release/projekt-fem-app` | [ ] |
-| 0.4 | App starten | Fenster öffnet, oben 5 Reiter: Modell · Geometrie · Studie · Stabwerk · Ergebnis; rechts „CAD“, „Heimnetz“ | [ ] |
+| 0.4 | App starten | Startseite „Was möchtest du rechnen?“ mit vier Kacheln; oben rechts Datei, Export, Einstellungen (Regler-Symbol) | [ ] |
 | 0.5 | Mac: dasselbe auf dem Mac | baut und startet | [ ] |
+
+## 0a. Neue Oberfläche (nach deinem Entwurf)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 0a.1 | Startseite: STEP-Datei per Kachel öffnen, danach Logo oben links | zurück zur Startseite, „Zurück zu …“, unter „Zuletzt geöffnet“ steht das Teil | [ ] |
+| 0a.2 | STEP-Datei aus dem Dateimanager auf das Fenster ziehen | wird geöffnet | [ ] |
+| 0a.3 | Studienbaum: Teil, Werkstoff, Netz, Lager, Lasten, Verbindungen nacheinander anklicken | darunter jeweils die passenden Eigenschaften; grüner Punkt = festgelegt, Kreis = offen | [ ] |
+| 0a.4 | Bei **Lager** auf „neu“ | Lager-Arten als Symbole (fest, gleitend, Bolzen, Richtungen), Flächenauswahl aktiv; Fläche anklicken, „Fertig“ | [ ] |
+| 0a.5 | Bei **Lasten** auf „neu“, ebene Fläche anklicken | Kraft 1000 N **senkrecht auf die Fläche** (Pfeil drückt auf die Fläche); Betrag ändern, X/Y/Z (nochmal klicken = Gegenrichtung), umkehren, Pfeil im Bild ziehen | [ ] |
+| 0a.6 | Rechnen-Knopf, solange etwas fehlt | grau; Klick zeigt „Noch offen“, Klick auf einen Punkt springt zum Eintrag | [ ] |
+| 0a.7 | Im Bild auf eine blaue bzw. orange Fläche klicken | zugehöriges Lager bzw. Last wird im Baum gewählt | [ ] |
+| 0a.8 | **Analyse:** Eigenfrequenzen wählen, rechnen; zurück auf Statik | Formen-Anzahl im Baumkopf, Ergebnis mit Frequenzen | [ ] |
+| 0a.9 | Ansichtswürfel: OBEN, VORNE … anklicken; Haus (Startansicht), Rahmen (alles zeigen); Achse X/Y/Z unten links | Blick senkrecht auf die Seite bzw. Ebene | [ ] |
+| 0a.10 | Doppelklick auf eine Fläche | Blick senkrecht auf diese Fläche | [ ] |
+| 0a.11 | **Mac-Trackpad:** Einstellungen › Maus & Trackpad › „Trackpad (Mac)“: zwei Finger wischen, spreizen, ⇧ + zwei Finger, Klick | drehen um den Punkt unter dem Zeiger, zoomen zum Zeiger, verschieben, Klick wählt nur (dreht nicht) | [ ] |
+| 0a.12 | **Maus wie Onshape** bzw. **wie SolidWorks** (am PC) | rechte bzw. mittlere Taste dreht, Rad zoomt zum Zeiger; fühlt es sich an wie im CAD? | [ ] |
+| 0a.13 | Ergebnis: Urteil oben, σv / u / S / mehr, Details auf- und zuklappen | rot bei „Nachweis nicht erfüllt“, grün bei erfüllt; Details bleiben so, wie zuletzt eingestellt | [ ] |
+| 0a.14 | Leiste im Bild: **Iso-Clip**, Regler auf ~100 MPa, über/unter | nur die Bereiche über (unter) dem Wert farbig, Rest grau | [ ] |
+| 0a.15 | **Messen** an, Klick aufs Bauteil | Kästchen mit σv, u und S an der Stelle; Messen aus = Klick ohne Wirkung | [ ] |
+| 0a.16 | Einstellungen › Darstellung: hell / dunkel, Farbstufen aus | Erscheinungsbild wechselt; fließender Farbverlauf | [ ] |
+| 0a.17 | Was ist noch unklar, zu voll oder fehlt? „Fläche teilen“ ist als „bald“ markiert (kommt als Nächstes) | deine Anmerkungen | [ ] |
 
 ## 1. Grundablauf (Kurzcheck, dass nichts kaputt ist)
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 1.1 | Hebel öffnen, S235JR, Lager Rechteckaufnahme fest, Last 1000 N in −y auf Bohrung, Rechnen | max. σv ≈ 209 MPa (2-mm-Netz), u ≈ 0,175 mm, S ≈ 1,12 | [ ] |
-| 1.2 | Drehen/Verschieben/Zoomen im Bild | wie zuletzt (CAD-artig) | [ ] |
+| 1.1 | Hebel öffnen, S235JR, Lager Rechteckaufnahme fest, Last 1000 N auf Bohrung, Richtung Y und nochmal Y (= −Y), Rechnen | max. σv ≈ 209 MPa (2-mm-Netz), u ≈ 0,175 mm, S ≈ 1,12 | [ ] |
+| 1.2 | Drehen/Verschieben/Zoomen im Bild | wie in Einstellungen › Maus & Trackpad gewählt (unten im Bild steht die Kurzhilfe) | [ ] |
 | 1.3 | Projekt speichern und wieder öffnen | alles wieder da (auch Infill, Nachweis, Geometrieänderungen) | [ ] |
 
 ## 1a. Verformungsanimation und Video
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 1a.1 | Hebel rechnen, im Ergebnis unter „Verformung“ **Animation** | Bauteil verformt sich langsam hin und zurück, Farben wachsen mit der Last | [ ] |
+| 1a.1 | Hebel rechnen, in der Leiste unten im Bild **Animation** | Bauteil verformt sich langsam hin und zurück, Farben wachsen mit der Last | [ ] |
 | 1a.2 | Geschwindigkeit ½× / 2×, Darstellung auf Verschiebung bzw. Sicherheit umstellen | läuft weiter; bei Sicherheit bleiben die Farben fest | [ ] |
-| 1a.3 | **Video** | nach ~6 s Datei `Hebel-verformung.webm` (Mac: `.mp4`), mit Titel, Kennwerten, Farbskala, „Last … %“ | [ ] |
+| 1a.3 | **Video** (Kamera-Symbol rechts in der Leiste oder Export › Video der Verformung) | nach ~6 s Datei `Hebel-verformung.webm` (Mac: `.mp4`), mit Titel, Kennwerten, Farbskala, „Last … %“ | [ ] |
 | 1a.4 | Video in der Linux-Desktop-App | geht oder klare Meldung (dann im Browser über die Heimnetz-Ansicht) | [ ] |
 
 ## 2. Fortschrittsanzeige
@@ -52,7 +74,7 @@ Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 3.1 | Last mit Wirkbereich (z. B. Kreis Ø10 auf der Oberseite) anlegen | unter Netz Hinweis „Wirkbereiche geändert – Neu vernetzen“, Knopf blau | [ ] |
+| 3.1 | Last mit Wirkbereich (bei der Last unter „Mehr“, z. B. Kreis Ø10 auf der Oberseite) anlegen | im Studienbaum bei Netz offener Kreis, unter Netz Hinweis „Neu vernetzen“, Knopf blau | [ ] |
 | 3.2 | Neu vernetzen, „Netz anzeigen“ | im Kreis deutlich feineres Netz | [ ] |
 | 3.3 | Häkchen „Netz in Wirkbereichen automatisch verfeinern“ aus, neu vernetzen | wieder gleichmäßiges Netz | [ ] |
 
@@ -64,7 +86,7 @@ Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke
 | 4.2 | „Wände und Infill berücksichtigen“ an | Felder Muster, Füllgrad (+ Regler), Wände, Linienbreite, Schichthöhe, Deck-/Bodenschichten; Hinweis mit Wandstärke und Ersatzwerten des Infills | [ ] |
 | 4.3 | Neu vernetzen (Netz wird an der Oberfläche auf Wandstärke verfeinert) | dauert länger, deutlich mehr Elemente | [ ] |
 | 4.4 | Rechnen | Ergebnis; Ansichten „Sicherheit Infill“ und „Wand / Infill“ wählbar | [ ] |
-| 4.5 | Ergebnis → „Schnitt (ins Bauteil schauen)“, Achse Y, Regler verschieben | Bauteil aufgeschnitten, Schnittfläche eingefärbt; bei „Wand / Infill“ rot = Wand außen, blau = Infill innen | [ ] |
+| 4.5 | Ergebnis, Leiste im Bild → **Schnitt**, Achse Y, Regler verschieben | Bauteil aufgeschnitten, Schnittfläche eingefärbt; bei „Wand / Infill“ rot = Wand außen, blau = Infill innen | [ ] |
 | 4.6 | „⇄ Seite“ | andere Hälfte sichtbar | [ ] |
 | 4.7 | Füllgrad 20 % → 60 %, rechnen | Sicherheit Infill steigt deutlich, Masse steigt | [ ] |
 | 4.8 | Muster durchprobieren (Gitter, Gyroid, Waben …) | plausible Unterschiede (Waben in der Ebene weicher) | [ ] |
@@ -83,8 +105,8 @@ Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 6.1 | Ergebnis → „Materialausnutzung“ | blau = kaum genutztes Material (auch im Schnitt) | [ ] |
-| 6.2 | Reiter Geometrie → Leichtbau-Vorschlag: 40 %, 20 Durchläufe, „Form berechnen“ | Fortschritt je Durchlauf; danach grüne Form im durchsichtigen Bauteil entlang des Kraftflusses | [ ] |
+| 6.1 | Ergebnis → „mehr …“ → „Materialausnutzung“ | blau = kaum genutztes Material (auch im Schnitt) | [ ] |
+| 6.2 | Werkzeugleiste links **Leichtbau**: 40 %, 20 Durchläufe, „Form berechnen“ | Fortschritt je Durchlauf; danach grüne Form im durchsichtigen Bauteil entlang des Kraftflusses | [ ] |
 | 6.3 | Schwellwert-Regler bewegen | Form wird dicker/dünner, Volumenanteil im Text | [ ] |
 | 6.4 | „Form als STL speichern“, in Slicer/CAD öffnen | STL lässt sich öffnen, Maße passen zum Bauteil | [ ] |
 
@@ -102,17 +124,17 @@ Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 8.1 | Ergebnis → „Bericht als PDF“ | App schaltet kurz durch die Ansichten, dann Speichern-Dialog | [ ] |
+| 8.1 | **Export › Bericht als PDF** | App schaltet kurz durch die Ansichten, dann Speichern-Dialog | [ ] |
 | 8.2 | PDF öffnen | 4–6 Seiten: Kopf mit Urteil, Bauteil/Netz, Werkstoff, Lager, Lasten, Ergebnisse, Nachweis, Hinweise, Bilder mit Farbskala, Annahmen | [ ] |
 | 8.3 | Mit 3D-Druck-Werkstoff + Infill | Werkstoffteil enthält Aufbaurichtung, Füllung, Wände | [ ] |
 
-## 9. Parameterstudie (Reiter „Studie“)
+## 9. Parameterstudie (Werkzeugleiste links „Studie“)
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
 | 9.1 | Netzgröße „4; 3; 2; 1,5“, Studie starten | Tabelle + Diagramm; Hebel: σv steigt leicht (200 → 210 MPa), u fast gleich | [ ] |
 | 9.2 | Im Diagramm über die Punkte fahren | Wert erscheint | [ ] |
-| 9.3 | Reiter Geometrie: Radius-Änderung anlegen; Studie → Parameter „Radius“, Werte „4; 6; 8; 10“ | je Wert Geometrie geändert und gerechnet; danach Ausgangszustand wieder da | [ ] |
+| 9.3 | Werkzeugleiste **Geometrie**: Radius-Änderung anlegen; Studie → Parameter „Radius“, Werte „4; 6; 8; 10“ | je Wert Geometrie geändert und gerechnet; danach Ausgangszustand wieder da | [ ] |
 | 9.4 | Mit Infill: Parameter Füllgrad | Werte je Füllgrad | [ ] |
 | 9.5 | „Tabelle als CSV (Excel)“ | öffnet sich in Excel/LibreOffice korrekt (Semikolon, Komma) | [ ] |
 
@@ -120,7 +142,7 @@ Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 10.1 | Ergebnis → „Nach MathPad (.mathpad)“ | Datei „… FEM.mathpad“ | [ ] |
+| 10.1 | **Export › MathPad-Rechenblatt** | Datei „… FEM.mathpad“ | [ ] |
 | 10.2 | In MathPad öffnen | Notizen + Werte mit Einheiten (E, R_e, σ_v, u_max, m, F_A1x …), S_F = R_e/σ_v rechnet live, a_F = Ausnutzung | [ ] |
 
 ## 11. Eigenfrequenzen und Knicken
@@ -140,7 +162,7 @@ Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke
 | 12.1 | Last „Strömung / Wind“, „Alle Außenflächen wählen“, Luft 30 m/s, c_w 1,2, Richtung −z | Hinweis mit Druck ≈ 662 Pa; Pfeil in Strömungsrichtung | [ ] |
 | 12.2 | Rechnen | „Summe Lasten“ ≈ Druck × angeströmte Fläche (Hebel Oberseite 26,8 cm² → ≈ 1,8 N) | [ ] |
 
-## 13. Stabwerk (Reiter „Stabwerk“)
+## 13. Stabwerk (Startseite oder Werkzeugleiste „Stabwerk“)
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
@@ -166,20 +188,22 @@ NX, Solid Edge und „Senden an“ kannst du überspringen.
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 15.1 | Oben **„CAD“** öffnen | Dialog mit Erklärung, Abschnitte SolidCraft und Onshape | [ ] |
-| 15.1a | **SolidCraft** starten (gleicher Rechner), ein Teil konstruieren; in Projekt-FEM „CAD“ → SolidCraft | „gefunden“ | [ ] |
+| 15.1 | **Einstellungen › CAD-Verbindungen** öffnen | Abschnitte Onshape, SolidCraft, Add-ins; Häkchen „automatisch neu rechnen“ | [ ] |
+| 15.1a | **SolidCraft** starten (gleicher Rechner), ein Teil konstruieren; in Projekt-FEM Einstellungen › CAD-Verbindungen → SolidCraft | „gefunden“ | [ ] |
 | 15.1b | „Live mitlaufen“ anhaken | Design wird geöffnet („SolidCraft: „…“ geöffnet“) | [ ] |
 | 15.1c | Lager + Last setzen, rechnen. In SolidCraft ein Maß ändern | nach ~1–2 s: „neue Version … übernommen und neu gerechnet“, Vergleich | [ ] |
 | 15.1d | „Ergebnis → SolidCraft“ | in SolidCraft im Parameter-Fenster FEM_Sicherheit, FEM_SigmaV_MPa, FEM_Verformung_mm … | [ ] |
-| 15.1e | Reiter Studie → Parameter „SolidCraft: <dein Maß>“, z. B. 3 Werte → Studie starten | Kurve/Tabelle; danach hat das Maß in SolidCraft wieder den alten Wert | [ ] |
-| 15.2 | **Onshape:** API-Schlüssel anlegen (dev-portal.onshape.com → API keys, lesen + schreiben), in „CAD“ eintragen | „API-Schlüssel hinterlegt“, zwei Lesezeichen erscheinen | [ ] |
+| 15.1e | Werkzeugleiste Studie → Parameter „SolidCraft: <dein Maß>“, z. B. 3 Werte → Studie starten | Kurve/Tabelle; danach hat das Maß in SolidCraft wieder den alten Wert | [ ] |
+| 15.2 | **Onshape:** API-Schlüssel anlegen (dev-portal.onshape.com → API keys, lesen + schreiben), unter Einstellungen › CAD-Verbindungen eintragen (oder beim ersten Klick auf „Aus Onshape“) | „API-Schlüssel hinterlegt“, zwei Lesezeichen erscheinen | [ ] |
 | 15.3 | Lesezeichen „→ Projekt-FEM“ in die Lesezeichenleiste ziehen, in Onshape ein Teilestudio öffnen, Lesezeichen klicken | kleines Fenster „… an Projekt-FEM geschickt“, Projekt-FEM öffnet „Dokument - Teilestudio“ | [ ] |
 | 15.4 | Lager + Last setzen, rechnen. In Onshape etwas ändern (z. B. Radius), Lesezeichen wieder klicken | Hinweis „neue Version … übernommen und neu gerechnet“, Vergleich vorige Version ↔ aktuell | [ ] |
 | 15.5 | Lesezeichen „FEM-Ergebnis → Onshape“ klicken, in Onshape Teil → Eigenschaften | Beschreibung enthält `[FEM …: S = … · σv … · u … · … g …]`, eigener Text bleibt | [ ] |
 | 15.4a | Onshape-Baugruppe statt Teilestudio schicken | Meldung „Baugruppen kann Projekt-FEM noch nicht rechnen – bitte das Teilestudio öffnen“ | [ ] |
-| 15.5a | **Onshape-Variable:** im Teilestudio Feature „Variable“ `#dicke = 5 mm` anlegen und in einer Extrusion verwenden, Teil holen, rechnen; Reiter Studie → „Onshape: #dicke“ → `3; 5; 8` → Studie starten | Kurve/Tabelle; in Onshape steht danach wieder 5 mm | [ ] |
+| 15.5a | **Onshape-Variable:** im Teilestudio Feature „Variable“ `#dicke = 5 mm` anlegen und in einer Extrusion verwenden, Teil holen, rechnen; Werkzeugleiste Studie → „Onshape: #dicke“ → `3; 5; 8` → Studie starten | Kurve/Tabelle; in Onshape steht danach wieder 5 mm | [ ] |
 | 15.5b | Kostenloses Onshape-Konto: Dokumente sind öffentlich – der FEM-Eintrag in der Beschreibung ist also für alle sichtbar | zur Kenntnis genommen | [ ] |
-| 15.6 | Falls der Browser das Lesezeichen blockiert: Onshape-Adresse kopieren → „CAD“ → einfügen → „Holen“ | Teil wird geöffnet | [ ] |
+| 15.6 | **Onshape-Bibliothek:** Startseite „Aus Onshape“ (oder Datei › Aus Onshape-Bibliothek): Dokument suchen, Teilestudio wählen, „Holen“ | eigene Dokumente mit Vorschaubild, Teil wird geöffnet und steht unter „Zuletzt geöffnet“ | [ ] |
+| 15.6a | Onshape-Teil gerechnet: **Export › Ergebnis → Onshape** | Hinweis mit dem eingetragenen Text, in Onshape Beschreibung `[FEM …]` | [ ] |
+| 15.6b | Teil „Neue Version holen“ (Studienbaum › Teil) nach einer Änderung in Onshape | neue Version, Lager und Lasten bleiben | [ ] |
 | 15.7 | **Fusion:** Add-in einrichten (Umschalt+S → Add-Ins → +), Reiter VOLUMENKÖRPER | Gruppe „Projekt-FEM“ mit zwei Knöpfen | [ ] |
 | 15.8 | Fusion: „In Projekt-FEM rechnen“, in Projekt-FEM rechnen, in Fusion ändern, nochmal „In Projekt-FEM rechnen“ | wie 15.3/15.4 | [ ] |
 | 15.9 | Fusion: „Ergebnis holen“ | Meldung mit Werten, Ändern → Parameter: FEM_Sicherheit usw. | [ ] |
@@ -187,14 +211,14 @@ NX, Solid Edge und „Senden an“ kannst du überspringen.
 | 15.11 | *(optional, nutzt du nicht)* **NX:** Journale ausführen (Alt+F8), dann als Benutzerbefehl-Knopf | Teil kommt an; Attribute FEM_… | [ ] |
 | 15.12 | *(optional, nutzt du nicht)* **Solid Edge:** Skripte per Doppelklick | Teil kommt an; Eigenschaften FEM_… | [ ] |
 | 15.13 | **Anderes CAD / Datei:** „Senden an → An Projekt-FEM“ (Windows) bzw. Schnellaktion (Mac) auf eine `.step` | Teil wird geöffnet | [ ] |
-| 15.14 | **Über das Heimnetz:** am Laptop `projekt-fem-cad.txt` aus dem Dialog „CAD“ anlegen, dort aus dem CAD senden; Projekt-FEM im Browser offen | Teil erscheint im Browser-Tab; „Ergebnis holen“ geht auch | [ ] |
+| 15.14 | **Über das Heimnetz:** am Laptop `projekt-fem-cad.txt` aus Einstellungen › CAD-Verbindungen anlegen, dort aus dem CAD senden; Projekt-FEM im Browser offen | Teil erscheint im Browser-Tab; „Ergebnis holen“ geht auch | [ ] |
 | 15.15 | Projekt-FEM neu starten, im CAD „Ergebnis holen“ | letzte Werte kommen noch | [ ] |
 
 Fehlermeldungen aus dem CAD bitte wörtlich oder als Screenshot – die CAD-Schnittstellen unterscheiden sich je nach
 Version. Onshape ist mit echtem Konto getestet; Fusion, SolidWorks, NX, Solid Edge und SolidCraft konnte ich hier nicht
 selbst starten.
 
-## 16. Schweißnähte (Bleche) – Reiter Modell, Abschnitt „Schweißnähte“
+## 16. Schweißnähte (Bleche) – Studienbaum › Verbindungen
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
@@ -202,7 +226,7 @@ selbst starten.
 | 16.2 | „Spalte suchen“ (bis 1 mm) | 4 Spalte à 0,2 mm, 76 mm² | [ ] |
 | 16.3 | „Alle 4 als Naht übernehmen“, rechnen | u max ≈ 0,5 mm; Karte „Schweißnähte“ mit Kraft, l/a, τw, Ausnutzung | [ ] |
 | 16.4 | Eine Naht auf „Kehlnaht“, a = 1 mm | τw steigt etwa auf das Doppelte | [ ] |
-| 16.5 | Naht von Hand: „Naht hinzufügen“ → Fläche A (schmale Stirnfläche), Fläche B (Gegenfläche) | Flächen orange eingefärbt, Zähler | [ ] |
+| 16.5 | Naht von Hand: „Naht von Hand (Fläche A und B anklicken)“ → Fläche A (schmale Stirnfläche), Fläche B (Gegenfläche) | Flächen orange eingefärbt, Zähler | [ ] |
 | 16.6 | **Dein SolidWorks-Blechteil** mit geschlossenen Ecken als STEP: Spalte suchen, Nähte, rechnen | Spalte werden gefunden, Ergebnis plausibel? | [ ] |
 | 16.7 | Ohne Nähte bei getrennten Teilen rechnen | Meldung „nicht ausreichend gelagert … Schweißnähte anlegen“ | [ ] |
 | 16.8 | PDF-Bericht | Abschnitt „Schweißnähte“ | [ ] |
@@ -214,7 +238,7 @@ selbst starten.
 |---|---|---|---|
 | 17.1 | Onshape-Passwort ändern (war kurz im Speicher der Cloud-Umgebung), Zwei-Faktor-Anmeldung einschalten | erledigt | [ ] |
 | 17.2 | Test-API-Schlüssel löschen: dev-portal.onshape.com → API keys (stand im Chat, gültig bis 13.11.) | Schlüssel weg | [ ] |
-| 17.3 | Neuen API-Schlüssel anlegen und **nur** in Projekt-FEM unter „CAD“ eintragen | „API-Schlüssel hinterlegt“ | [ ] |
+| 17.3 | Neuen API-Schlüssel anlegen und **nur** in Projekt-FEM unter Einstellungen › CAD-Verbindungen eintragen | „API-Schlüssel hinterlegt“ | [ ] |
 | 17.4 | In der Claude-Sitzung: Cloud-Umgebungs-Menü → Bearbeiten → Network secrets → Eintrag cad.onshape.com entfernen | Eintrag weg | [ ] |
 | 17.5 | Onshape-Testdokument „Projekt-FEM Test 1“ behalten oder löschen | entschieden | [ ] |
 | 17.6 | Heimnetz-Freigabe: Link mit Schlüssel nur auf eigenen Geräten; bei Bedarf „Neuen Zugangsschlüssel erzeugen“ (Lesezeichen danach neu anlegen) | ok | [ ] |

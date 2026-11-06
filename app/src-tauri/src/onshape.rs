@@ -6,6 +6,7 @@
 //! Portal → API keys). „FEM-Ergebnis → Onshape“ schreibt die Ergebniswerte in die Beschreibung der Teile.
 //! Die Schlüssel liegen nur auf dem rechnenden Rechner (`~/.config/projekt-fem/onshape.json`).
 
+use std::io::Read;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -104,7 +105,7 @@ struct Client {
 
 fn api_error(e: ureq::Error) -> String {
     match e {
-        ureq::Error::Status(401, _) => "Onshape lehnt die API-Schlüssel ab – in Projekt-FEM unter „CAD“ neu eintragen".into(),
+        ureq::Error::Status(401, _) => "Onshape lehnt die API-Schlüssel ab – in Projekt-FEM unter Einstellungen › CAD-Verbindungen neu eintragen".into(),
         ureq::Error::Status(403, _) => "Kein Zugriff auf dieses Dokument (API-Schlüssel ohne Lese- bzw. Schreibrecht?)".into(),
         ureq::Error::Status(404, _) => "Onshape findet das Teilestudio nicht – Adresse prüfen".into(),
         ureq::Error::Status(code, r) => format!("Onshape meldet Fehler {code}: {}", r.into_string().unwrap_or_default().chars().take(300).collect::<String>()),
@@ -114,11 +115,15 @@ fn api_error(e: ureq::Error) -> String {
 
 impl Client {
     fn new(t: &Target) -> Result<Client, String> {
+        Client::with_base(&t.base)
+    }
+
+    fn with_base(base: &str) -> Result<Client, String> {
         use base64::Engine;
-        let k = load_keys().ok_or("Onshape-API-Schlüssel fehlen – in Projekt-FEM unter „CAD“ eintragen")?;
+        let k = load_keys().ok_or("Onshape-API-Schlüssel fehlen – in Projekt-FEM unter Einstellungen › CAD-Verbindungen eintragen")?;
         let auth = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", k.access, k.secret)));
         let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(120)).build();
-        Ok(Client { base: t.base.clone(), auth, agent })
+        Ok(Client { base: base.to_string(), auth, agent })
     }
 
     fn get(&self, path: &str) -> Result<Value, String> {
@@ -144,17 +149,151 @@ impl Client {
     }
 
     fn bytes(&self, path: &str) -> Result<Vec<u8>, String> {
-        let r = self
-            .agent
-            .get(&format!("{}/api/v6/{path}", self.base))
-            .set("Authorization", &self.auth)
-            .set("Accept", "application/octet-stream")
-            .call()
-            .map_err(api_error)?;
-        let mut buf = Vec::new();
-        std::io::Read::read_to_end(&mut r.into_reader(), &mut buf).map_err(|e| e.to_string())?;
-        Ok(buf)
+        self.fetch(&format!("{}/api/v6/{path}", self.base), "application/octet-stream").map(|(b, _)| b)
     }
+
+    /// Rohdaten von einer Adresse dieses Onshape-Servers → (Bytes, Inhaltstyp)
+    fn fetch(&self, url: &str, accept: &str) -> Result<(Vec<u8>, String), String> {
+        let r = self.agent.get(url).set("Authorization", &self.auth).set("Accept", accept).call().map_err(api_error)?;
+        let kind = r.content_type().to_string();
+        let mut buf = Vec::new();
+        std::io::Read::take(r.into_reader(), 8 << 20).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        Ok((buf, kind))
+    }
+}
+
+// --- Bibliothek: eigene Dokumente durchblättern ------------------------------------------------
+
+/// Onshape-Server für die Bibliothek: cad.onshape.com (Test: PROJEKT_FEM_ONSHAPE_HOST)
+fn library_base() -> String {
+    match std::env::var("PROJEKT_FEM_ONSHAPE_HOST") {
+        Ok(h) if !h.is_empty() => format!("http://{h}"),
+        _ => "https://cad.onshape.com".into(),
+    }
+}
+
+fn id_ok(s: &str) -> bool {
+    s.len() >= 8 && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Dokument in der Bibliothek
+#[derive(Debug, Clone, Serialize)]
+pub struct Document {
+    pub id: String,
+    pub name: String,
+    /// Arbeitsbereich (Standard), in dem die Teilestudios liegen
+    pub workspace: String,
+    pub modified: String,
+    pub owner: String,
+    /// Vorschaubild über `onshape_thumbnail` holen (Adresse beim Onshape-Server)
+    pub thumbnail: Option<String>,
+}
+
+/// Teilestudio oder Baugruppe eines Dokuments
+#[derive(Debug, Clone, Serialize)]
+pub struct Element {
+    pub id: String,
+    pub name: String,
+    /// PARTSTUDIO oder ASSEMBLY
+    pub kind: String,
+    /// Adresse wie im Browser – damit holt Projekt-FEM das Teilestudio
+    pub url: String,
+}
+
+fn thumb_href(v: &Value) -> Option<String> {
+    let sizes = v["thumbnail"]["sizes"].as_array()?;
+    // kleines Bild genügt für die Liste
+    let pick = sizes.iter().find(|s| s["size"] == "300x170").or_else(|| sizes.iter().find(|s| s["size"] == "70x40")).or(sizes.first())?;
+    pick["href"].as_str().map(String::from)
+}
+
+/// Eigene und geteilte Dokumente, zuletzt geänderte zuerst; `q` sucht im Namen
+pub fn documents(q: &str) -> Result<Vec<Document>, String> {
+    let c = Client::with_base(&library_base())?;
+    let q = q.trim();
+    let mut path = "documents?sortColumn=modifiedAt&sortOrder=desc&offset=0&limit=20".to_string();
+    if !q.is_empty() {
+        path += &format!("&q={}", urlencode(q));
+    }
+    let r = c.get(&path)?;
+    Ok(r["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|d| {
+            let id = d["id"].as_str()?;
+            let ws = d["defaultWorkspace"]["id"].as_str()?;
+            (id_ok(id) && id_ok(ws)).then(|| Document {
+                id: id.into(),
+                name: d["name"].as_str().unwrap_or("(ohne Namen)").into(),
+                workspace: ws.into(),
+                modified: d["modifiedAt"].as_str().unwrap_or("").into(),
+                owner: d["owner"]["name"].as_str().unwrap_or("").into(),
+                thumbnail: thumb_href(d),
+            })
+        })
+        .collect())
+}
+
+/// Teilestudios (und Baugruppen) im Arbeitsbereich eines Dokuments
+pub fn elements(did: &str, wid: &str) -> Result<Vec<Element>, String> {
+    if !id_ok(did) || !id_ok(wid) {
+        return Err("Ungültige Dokumentkennung".into());
+    }
+    let base = library_base();
+    let c = Client::with_base(&base)?;
+    let r = c.get(&format!("documents/d/{did}/w/{wid}/elements"))?;
+    Ok(r.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            let id = e["id"].as_str()?;
+            let kind = e["elementType"].as_str()?;
+            (id_ok(id) && (kind == "PARTSTUDIO" || kind == "ASSEMBLY")).then(|| Element {
+                id: id.into(),
+                name: e["name"].as_str().unwrap_or("").into(),
+                kind: kind.into(),
+                url: format!("{base}/documents/{did}/w/{wid}/e/{id}"),
+            })
+        })
+        .collect())
+}
+
+/// Bildadresse prüfen: nur der Onshape-Server selbst (dorthin gehen die Schlüssel mit). Im Test gegen einen Nachbau
+/// (`base` = http://…) wird dieselbe Adresse dort abgefragt.
+fn thumb_url(h: &str, base: &str) -> Result<String, String> {
+    let bad = || "Vorschaubild nicht vom Onshape-Server".to_string();
+    let (scheme, rest) = h.split_once("://").ok_or_else(bad)?;
+    let (host, path) = rest.split_once('/').ok_or_else(bad)?;
+    let host = host.to_ascii_lowercase();
+    let onshape = scheme == "https"
+        && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        && (host == "onshape.com" || host.ends_with(".onshape.com"));
+    let same = format!("{scheme}://{host}") == base;
+    if !(onshape || same) || !path.starts_with("api/") || path.contains("..") || path.contains("//") || path.contains('@') {
+        return Err(bad());
+    }
+    Ok(if base.starts_with("http://") { format!("{base}/{path}") } else { h.to_string() })
+}
+
+/// Vorschaubild als data:-Adresse. `href` ist eine Bildadresse aus `documents`; ohne `href` das Bild eines
+/// Teilestudios (`did`, `wid`, `eid`). Die Schlüssel gehen nur an den Onshape-Server selbst.
+pub fn thumbnail(href: Option<&str>, did: &str, wid: &str, eid: &str) -> Result<String, String> {
+    use base64::Engine;
+    let base = library_base();
+    let c = Client::with_base(&base)?;
+    let url = match href {
+        Some(h) => thumb_url(h, &base)?,
+        None => {
+            if !id_ok(did) || !id_ok(wid) || !id_ok(eid) {
+                return Err("Ungültige Kennung".into());
+            }
+            format!("{base}/api/v6/thumbnails/d/{did}/w/{wid}/e/{eid}/s/300x170")
+        }
+    };
+    let (data, kind) = c.fetch(&url, "image/*")?;
+    let kind = if kind.starts_with("image/") { kind } else { "image/png".into() };
+    Ok(format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(data)))
 }
 
 /// Teilname in Projekt-FEM: „Dokument - Teilestudio“ (bleibt über Änderungen gleich)
@@ -432,6 +571,27 @@ mod tests {
         assert_eq!(split_expression("30deg"), Some((30.0, "deg".into())));
         assert_eq!(split_expression("#a * 2"), None);
         assert_eq!(split_expression("2 * #a"), None);
+    }
+
+    #[test]
+    fn vorschaubild_nur_von_onshape() {
+        let b = "https://cad.onshape.com";
+        assert!(thumb_url("https://cad.onshape.com/api/thumbnails/d/abc/w/def/s/70x40?t=1", b).is_ok());
+        assert!(thumb_url("https://firma.onshape.com/api/thumbnails/x", b).is_ok());
+        for evil in [
+            "https://evil.example.com/api/x",
+            "https://cad.onshape.com.evil.com/api/x",
+            "http://cad.onshape.com/api/x",
+            "https://cad.onshape.com/../api/x",
+            "https://cad.onshape.com/static/x",
+            "https://user@evil.com/api/x",
+            "https://cad.onshape.com//evil.com/api",
+            "javascript:alert(1)",
+        ] {
+            assert!(thumb_url(evil, b).is_err(), "{evil}");
+        }
+        // Test gegen den Nachbau: gleicher Pfad beim Nachbau
+        assert_eq!(thumb_url("https://cad.onshape.com/api/t/1", "http://127.0.0.1:9912").unwrap(), "http://127.0.0.1:9912/api/t/1");
     }
 
     #[test]
