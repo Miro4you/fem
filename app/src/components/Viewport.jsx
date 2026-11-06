@@ -411,17 +411,41 @@ export default function Viewport({
       s.surf.material = s.setupMat
       const col = s.surf.geometry.attributes.color.array
       const c = new THREE.Color()
+      // 3D-Druck: Überhänge (> 45°, nicht auf dem Druckbett) rötlich markieren
+      let over = null
+      if (layers) {
+        const b = new THREE.Vector3(...layers.dir).normalize()
+        const pos = s.surf.geometry.attributes.position.array
+        let minT = Infinity
+        for (let i = 0; i < pos.length; i += 3) minT = Math.min(minT, pos[i] * b.x + pos[i + 1] * b.y + pos[i + 2] * b.z)
+        const [lo, hi] = mesh.bbox
+        const tol = 1e-3 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+        over = new Uint8Array(s.triSurface.length)
+        const a = new THREE.Vector3(), p1 = new THREE.Vector3(), p2 = new THREE.Vector3()
+        for (let t = 0; t < s.triSurface.length; t++) {
+          a.fromArray(pos, 9 * t)
+          p1.fromArray(pos, 9 * t + 3).sub(a)
+          p2.fromArray(pos, 9 * t + 6).sub(a)
+          const n = p1.cross(p2).normalize()
+          if (n.dot(b) < -Math.cos(Math.PI / 4)) {
+            let onBed = true
+            for (let k = 0; k < 3; k++) if (pos[9 * t + 3 * k] * b.x + pos[9 * t + 3 * k + 1] * b.y + pos[9 * t + 3 * k + 2] * b.z - minT > tol) onBed = false
+            over[t] = onBed ? 0 : 1
+          }
+        }
+      }
       for (let t = 0; t < s.triSurface.length; t++) {
         const tag = s.triSurface[t]
         const tint = surfaceTint?.(tag)
         c.copy(tint ? new THREE.Color(tint) : BASE)
+        if (over?.[t] && !tint) c.lerp(new THREE.Color('#e05252'), 0.55)
         if (tag === hoverTag) c.lerp(new THREE.Color('#ffffff'), 0.45)
         for (let k = 0; k < 3; k++) c.toArray(col, 9 * t + 3 * k)
       }
       s.surf.geometry.attributes.color.needsUpdate = true
     }
     s.dirty = true
-  }, [mesh, mode, result, surfaceTint, hoverTag])
+  }, [mesh, mode, result, surfaceTint, hoverTag, layers?.dir?.join(',')])
 
   // --- Schnitt: Oberfläche abschneiden, Schnittfläche einfärben ----------------------------------
   useEffect(() => {

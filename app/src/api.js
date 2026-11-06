@@ -107,6 +107,10 @@ export async function exportStep(path, name) {
 export const section = (point, normal) =>
   isDesktop ? invoke('section', { point, normal }) : http('/section', { method: 'POST', json: { point, normal } })
 
+/// 3D-Druck: ~400 Aufbaurichtungen bewerten (Sicherheit aus letzter Rechnung, Stützmaterial)
+export const orientationScan = (material) =>
+  isDesktop ? invoke('orientation_scan', { material }) : http('/orientation_scan', { method: 'POST', json: { material } })
+
 export const solve = (setup) => (isDesktop ? invoke('solve', { setup }) : http('/solve', { method: 'POST', json: { setup } }))
 
 /// STEP auswählen → Pfad auf dem rechnenden Rechner (im Browser: hochladen)

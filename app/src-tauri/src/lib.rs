@@ -518,6 +518,28 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
     }
 }
 
+// --- 3D-Druck: Aufbaurichtung bewerten ----------------------------------------------------
+
+/// Bewertet ~400 Aufbaurichtungen mit den Spannungen der letzten Rechnung (Festigkeit) und der Geometrie (Stützmaterial)
+pub fn orientation_scan_impl(state: &AppState, material: Material) -> Result<Vec<fem_core::orientation::OrientationScore>, String> {
+    let s = state.lock().unwrap();
+    let mesh = s.mesh.as_ref().ok_or("Zuerst eine Geometrie öffnen")?;
+    let stress: &[[f64; 6]] = s.results.as_ref().map(|r| r.stress.as_slice()).unwrap_or(&[]);
+    // Achsrichtungen und die aktuelle Richtung exakt, dazu gleichmäßig verteilte Richtungen
+    let mut dirs: Vec<[f64; 3]> = vec![[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]];
+    if let Some(l) = &material.layers {
+        dirs.insert(0, l.build_dir);
+    }
+    dirs.extend(fem_core::orientation::sphere_directions(400));
+    Ok(fem_core::orientation::scan(mesh, &s.faces, &material, stress, &dirs))
+}
+
+#[tauri::command]
+async fn orientation_scan(state: tauri::State<'_, AppState>, material: Material) -> Result<Vec<fem_core::orientation::OrientationScore>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || orientation_scan_impl(&state, material)).await.map_err(|e| e.to_string())?
+}
+
 // --- Schnitt -----------------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -683,6 +705,7 @@ pub fn run() {
             copy_step,
             solve,
             section,
+            orientation_scan,
             export_vtu,
             save_text,
             load_text,

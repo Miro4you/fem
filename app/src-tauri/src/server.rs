@@ -19,7 +19,9 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use crate::{modify_geometry_impl, open_step_impl, progress_impl, section_impl, solve_impl, write_vtu_impl, AppState, Setup};
+use crate::{
+    modify_geometry_impl, open_step_impl, orientation_scan_impl, progress_impl, section_impl, solve_impl, write_vtu_impl, AppState, Setup,
+};
 use fem_core::gmsh::Refine;
 
 pub const DEFAULT_PORT: u16 = 8790;
@@ -158,6 +160,7 @@ fn router(shared: Shared) -> Router {
         .route("/modify_geometry", post(api_modify_geometry))
         .route("/solve", post(api_solve))
         .route("/section", post(api_section))
+        .route("/orientation_scan", post(api_orientation_scan))
         .route("/vtu", get(api_vtu))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
         .layer(axum::middleware::from_fn_with_state(shared.clone(), check_key));
@@ -323,6 +326,17 @@ async fn api_section(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<
     let state = s.session(&headers);
     let view = tokio::task::spawn_blocking(move || section_impl(&state, a.point, a.normal)).await.map_err(bad)?.map_err(bad)?;
     Ok(Json(view).into_response())
+}
+
+#[derive(Deserialize)]
+struct ScanArgs {
+    material: fem_core::Material,
+}
+
+async fn api_orientation_scan(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<ScanArgs>) -> ApiResult<Response> {
+    let state = s.session(&headers);
+    let v = tokio::task::spawn_blocking(move || orientation_scan_impl(&state, a.material)).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(v).into_response())
 }
 
 async fn api_vtu(State(s): State<Shared>, headers: HeaderMap) -> ApiResult<Response> {

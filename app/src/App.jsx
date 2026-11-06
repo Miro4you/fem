@@ -850,6 +850,7 @@ export default function App() {
                     <option value="">Benutzerdefiniert</option>
                   </select>
                   <MaterialFields material={material} setMaterial={setMaterial} />
+                  <Calibration material={material} setMaterial={setMaterial} />
                   <label className="check">
                     <input type="checkbox" checked={!!material.layered} onChange={(e) => setMaterial({ ...material, layered: e.target.checked, name: material.layered === e.target.checked ? material.name : 'Benutzerdefiniert' })} />
                     3D-Druck: Schichtaufbau berücksichtigen
@@ -863,6 +864,18 @@ export default function App() {
                       canCompare={problems.length === 0 && !busy}
                       onCompare={onCompareOrientations}
                       orientations={orientations?.key === orientationKey() ? orientations.rows : null}
+                      hasResult={!!result}
+                      onScan={async () => {
+                        try {
+                          setBusy('Bewerte Aufbaurichtungen …')
+                          return await api.orientationScan(materialPayload(material))
+                        } catch (e) {
+                          setError(String(e))
+                          return null
+                        } finally {
+                          setBusy(null)
+                        }
+                      }}
                       onUse={(d) => { const m = { ...material, buildDir: d }; setMaterial(m); onSolve(m) }}
                     />
                   )}
@@ -1486,6 +1499,75 @@ function MaterialFields({ material: m, setMaterial }) {
   )
 }
 
+// Werte aus einem eigenen Zugversuch übernehmen (Rm, Rp0,2, E)
+function Calibration({ material, setMaterial }) {
+  const [open, setOpen] = useState(false)
+  const [v, setV] = useState({ b: '10', h: '4', L0: '50', Fmax: '', Fp: '', F1: '', dL1: '', dir: 'xy' })
+  const set = (k) => (x) => setV({ ...v, [k]: x })
+  const A = Number(v.b) * Number(v.h)
+  const rm = Number(v.Fmax) > 0 && A > 0 ? Number(v.Fmax) / A : null
+  const rp = Number(v.Fp) > 0 && A > 0 ? Number(v.Fp) / A : null
+  const e = Number(v.F1) > 0 && Number(v.dL1) > 0 && A > 0 ? Number(v.F1) / A / (Number(v.dL1) / Number(v.L0)) : null
+  const round = (x) => Number(x.toPrecision(4))
+  const apply = () => {
+    const z = material.layered && v.dir === 'z'
+    const patch = { name: 'Benutzerdefiniert (kalibriert)' }
+    if (rm != null) patch[z ? 'tensile_z' : 'tensile'] = round(rm)
+    if (rp != null) patch[z ? 'yield_z' : 'yield'] = round(rp)
+    if (e != null) patch[z ? 'E_z' : 'E'] = round(e)
+    setMaterial({ ...material, ...patch })
+    setOpen(false)
+  }
+  if (!open)
+    return (
+      <button className="link" onClick={() => setOpen(true)}>
+        Werte aus eigenem Zugversuch übernehmen …
+      </button>
+    )
+  return (
+    <div className="calib">
+      <div className="item-head">
+        <strong>Kalibrierung aus Zugversuch</strong>
+        <span className="spacer" />
+        <button className="icon-btn" onClick={() => setOpen(false)}>
+          <X size={14} />
+        </button>
+      </div>
+      <div className="grid3">
+        <NumField label="Breite b" unit="mm" value={v.b} onChange={set('b')} />
+        <NumField label="Dicke h" unit="mm" value={v.h} onChange={set('h')} />
+        <NumField label="Messlänge L₀" unit="mm" value={v.L0} onChange={set('L0')} />
+      </div>
+      <div className="grid3">
+        <NumField label="Höchstkraft" unit="N" value={v.Fmax} onChange={set('Fmax')} />
+        <NumField label="Kraft bei Rp0,2" unit="N" value={v.Fp} onChange={set('Fp')} />
+      </div>
+      <div className="grid3">
+        <NumField label="Kraft F₁" unit="N" value={v.F1} onChange={set('F1')} />
+        <NumField label="Verlängerung bei F₁" unit="mm" value={v.dL1} onChange={set('dL1')} />
+      </div>
+      {material.layered && (
+        <div className="segmented small">
+          <button className={v.dir === 'xy' ? 'on' : ''} onClick={() => set('dir')('xy')}>
+            liegend gedruckt (XY)
+          </button>
+          <button className={v.dir === 'z' ? 'on' : ''} onClick={() => set('dir')('z')}>
+            stehend gedruckt (Z)
+          </button>
+        </div>
+      )}
+      <p className="hint">
+        Ergebnis: Rm {rm != null ? fmt(rm) : '–'} MPa · Rp0,2 {rp != null ? fmt(rp) : '–'} MPa · E {e != null ? fmt(e) : '–'} MPa. F₁ und Verlängerung aus
+        dem geraden Anfangsteil der Kurve. Probe am besten mit 100 % Füllung drucken – dann gelten die Werte für den Werkstoff, und Wände/Infill
+        rechnet das Programm selbst.
+      </p>
+      <button className="btn wide" disabled={rm == null && rp == null && e == null} onClick={apply}>
+        <Check size={15} /> Übernehmen
+      </button>
+    </div>
+  )
+}
+
 function InfillFields({ material, setMaterial }) {
   const inf = { ...DEFAULT_INFILL, ...(material.infill ?? {}) }
   const set = (patch) => setMaterial({ ...material, infill: { ...inf, ...patch } })
@@ -1537,7 +1619,88 @@ function InfillFields({ material, setMaterial }) {
   )
 }
 
-function PrintOrientation({ material, setMaterial, picking, onPick, canCompare, onCompare, orientations, onUse }) {
+// Richtung als Text: Achse (±X/Y/Z) oder Winkel
+function dirLabel(d) {
+  const k = [0, 1, 2].find((i) => Math.abs(Math.abs(d[i]) - 1) < 1e-3)
+  if (k != null) return (d[k] > 0 ? '+' : '−') + 'XYZ'[k]
+  const a = anglesOf(d)
+  return `${fmt(Number(a.a))}° / ${fmt(Number(a.b))}°`
+}
+
+function OrientationScan({ onScan, onUse, current }) {
+  const [rows, setRows] = useState(null)
+  const [sort, setSort] = useState('safety')
+  const list = useMemo(() => {
+    if (!rows) return []
+    const total = rows.reduce((m, r) => Math.max(m, r.overhang_area + r.bed_area), 1)
+    const key = {
+      safety: (r) => -(r.safety ?? 0),
+      support: (r) => r.overhang_area - 1e-6 * (r.safety ?? 0),
+      // Kompromiss: Sicherheit abgewertet um den Anteil Stützfläche
+      both: (r) => -(r.safety ?? 0) * (1 - (0.5 * r.overhang_area) / total),
+    }[sort]
+    const sorted = [...rows].sort((a, b) => key(a) - key(b))
+    const picked = []
+    for (const r of sorted) {
+      if (picked.every((p) => p.dir[0] * r.dir[0] + p.dir[1] * r.dir[1] + p.dir[2] * r.dir[2] < Math.cos((20 * Math.PI) / 180))) picked.push(r)
+      if (picked.length >= 6) break
+    }
+    return picked
+  }, [rows, sort])
+  return (
+    <>
+      <button className="btn wide" onClick={async () => setRows(await onScan())}>
+        <Move3d size={15} /> Aufbaurichtung optimieren (alle Richtungen)
+      </button>
+      {rows && (
+        <>
+          <div className="segmented small">
+            {[['safety', 'Sicherheit'], ['support', 'wenig Stützmaterial'], ['both', 'Kompromiss']].map(([k, l]) => (
+              <button key={k} className={sort === k ? 'on' : ''} onClick={() => setSort(k)}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <table className="orient-table">
+            <thead>
+              <tr>
+                <th>Richtung</th>
+                <th>S ≈</th>
+                <th>Stütze</th>
+                <th>Höhe</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((r, i) => (
+                <tr key={i}>
+                  <td title={`Aufbaurichtung (${r.dir.map((v) => fmt(v)).join(' / ')})`}>{dirLabel(r.dir)}</td>
+                  <td className={r.safety >= 1.5 ? 'good' : r.safety >= 1 ? 'ok' : 'bad'}>
+                    {fmt(r.safety)}
+                    {r.layer_governs ? '*' : ''}
+                  </td>
+                  <td>{fmt(r.overhang_area / 100)} cm²</td>
+                  <td>{fmt(r.height)} mm</td>
+                  <td>
+                    <button className="link" onClick={() => onUse(r.dir)}>
+                      prüfen
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="hint">
+            S ≈ aus den Spannungen der letzten Rechnung abgeschätzt (* = Schichthaftung maßgeblich); „prüfen“ rechnet die Richtung voll nach.
+            Stütze = Fläche mit Überhang über 45°. Winkelangabe: Winkel in XY / Neigung zu XY. Aktuell: {dirLabel(current)}.
+          </p>
+        </>
+      )}
+    </>
+  )
+}
+
+function PrintOrientation({ material, setMaterial, picking, onPick, canCompare, onCompare, orientations, onUse, hasResult, onScan }) {
   const dir = material.buildDir ?? [0, 0, 1]
   const isDir = (d) => Math.abs(Math.abs(d[0] * dir[0] + d[1] * dir[1] + d[2] * dir[2]) - 1) < 1e-6
   return (
@@ -1552,15 +1715,23 @@ function PrintOrientation({ material, setMaterial, picking, onPick, canCompare, 
               </button>
             ))}
           </div>
+          <button className="btn small" title="Bauteil auf den Kopf stellen (wichtig für Überhänge)" onClick={() => setMaterial({ ...material, buildDir: dir.map((v) => (v === 0 ? 0 : -v)) })}>
+            ⇅ Umdrehen
+          </button>
           <button className={'link' + (picking ? ' on' : '')} onClick={onPick}>
             <MousePointerClick size={13} /> {picking ? 'Auswahl abbrechen' : 'Fläche aufs Druckbett legen'}
           </button>
         </div>
-        {!BUILD_DIRS.some(([, d]) => isDir(d)) && <p className="hint">Aufbaurichtung {dirName(dir)}</p>}
+        <p className="hint">Aufbaurichtung {dirLabel(dir)}. Rot markierte Flächen hängen über (über 45°) und brauchen Stützmaterial.</p>
       </div>
       <button className="btn wide" disabled={!canCompare} onClick={onCompare} title={canCompare ? '' : 'Erst Lager und Lasten festlegen'}>
         <Layers size={15} /> Aufbaurichtung vergleichen (X / Y / Z)
       </button>
+      {hasResult ? (
+        <OrientationScan onScan={onScan} onUse={onUse} current={dir} />
+      ) : (
+        <p className="hint">Nach einer Rechnung lässt sich die Aufbaurichtung auch frei optimieren (alle Richtungen, mit Stützmaterial).</p>
+      )}
       {orientations && (
         <table className="orient-table">
           <thead>

@@ -12,6 +12,7 @@ pub mod gmsh;
 pub mod material;
 pub mod mesh;
 pub mod model;
+pub mod orientation;
 pub mod pcg;
 pub mod progress;
 pub mod region;
