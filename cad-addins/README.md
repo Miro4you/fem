@@ -91,6 +91,9 @@ wird ersetzt. Geht nur im Arbeitsbereich, nicht in gespeicherten Versionen.
 Falls der Browser das Lesezeichen blockiert: die Onshape-Adresse kopieren und im Dialog „CAD“ bei
 „Adresse des Teilestudios einfügen“ → „Holen“.
 
+Bei kostenlosen Onshape-Konten sind alle Dokumente öffentlich – dann ist auch der eingetragene FEM-Eintrag in der
+Beschreibung für alle sichtbar.
+
 Die Lesezeichen enthalten den Zugangsschlüssel – nicht weitergeben. Nach „Neuen Zugangsschlüssel erzeugen“ die
 Lesezeichen neu anlegen.
 
@@ -159,7 +162,7 @@ Stabwerk (Rahmen/Fachwerke aus einer Linienzeichnung) vorgemerkt.
 |---|---|
 | Projekt-FEM-Seite (Empfang, neue Version erkennen, Lager/Lasten übertragen, neu rechnen, Ergebnis bereitstellen) | getestet |
 | SolidCraft | gegen einen Nachbau des SolidCraft-Steuerkanals getestet (nach dessen Dokumentation: Schlüsseldatei, Mitlaufen, neue Version nach Maßänderung, Ergebnis als Parameter + Eigenschaft, Parameterstudie mit Rücksetzen). **Mit echtem SolidCraft noch nicht** (Programm konnte hier nicht gestartet werden) |
-| Onshape | **mit echtem Onshape getestet** (06.11.2026, kostenloses Konto): Teilestudio holen (STEP in ~8 s, Maße in mm korrekt), Baugruppe wird abgelehnt, Teile und Eigenschaft „Description“ lesen. Ergebnis in die Beschreibung schreiben: nur gegen Nachbau getestet. Lesezeichen im Browser: noch offen |
+| Onshape | **mit echtem Onshape getestet** (06.11.2026, kostenloses Konto, Dokument „Projekt-FEM Test 1“): Teilestudio holen (STEP in ~8 s, Maße in mm korrekt), rechnen, in Onshape Variable `#dicke` 5 → 8 mm ändern, neue Version holen → Lager/Lasten übernommen, automatisch neu gerechnet (σv 117,9 → 45,5 MPa, Handrechnung 120 → 46,9 MPa), Ergebnis in die Beschreibung geschrieben, Baugruppe wird abgelehnt. Offen: Klick auf das Lesezeichen im echten Onshape-Tab (Browser-Sicherheitsregeln) |
 | Fusion-Add-in, NX-Journale | Ablauf mit Platzhaltern statt Fusion/NX gegen Projekt-FEM getestet (senden, holen, Heimnetz, Fehler). **Im echten Programm noch nicht** |
 | SolidWorks-Makro, Solid-Edge-Skripte, „Senden an“ (Windows) | **ungetestet** (hier kein Windows) |
 | `an_projekt_fem.sh` (Mac/Linux) | getestet (lokal, Heimnetz, falscher Schlüssel, Umlaute im Namen) |
