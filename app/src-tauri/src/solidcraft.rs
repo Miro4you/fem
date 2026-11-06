@@ -188,10 +188,30 @@ fn now_ms() -> u64 {
 }
 
 /// Name des offenen Designs (aus `document.export`; dort steht der Name, unter dem es gespeichert ist)
+/// Ältere SolidCraft-Versionen kennen manche Methode/Befehl noch nicht
+fn unknown(e: &str) -> bool {
+    e.contains("unknown method") || e.contains("unknown command") || e.contains("no command")
+}
+
+/// Name des offenen Designs. Neuere SolidCraft-Versionen liefern ihn über `document.export`; ältere (z. B. 0.30)
+/// nicht – dann Teilenummer/Projekt aus den Design-Eigenschaften, sonst „SolidCraft-Design“.
 fn design_name(c: &mut Conn) -> Result<String, String> {
-    let d = c.call("document.export", json!({}))?;
-    let n = d.get("name").and_then(Value::as_str).unwrap_or("").trim().trim_end_matches(".sc").to_string();
-    Ok(if n.is_empty() { "SolidCraft".into() } else { n })
+    match c.call("document.export", json!({})) {
+        Ok(d) => {
+            let n = d.get("name").and_then(Value::as_str).unwrap_or("").trim().trim_end_matches(".sc").to_string();
+            return Ok(if n.is_empty() { "SolidCraft-Design".into() } else { n });
+        }
+        Err(e) if !unknown(&e) => return Err(e),
+        Err(_) => {}
+    }
+    if let Ok(m) = c.execute("document.metadata", json!({})) {
+        for k in ["part_number", "project"] {
+            if let Some(n) = m["properties"][k].as_str().map(str::trim).filter(|n| !n.is_empty()) {
+                return Ok(n.to_string());
+            }
+        }
+    }
+    Ok("SolidCraft-Design".into())
 }
 
 fn export_path(tag: &str) -> PathBuf {
@@ -201,7 +221,13 @@ fn export_path(tag: &str) -> PathBuf {
 /// Geometrie des offenen Designs als STEP holen (Datei auf diesem Rechner)
 fn export_step(c: &mut Conn, path: &std::path::Path) -> Result<Vec<u8>, String> {
     let _ = std::fs::remove_file(path);
-    c.execute("file.export_step", json!({ "path": path.display().to_string() })).map_err(|e| {
+    let p = json!({ "path": path.display().to_string() });
+    let r = match c.execute("file.export_step", p.clone()) {
+        // ältere Versionen: allgemeiner Export, Format aus der Endung .step
+        Err(e) if unknown(&e) => c.execute("file.export", p),
+        r => r,
+    };
+    r.map_err(|e| {
         if e.contains("bod") {
             format!("{e} (hat das Design schon einen Körper?)")
         } else {
@@ -391,7 +417,22 @@ pub fn write_result(name: Option<&str>) -> Result<String, String> {
     let mut meta = summary.clone();
     meta["programm"] = json!("Projekt-FEM");
     steps.push(json!({ "command": "document.metadata.set", "params": { "key": METADATA_KEY, "value": meta } }));
-    let r = c.call("engine.batch", json!({ "commands": steps, "rollback": true, "verbose": false }))?;
+    let r = match c.call("engine.batch", json!({ "commands": steps, "rollback": true, "verbose": false })) {
+        Ok(r) => r,
+        // ältere Versionen ohne engine.batch: Schritt für Schritt; Eigenschaft optional
+        Err(e) if unknown(&e) => {
+            for st in &steps {
+                let cmd = st["command"].as_str().unwrap_or("");
+                match c.execute(cmd, st["params"].clone()) {
+                    Ok(_) => {}
+                    Err(e) if cmd == "document.metadata.set" && unknown(&e) => {}
+                    Err(e) => return Err(format!("SolidCraft: {e} ({cmd})")),
+                }
+            }
+            json!({})
+        }
+        Err(e) => return Err(e),
+    };
     if let Some(f) = r.get("failed") {
         return Err(format!(
             "SolidCraft: {} ({})",

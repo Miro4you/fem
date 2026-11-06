@@ -64,7 +64,9 @@ Projekt-FEM direkt mit dem offenen Design arbeitet – ohne Add-in und ohne Expo
    Parameter des Designs stehen zur Wahl) → Werte → Studie starten. SolidCraft baut die Geometrie je Wert neu auf,
    Projekt-FEM rechnet; danach wird der alte Wert wieder eingesetzt. Ergebnis als Kurve und CSV.
 
-„Jetzt holen“ übernimmt das Design einmalig, ohne mitzulaufen. Der Teilname ist der Name des Designs.
+„Jetzt holen“ übernimmt das Design einmalig, ohne mitzulaufen. Der Teilname ist der Name des Designs. Ältere
+SolidCraft-Versionen (z. B. 0.30) geben den Namen nicht heraus – dann heißt das Teil „SolidCraft-Design“, oder es
+nimmt die **Teilenummer** bzw. das **Projekt** aus den Design-Eigenschaften (Datei › Eigenschaften), wenn dort etwas steht.
 
 Grenze: SolidCraft muss auf demselben Rechner laufen wie der rechnende Teil von Projekt-FEM (der Steuerkanal ist nur
 lokal erreichbar). Einen Knopf direkt in SolidCraft gibt es noch nicht – SolidCraft plant Plugins
