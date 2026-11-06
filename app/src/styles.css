@@ -312,3 +312,15 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .proof td.good { color: var(--good); font-weight: 600; }
 .proof td.bad { color: var(--bad); font-weight: 600; }
 .mat-actions { gap: 14px; }
+
+/* Studie: Diagramm */
+.study-chart { width: 100%; height: auto; overflow: visible; }
+.study-chart .grid { stroke: var(--line); stroke-width: 1; }
+.study-chart .tick { fill: var(--muted); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.study-chart .axis { fill: var(--muted); font-size: 10px; }
+.study-chart .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.study-chart .dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; pointer-events: none; }
+.study-chart .hit { fill: transparent; cursor: default; }
+.study-chart .tip { fill: var(--panel); stroke: var(--line); }
+.study-chart .tip-text { fill: var(--muted); font-size: 10px; }
+.study-chart .tip-text.strong { fill: var(--text); font-weight: 600; }

@@ -58,6 +58,26 @@ verfeinert. Ergebnisansichten „Sicherheit Infill“ und „Wand / Infill“, d
 Grenzen: Ersatzwerte des Infills sind Näherungen (mit eigenem Zugstab kalibrieren); Stützstrukturen werden nicht
 abgebildet; linear-elastisch, kein Kriechen.
 
+## Auswerten und Weitergeben
+
+- **Schnittansicht** (Ergebnis): Ebene X/Y/Z verschieben, Schnittfläche zeigt die Werte im Inneren.
+- **Festigkeitsnachweis**: erforderliche Sicherheit gegen Fließen und Bruch, zulässige Verformung (Werkstoff-Bereich);
+  im Ergebnis Ausnutzung je Nachweis und „erfüllt/nicht erfüllt“.
+- **PDF-Bericht**: Bauteil, Netz, Werkstoff (inkl. 3D-Druck), Lager, Lasten, Ergebnisse, Nachweis, Hinweise, Bilder mit
+  Farbskala, Annahmen und Grenzen.
+- **MathPad**: Export als `.mathpad`-Rechenblatt (Werkstoffwerte, Maximalwerte, Lagerkräfte, Masse und Nachweis als
+  Formeln, z. B. `S_F = R_e / σ_v`).
+- **Parameterstudie** (Reiter „Studie“): Netzgröße (Konvergenz), Füllgrad oder Maße aus „Geometrie anpassen“ über
+  mehrere Werte, Tabelle + Diagramm, CSV-Export.
+- **Werkstoffe**: Vorlagen mit Dichte (Masse im Ergebnis), eigene Werkstoffe speichern
+  (`~/.config/projekt-fem/werkstoffe.json`), Werte aus eigenem Zugversuch übernehmen.
+
+## Leichtbau
+
+Ergebnisansicht „Materialausnutzung“ und **Leichtbau-Vorschlag** (Reiter Geometrie): Topologieoptimierung (SIMP,
+Empfindlichkeitsfilter, Optimalitätskriterium) mit vorgegebenem Materialanteil; Flächen mit Lagern und Lasten bleiben
+voll. Die Form erscheint im Bauteil, Schwellwert einstellbar, Export als STL.
+
 ## Geometrie anpassen (grobe Abschätzung)
 
 Reiter **„Geometrie“**: Radius oder Bohrung anklicken und neuen Wert eingeben (0 = scharfe Kante bzw. Bohrung zu),

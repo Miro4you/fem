@@ -569,6 +569,105 @@ export default function App() {
     }
   }
 
+  // --- Parameterstudie -------------------------------------------------------------------
+  const [study, setStudy] = useState({ param: 'mesh', values: '4; 3; 2; 1.5' })
+  const [studyRows, setStudyRows] = useState(null)
+
+  // Wählbare Parameter: Netzgröße, Füllgrad, je Geometrieänderung ein Maß
+  const studyParams = useMemo(() => {
+    const out = [{ key: 'mesh', label: 'Netzgröße (Konvergenzstudie)', unit: 'mm' }]
+    if (material.layered && material.infill?.on) out.push({ key: 'infill', label: 'Füllgrad', unit: '%' })
+    geoOps.forEach((o, i) => {
+      if (!o.enabled) return
+      const n = `${i + 1}. ${GEO_OPS[o.op]}`
+      if (o.op === 'fillet') out.push({ key: `geo:${o.id}:radius`, label: `${n}: Radius`, unit: 'mm' })
+      if (o.op === 'hole') out.push({ key: `geo:${o.id}:diameter`, label: `${n}: Durchmesser`, unit: 'mm' })
+      if (o.op === 'add') out.push({ key: `geo:${o.id}:height`, label: `${n}: Höhe`, unit: 'mm' })
+      if (o.op === 'cut') out.push({ key: `geo:${o.id}:depth`, label: `${n}: Tiefe`, unit: 'mm' })
+      if ((o.op === 'add' || o.op === 'cut') && o.sketch?.shape === 'circle') out.push({ key: `geo:${o.id}:dia`, label: `${n}: Skizze Ø`, unit: 'mm' })
+      if ((o.op === 'add' || o.op === 'cut') && o.sketch?.shape === 'rect') out.push({ key: `geo:${o.id}:width`, label: `${n}: Skizze Breite`, unit: 'mm' })
+    })
+    return out
+  }, [material, geoOps])
+
+  async function runStudy() {
+    const values = study.values.split(/[;\s]+/).map((v) => Number(v.replace(',', '.'))).filter((v) => Number.isFinite(v))
+    if (!values.length) return setError('Bitte Werte angeben, z. B. „4; 3; 2; 1,5“')
+    const param = study.param
+    const meta = studyParams.find((p) => p.key === param)
+    const rows = []
+    const origSurfaces = mesh.surfaces
+    const refine = currentRefine(meshSize)
+    const active = geoOps.filter((o) => o.enabled && !opProblem(o))
+    setError(null)
+    setActive(null)
+    setDrawing(null)
+    try {
+      for (const [i, v] of values.entries()) {
+        setBusy(`Studie ${meta.label} = ${fmt(v)} ${meta.unit} (${i + 1}/${values.length}) …`)
+        let mat = material
+        let sups = supports
+        let lds = loads
+        let m = mesh
+        if (param === 'mesh') {
+          m = active.length
+            ? (await api.modifyGeometry(stepPath, active.map(opPayload), v, currentRefine(v))).mesh
+            : await api.openStep(stepPath, v, false, currentRefine(v))
+        } else if (param === 'infill') {
+          mat = { ...material, infill: { ...material.infill, percent: v } }
+        } else if (param.startsWith('geo:')) {
+          const [, id, field] = param.split(':')
+          const ops = active.map((o) => {
+            if (String(o.id) !== id) return o
+            if (field === 'dia') return { ...o, sketch: { ...o.sketch, radius: v / 2 } }
+            if (field === 'width') return { ...o, sketch: { ...o.sketch, width: v } }
+            if (field === 'depth') return { ...o, depth: v, through: false }
+            return { ...o, [field]: v }
+          })
+          const g = await api.modifyGeometry(stepPath, ops.map(opPayload), Number(meshSize) || null, refine)
+          m = g.mesh
+          const map = remapSurfaces(origSurfaces, m.surfaces)
+          const re = (items) => items.map((x) => ({ ...x, surfaces: [...new Set(x.surfaces.map((t) => map.get(t)).filter((t) => t != null))] }))
+          sups = re(supports)
+          lds = re(loads)
+        }
+        const r = await api.solve(buildSetup(mat, sups, lds))
+        const rho = Number(material.rho)
+        rows.push({
+          value: v, vm: r.max_von_mises.value, u: r.max_displacement.value, safety: r.safety, safetyBreak: r.safety_break,
+          volume: r.solid_volume, mass: rho > 0 ? (r.solid_volume / 1000) * rho : null, elements: m.elements, equations: r.equations,
+        })
+        setStudyRows({ param: meta, rows: [...rows] })
+      }
+      // Ausgangszustand wiederherstellen (Netz und Ergebnis)
+      if (param === 'mesh' || param.startsWith('geo:')) {
+        setBusy('Ausgangszustand wiederherstellen …')
+        const m = active.length
+          ? (await api.modifyGeometry(stepPath, active.map(opPayload), Number(meshSize) || null, refine)).mesh
+          : await api.openStep(stepPath, Number(meshSize) || null, false, refine)
+        setMesh(m)
+      }
+      if (result) {
+        const r = await api.solve(buildSetup(material))
+        setResult(r)
+        setResultStale(false)
+      }
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function exportStudyCsv() {
+    if (!studyRows) return
+    const head = [`${studyRows.param.label} [${studyRows.param.unit}]`, 'max. Vergleichsspannung [MPa]', 'max. Verschiebung [mm]', 'Sicherheit', 'Sicherheit Bruch', 'Volumen [mm³]', 'Masse [g]', 'Elemente', 'Unbekannte']
+    const lines = [head.join(';')]
+    for (const r of studyRows.rows)
+      lines.push([r.value, r.vm, r.u, r.safety ?? '', r.safetyBreak ?? '', r.volume, r.mass ?? '', r.elements, r.equations].map((v) => String(v).replace('.', ',')).join(';'))
+    api.saveBlob(new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv' }), 'parameterstudie.csv', 'CSV', 'csv').catch((e) => setError(String(e)))
+  }
+
   // --- Leichtbau ----------------------------------------------------------------------
   async function onTopo(args) {
     setBusy('Leichtbau-Vorschlag berechnen …')
@@ -619,14 +718,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesh, supports, loads, surfaceInfo, drawing])
 
-  function buildSetup(mat) {
+  function buildSetup(mat, sups = supports, lds = loads) {
     return {
         material: materialPayload(mat),
-        supports: supports.map((s) => {
+        supports: sups.map((s) => {
           const f = supportFix(s)
           return { surfaces: s.surfaces, fix: f.fix, local: f.local ?? null, region: regionNumbers(s.region) }
         }),
-        loads: loads.map((l) => {
+        loads: lds.map((l) => {
           const base = { type: l.kind, surfaces: l.surfaces, region: regionNumbers(l.region) }
           if (l.kind === 'pressure') return { ...base, pressure: Number(l.pressure) }
           // Moment in der Oberfläche in N·m, im Rechenkern N·mm
@@ -847,6 +946,62 @@ export default function App() {
     }
   }
 
+  // --- MathPad: Rechenblatt mit Ergebnissen und Nachweis ---------------------------------
+  function onExportMathpad() {
+    if (!result) return
+    const file = (stepPath ?? 'Bauteil').split(/[\\/]/).pop()
+    const num = (v) => {
+      const x = Number(v)
+      return Math.abs(x) < 1e-9 ? '0' : String(Number(x.toPrecision(5)))
+    }
+    const has = (v) => v !== '' && v != null && Number.isFinite(Number(v))
+    const L = []
+    const note = (t) => L.push('"' + t)
+    note(`Projekt-FEM: ${file} – Ergebnis vom ${new Date().toLocaleDateString('de-DE')}`)
+    note(`Werkstoff: ${material.name}${material.layered ? ` (3D-Druck, Aufbaurichtung ${dirLabel(material.buildDir ?? [0, 0, 1])})` : ''}`)
+    L.push(`E = ${num(material.E)} MPa`)
+    if (has(material.yield)) L.push(`R_e = ${num(material.yield)} MPa`)
+    if (has(material.tensile)) L.push(`R_m = ${num(material.tensile)} MPa`)
+    if (material.layered) {
+      L.push(`E_z = ${num(material.E_z)} MPa`)
+      if (has(material.yield_z)) L.push(`R_ez = ${num(material.yield_z)} MPa`)
+      if (has(material.tensile_z)) L.push(`R_mz = ${num(material.tensile_z)} MPa`)
+    }
+    L.push('')
+    note('Ergebnisse der FEM-Rechnung (Maximalwerte)')
+    L.push(`σ_v = ${num(result.max_von_mises.value)} MPa`)
+    L.push(`σ_1 = ${num(result.max_sigma1.value)} MPa`)
+    L.push(`σ_3 = ${num(result.min_sigma3.value)} MPa`)
+    L.push(`u_max = ${num(result.max_displacement.value)} mm`)
+    const rho = Number(material.rho)
+    if (rho > 0) L.push(`m = ${num((result.solid_volume / 1000) * rho)} g`)
+    const ref = Math.hypot(...result.total_load) || 1
+    result.reactions.forEach((r, i) => {
+      const c = clean(r, ref)
+      ;['x', 'y', 'z'].forEach((a, k) => L.push(`F_A${i + 1}${a} = ${num(c[k])} N`))
+      L.push(`F_A${i + 1} = sqrt(F_A${i + 1}x^2 + F_A${i + 1}y^2 + F_A${i + 1}z^2)`)
+    })
+    L.push('')
+    note('Nachweis (Formeln rechnen live – Werte hier anpassen)')
+    const strength = has(material.yield) ? 'R_e' : has(material.tensile) ? 'R_m' : null
+    if (strength) {
+      L.push(`S_F = ${strength} / σ_v`)
+      if (result.governing) note(`FEM mit Schichtaufbau: S = ${num(result.safety)} (maßgeblich: ${result.governing}) – die Formel oben gilt nur in der Schicht`)
+    }
+    if (has(material.tensile) && strength === 'R_e') L.push('S_B = R_m / σ_v')
+    if (Number(proof.sF) > 0) L.push(`S_Ferf = ${num(proof.sF)}`)
+    if (Number(proof.sB) > 0) L.push(`S_Berf = ${num(proof.sB)}`)
+    if (strength && Number(proof.sF) > 0) L.push('a_F = S_Ferf / S_F')
+    if (has(material.tensile) && strength === 'R_e' && Number(proof.sB) > 0) L.push('a_B = S_Berf / S_B')
+    L.push('')
+    const lines = L.map((text, i) => ({ id: i + 1, text, mark: null }))
+    const name = file.replace(/\.(step|stp)$/i, '') + ' FEM'
+    const data = { lines, nid: lines.length + 1, name, savedAt: new Date().toISOString() }
+    api.saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), name + '.mathpad', 'MathPad-Arbeitsblatt', 'mathpad').catch((e) =>
+      setError(String(e)),
+    )
+  }
+
   function reportData(images) {
     const file = (stepPath ?? 'Bauteil').split(/[\\/]/).pop()
     const [lo, hi] = mesh.bbox
@@ -956,6 +1111,9 @@ export default function App() {
           </button>
           <button className={view === 'geometry' ? 'on' : ''} disabled={!mesh} onClick={() => { setActive(null); setAim(null); setDirPick(null); setDrawing(null); setView('geometry') }}>
             Geometrie{geoOps.some((o) => o.enabled) ? ` (${geoOps.filter((o) => o.enabled).length})` : ''}
+          </button>
+          <button className={view === 'study' ? 'on' : ''} disabled={!mesh} onClick={() => { setActive(null); setDrawing(null); setView('study') }}>
+            Studie
           </button>
           <button className={view === 'result' ? 'on' : ''} disabled={!result} onClick={() => setView('result')}>
             Ergebnis{resultStale && result ? ' (veraltet)' : ''}
@@ -1294,6 +1452,16 @@ export default function App() {
                 </div>
               )}
             </>
+          ) : view === 'study' ? (
+            <StudyPanel
+              study={study}
+              setStudy={setStudy}
+              params={studyParams}
+              rows={studyRows}
+              canRun={problems.length === 0 && !busy}
+              onRun={runStudy}
+              onCsv={exportStudyCsv}
+            />
           ) : view === 'geometry' ? (
             <GeometryPanel
               ops={geoOps}
@@ -1333,6 +1501,7 @@ export default function App() {
                 stale={resultStale}
                 onExport={onExportVtu}
                 onReport={onReport}
+                onMathpad={onExportMathpad}
                 cut={cut}
                 setCut={setCut}
                 proof={proof}
@@ -1535,7 +1704,7 @@ function Compare({ reference, current, onUnpin }) {
   )
 }
 
-function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, onReport, reference, current, onPin, onUnpin, cut, setCut, proof }) {
+function ResultPanel({ result, material, quantity, setQuantity, deform, setDeform, display, showMesh, setShowMesh, stale, onExport, onReport, onMathpad, reference, current, onPin, onUnpin, cut, setCut, proof }) {
   const rho = Number(material.rho)
   const massG = rho > 0 ? (result.solid_volume / 1000) * rho : null
   const sf = result.safety
@@ -1656,6 +1825,9 @@ function ResultPanel({ result, material, quantity, setQuantity, deform, setDefor
       <button className="btn wide primary" onClick={onReport} disabled={stale}>
         <Download size={15} /> Bericht als PDF
       </button>
+      <button className="btn wide" onClick={onMathpad} disabled={stale}>
+        <Download size={15} /> Nach MathPad (.mathpad)
+      </button>
       <button className="btn wide" onClick={onExport}>
         <Download size={15} /> Ergebnis für ParaView exportieren (.vtu)
       </button>
@@ -1698,6 +1870,156 @@ function NumField({ label, unit, value, onChange }) {
         {unit && <em>{unit}</em>}
       </div>
     </label>
+  )
+}
+
+// --- Parameterstudie --------------------------------------------------------------------------------
+
+const STUDY_METRICS = {
+  vm: { label: 'max. Vergleichsspannung', short: 'Spannung', unit: 'MPa' },
+  u: { label: 'max. Verschiebung', short: 'Verformung', unit: 'mm' },
+  safety: { label: 'Sicherheit', short: 'Sicherheit', unit: '' },
+  mass: { label: 'Masse', short: 'Masse', unit: 'g' },
+}
+
+// Liniendiagramm einer Messreihe (Wert über Parameter), Werte beim Darüberfahren
+function StudyChart({ rows, metric, param }) {
+  const [hover, setHover] = useState(null)
+  const pts = rows.filter((r) => r[metric] != null && Number.isFinite(r[metric]))
+  if (pts.length < 2) return <p className="hint">Für das Diagramm mindestens zwei Werte.</p>
+  const W = 300, H = 170, L = 44, R = 10, T = 10, B = 30
+  const xs = pts.map((r) => r.value)
+  const ys = pts.map((r) => r[metric])
+  const [x0, x1] = [Math.min(...xs), Math.max(...xs)]
+  let [y0, y1] = [Math.min(...ys), Math.max(...ys)]
+  const pad = (y1 - y0) * 0.1 || Math.abs(y1) * 0.1 || 1
+  y0 -= pad
+  y1 += pad
+  const sx = (x) => L + ((x - x0) / (x1 - x0 || 1)) * (W - L - R)
+  const sy = (y) => T + (1 - (y - y0) / (y1 - y0)) * (H - T - B)
+  const sorted = pts.map((r, i) => [r.value, r[metric], i]).sort((a, b) => a[0] - b[0])
+  const path = sorted.map(([x, y], i) => `${i ? 'L' : 'M'}${sx(x).toFixed(1)},${sy(y).toFixed(1)}`).join(' ')
+  const ticks = [0, 0.5, 1].map((t) => y0 + t * (y1 - y0))
+  const m = STUDY_METRICS[metric]
+  return (
+    <svg className="study-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${m.label} über ${param.label}`}>
+      {ticks.map((t) => (
+        <g key={t}>
+          <line x1={L} x2={W - R} y1={sy(t)} y2={sy(t)} className="grid" />
+          <text x={L - 5} y={sy(t) + 3} className="tick" textAnchor="end">
+            {fmt(t)}
+          </text>
+        </g>
+      ))}
+      {sorted.map(([x]) => (
+        <text key={'x' + x} x={sx(x)} y={H - B + 14} className="tick" textAnchor="middle">
+          {fmt(x)}
+        </text>
+      ))}
+      <text x={(L + W - R) / 2} y={H - 3} className="axis" textAnchor="middle">
+        {param.label} {param.unit && `[${param.unit}]`}
+      </text>
+      <path d={path} className="line" />
+      {sorted.map(([x, y, i]) => (
+        <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+          <circle cx={sx(x)} cy={sy(y)} r={12} className="hit" />
+          <circle cx={sx(x)} cy={sy(y)} r={hover === i ? 5.5 : 4} className="dot" />
+        </g>
+      ))}
+      {hover != null && (() => {
+        const r = pts[hover]
+        const x = Math.min(Math.max(sx(r.value), L + 50), W - R - 50)
+        return (
+          <g>
+            <rect x={x - 50} y={T} width={100} height={30} rx={4} className="tip" />
+            <text x={x} y={T + 12} textAnchor="middle" className="tip-text">
+              {fmt(r.value)} {param.unit}
+            </text>
+            <text x={x} y={T + 25} textAnchor="middle" className="tip-text strong">
+              {fmt(r[metric])} {m.unit}
+            </text>
+          </g>
+        )
+      })()}
+    </svg>
+  )
+}
+
+function StudyPanel({ study, setStudy, params, rows, canRun, onRun, onCsv }) {
+  const [metric, setMetric] = useState('vm')
+  const param = params.find((p) => p.key === study.param) ?? params[0]
+  const defaults = { mesh: '4; 3; 2; 1,5', infill: '10; 20; 40; 60; 100' }
+  return (
+    <>
+      <section className="section">
+        <h2>
+          <Layers size={15} /> Parameterstudie
+        </h2>
+        <p className="hint">
+          Rechnet dasselbe Modell für mehrere Werte eines Parameters. Die Netzstudie zeigt, ob eine Spannung belastbar ist: Bleibt sie bei feinerem
+          Netz gleich, passt es; wächst sie immer weiter, ist es eine Singularität (Lagerkante, scharfe Ecke). Geometriemaße erscheinen hier, sobald im
+          Reiter Geometrie eine Änderung angelegt ist.
+        </p>
+        <label className="field">
+          <span>Parameter</span>
+          <select
+            value={param.key}
+            onChange={(e) => setStudy({ param: e.target.value, values: defaults[e.target.value] ?? study.values })}
+          >
+            {params.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Werte {param.unit && `[${param.unit}]`}, getrennt mit Semikolon</span>
+          <input value={study.values} onChange={(e) => setStudy({ ...study, values: e.target.value })} />
+        </label>
+        <button className="btn primary wide" disabled={!canRun} onClick={onRun} title={canRun ? '' : 'Erst Lager und Lasten im Reiter Modell festlegen'}>
+          <Play size={15} /> Studie starten
+        </button>
+      </section>
+      {rows && (
+        <section className="section">
+          <h2>Ergebnis: {rows.param.label}</h2>
+          <div className="segmented small">
+            {Object.entries(STUDY_METRICS).map(([k, m]) => (
+              <button key={k} className={metric === k ? 'on' : ''} onClick={() => setMetric(k)}>
+                {m.short}
+              </button>
+            ))}
+          </div>
+          <StudyChart rows={rows.rows} metric={metric} param={rows.param} />
+          <table className="orient-table">
+            <thead>
+              <tr>
+                <th>{rows.param.unit || 'Wert'}</th>
+                <th>σv max</th>
+                <th>u max</th>
+                <th>S</th>
+                <th>Elem.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.rows.map((r) => (
+                <tr key={r.value}>
+                  <td>{fmt(r.value)}</td>
+                  <td>{fmt(r.vm)}</td>
+                  <td>{fmt(r.u)}</td>
+                  <td>{fmt(r.safety)}</td>
+                  <td>{r.elements.toLocaleString('de-DE')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button className="btn wide" onClick={onCsv}>
+            <Download size={15} /> Tabelle als CSV (Excel)
+          </button>
+        </section>
+      )}
+    </>
   )
 }
 

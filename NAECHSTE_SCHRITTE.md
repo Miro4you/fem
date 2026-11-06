@@ -55,8 +55,15 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - ✅ Geometrie anpassen (grobe Abschätzung): Reiter „Geometrie“ – Radius/Bohrung ändern, Material hinzu/weg per
   Skizze, Vorher/Nachher-Vergleich. Später möglich: Linienzug-Skizze, Kanten neu verrunden, Fasen
 - Hinweis: Die „R3“-Radien am Hebel (Flächen 16/17) sind laut Geometrie R6
-- Danach: „wenig genutztes Material“ + Topologieoptimierung (Leichtbau)
-- Mac-Build testen
+- ✅ Fortschrittsanzeige, Netzverfeinerung in Wirkbereichen
+- ✅ 3D-Druck: Wände + Infill (Schale + Kern), Aufbaurichtung frei optimieren, Überhänge, Kalibrierung
+- ✅ Schnittansicht
+- ✅ Leichtbau: Materialausnutzung + Topologieoptimierung mit STL-Export
+- ✅ Phase 3: Werkstoffdatenbank (Dichte, eigene Werkstoffe), Festigkeitsnachweis, PDF-Bericht,
+  Parameterstudien, MathPad-Export
+- **Neu: Baugruppen** – mehrere Körper aus einer STEP-Datei: Werkstoff je Körper, Verbindungen (verklebt/
+  verschraubt/Kontakt), Körper ein-/ausblenden, Kräfte zwischen den Körpern auswerten
+- Mac: läuft laut Felix (installiert) – Rückmeldung abwarten
 - Endgültiger Programmname
 
 ## 4. Phase 3 (erst nach Felix' Go)
