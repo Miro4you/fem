@@ -83,6 +83,11 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
   SolidCraft zum Anschauen. Breite Kompatibilität bleibt Ziel (Bekanntheit). Nächste Kandidaten: Parameterstudie über
   ✅ Onshape-Variablen (Teilestudio) – mit echtem Onshape getestet. Offen: Variablen-Studios, Konfigurationen,
   SolidWorks-Konfigurationen. Onshape-Anbindung mit echtem Konto getestet (06.11.)
+- **Neu (später, nach Baugruppen): Bewegungssimulation + FEM** – Mechanismus aus der Baugruppe (Gelenke: Drehgelenk,
+  Schubgelenk, Bolzen), Antrieb (Drehzahl/Kurbelwinkel oder Kraft/Moment), Starrkörper-Mehrkörperrechnung → Gelenk-
+  und Bolzenkräfte über den Bewegungsweg (inkl. Massenkräfte) → Kurve „Kraft über Winkel/Zeit“ → für die kritischen
+  Stellungen automatisch FEM je Teil (quasistatisch, z. B. Koppelstange + Bolzen) → Sicherheit über den Bewegungsweg,
+  später Dauerfestigkeit (Lastzyklen) und Bolzen auf Abscheren/Lochleibung. Onshape-Mates/Fusion-Gelenke übernehmen.
 - **Neu: Baugruppen** – mehrere Körper aus einer STEP-Datei: Werkstoff je Körper, Verbindungen (verklebt/
   verschraubt/Kontakt), Körper ein-/ausblenden, Kräfte zwischen den Körpern auswerten
 - Mac: läuft laut Felix (installiert) – Rückmeldung abwarten
