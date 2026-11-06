@@ -21,7 +21,7 @@ use tokio::sync::oneshot;
 
 use crate::{
     modify_geometry_impl, open_step_impl, orientation_scan_impl, progress_impl, section_impl, solve_impl, topo_stl_impl, topo_surface_impl,
-    topopt_impl, write_vtu_impl, AppState, Setup, TopoArgs,
+    topopt_impl, write_vtu_impl, AppState, Setup, TopoArgs, modes_impl,
 };
 use fem_core::gmsh::Refine;
 
@@ -169,6 +169,7 @@ fn router(shared: Shared) -> Router {
         .route("/section", post(api_section))
         .route("/orientation_scan", post(api_orientation_scan))
         .route("/topopt", post(api_topopt))
+        .route("/modes", post(api_modes))
         .route("/topo_surface", post(api_topo_surface))
         .route("/topo_stl", get(api_topo_stl))
         .route("/vtu", get(api_vtu))
@@ -354,6 +355,20 @@ struct ScanArgs {
 async fn api_orientation_scan(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<ScanArgs>) -> ApiResult<Response> {
     let state = s.session(&headers);
     let v = tokio::task::spawn_blocking(move || orientation_scan_impl(&state, a.material)).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(v).into_response())
+}
+
+#[derive(Deserialize)]
+struct ModesReq {
+    setup: Setup,
+    kind: String,
+    count: usize,
+    density: Option<f64>,
+}
+
+async fn api_modes(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<ModesReq>) -> ApiResult<Response> {
+    let state = s.session(&headers);
+    let v = tokio::task::spawn_blocking(move || modes_impl(&state, a.setup, &a.kind, a.count, a.density)).await.map_err(bad)?.map_err(bad)?;
     Ok(Json(v).into_response())
 }
 

@@ -401,6 +401,26 @@ export default function Viewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesh])
 
+  // --- Animation (Schwing-/Knickform): Verformung periodisch ---------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    if (!(mode === 'result' && result?.animate && s.surf)) return
+    let raf = 0
+    const t0 = performance.now()
+    const tick = () => {
+      const k = Math.sin(((performance.now() - t0) / 1000) * 2 * Math.PI * 0.8)
+      deform(s, result.scale * k, result.displacement)
+      s.dirty = true
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      deform(s, result.scale, result.displacement)
+      s.dirty = true
+    }
+  }, [result, mode, mesh])
+
   // --- Geometrie (Verformung), Farben -----------------------------------------
   useEffect(() => {
     const s = ctx.current
@@ -735,6 +755,25 @@ export default function Viewport({
       ))}
     </div>
   )
+}
+
+// Oberfläche und Kanten mit Verformung (scale · disp) versetzen
+function deform(s, scale, disp) {
+  const pos = s.surf.geometry.attributes.position.array
+  for (let v = 0; v < s.vertNode.length; v++) {
+    const n = s.vertNode[v]
+    for (let k = 0; k < 3; k++) pos[3 * v + k] = s.base[3 * n + k] + (disp ? scale * disp[3 * n + k] : 0)
+  }
+  s.surf.geometry.attributes.position.needsUpdate = true
+  for (const line of [s.edges, s.wire]) {
+    const arr = line.geometry.attributes.position.array
+    const pairs = line.geometry.userData.pairs
+    for (let i = 0; i < pairs.length; i++) {
+      const n = pairs[i]
+      for (let k = 0; k < 3; k++) arr[3 * i + k] = s.base[3 * n + k] + (disp ? scale * disp[3 * n + k] : 0)
+    }
+    line.geometry.attributes.position.needsUpdate = true
+  }
 }
 
 // Ebenen für das Ausrichten des Lastpfeils: zwei Richtungen (u, v); Winkel wird von u nach v gemessen

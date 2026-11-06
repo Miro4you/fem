@@ -64,98 +64,7 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
     };
 
     // --- Randbedingungen ---------------------------------------------------
-    let mut prescribed: Vec<Option<f64>> = vec![None; ndof];
-    // Knoten ohne Element (z. B. Geometriepunkte aus Gmsh) festhalten
-    let mut used = vec![false; n_nodes];
-    for &n in &mesh.conn {
-        used[n] = true;
-    }
-    for (n, _) in used.iter().enumerate().filter(|(_, &u)| !u) {
-        for k in 0..3 {
-            prescribed[3 * n + k] = Some(0.0);
-        }
-    }
-    let mut support_nodes = Vec::new();
-    // lokal festgehaltene Richtungen je Knoten (Einheitsvektoren, global)
-    let mut local_dirs: std::collections::BTreeMap<usize, Vec<Vector3<f64>>> = Default::default();
-    for s in &model.supports {
-        let mut nodes: Vec<usize> = model
-            .group_faces(&s.group, &faces)?
-            .into_iter()
-            .flat_map(|f| faces[f].nodes.clone())
-            .collect();
-        nodes.sort_unstable();
-        nodes.dedup();
-        if let Some(region) = model.group_region(&s.group)? {
-            let tol = mesh.tolerance();
-            nodes.retain(|&n| region.contains(mesh.nodes[n], tol));
-            if nodes.is_empty() {
-                return Err(FemError::BadLoad(s.group.clone(), "der Wirkbereich trifft die gewählten Flächen nicht".into()));
-            }
-        }
-        match &s.local {
-            None => {
-                for &n in &nodes {
-                    for (k, v) in s.fix.components().iter().enumerate() {
-                        if v.is_some() {
-                            prescribed[3 * n + k] = *v;
-                        }
-                    }
-                }
-            }
-            Some(LocalFix::Normal) => {
-                let normals = node_normals(model, &faces, &model.group_faces(&s.group, &faces)?);
-                for &n in &nodes {
-                    if let Some(nv) = normals.get(&n) {
-                        local_dirs.entry(n).or_default().push(*nv);
-                    }
-                }
-            }
-            Some(LocalFix::Cylindrical { origin, axis, radial, tangential, axial }) => {
-                let a = Vector3::from(*axis).normalize();
-                for &n in &nodes {
-                    let d = Vector3::from(mesh.nodes[n]) - Vector3::from(*origin);
-                    let r = d - a * d.dot(&a);
-                    if r.norm() <= mesh.tolerance() {
-                        return Err(FemError::BadLoad(s.group.clone(), "Knoten auf der Zylinderachse – Achse prüfen".into()));
-                    }
-                    let er = r.normalize();
-                    let dirs = local_dirs.entry(n).or_default();
-                    for (on, v) in [(*radial, er), (*tangential, a.cross(&er)), (*axial, a)] {
-                        if on {
-                            dirs.push(v);
-                        }
-                    }
-                }
-            }
-        }
-        support_nodes.push((s.group.clone(), nodes));
-    }
-    // Knoten mit lokalen Lagern: Basis aus den festgehaltenen Richtungen (inkl. globaler Lager am selben Knoten)
-    let mut frames = NodeFrames::new(n_nodes);
-    for (n, mut dirs) in local_dirs {
-        for k in 0..3 {
-            if let Some(v) = prescribed[3 * n + k] {
-                if v != 0.0 {
-                    return Err(FemError::Input("vorgegebene Verschiebung ≠ 0 an einem Knoten mit lokaler Lagerung".into()));
-                }
-                let mut e = Vector3::zeros();
-                e[k] = 1.0;
-                dirs.push(e);
-            }
-        }
-        let basis = orthonormal_basis(&dirs);
-        let fixed = basis.len();
-        if fixed == 0 {
-            continue;
-        }
-        for k in 0..3 {
-            prescribed[3 * n + k] = (k < fixed || fixed == 3).then_some(0.0);
-        }
-        if fixed < 3 {
-            frames.set(n, complete_basis(&basis));
-        }
-    }
+    let Constraints { prescribed, support_nodes, frames } = constraints(model, &faces)?;
 
     progress.report("Lasten verteilen", None);
     let f_ext = load_vector(model, &faces)?;
@@ -459,6 +368,113 @@ fn solve_direct(
     Ok(u)
 }
 
+/// Lagerbedingungen: vorgegebene Freiheitsgrade (lokal an Knoten mit eigener Basis), Knoten je Lager, Knotenbasen
+pub(crate) struct Constraints {
+    pub prescribed: Vec<Option<f64>>,
+    pub support_nodes: Vec<(String, Vec<usize>)>,
+    pub frames: NodeFrames,
+}
+
+pub(crate) fn constraints(model: &Model, faces: &[Face]) -> Result<Constraints> {
+    let mesh = &model.mesh;
+    let n_nodes = mesh.nodes.len();
+    let ndof = 3 * n_nodes;
+    let mut prescribed: Vec<Option<f64>> = vec![None; ndof];
+    // Knoten ohne Element (z. B. Geometriepunkte aus Gmsh) festhalten
+    let mut used = vec![false; n_nodes];
+    for &n in &mesh.conn {
+        used[n] = true;
+    }
+    for (n, _) in used.iter().enumerate().filter(|(_, &u)| !u) {
+        for k in 0..3 {
+            prescribed[3 * n + k] = Some(0.0);
+        }
+    }
+    let mut support_nodes = Vec::new();
+    // lokal festgehaltene Richtungen je Knoten (Einheitsvektoren, global)
+    let mut local_dirs: std::collections::BTreeMap<usize, Vec<Vector3<f64>>> = Default::default();
+    for s in &model.supports {
+        let mut nodes: Vec<usize> = model
+            .group_faces(&s.group, &faces)?
+            .into_iter()
+            .flat_map(|f| faces[f].nodes.clone())
+            .collect();
+        nodes.sort_unstable();
+        nodes.dedup();
+        if let Some(region) = model.group_region(&s.group)? {
+            let tol = mesh.tolerance();
+            nodes.retain(|&n| region.contains(mesh.nodes[n], tol));
+            if nodes.is_empty() {
+                return Err(FemError::BadLoad(s.group.clone(), "der Wirkbereich trifft die gewählten Flächen nicht".into()));
+            }
+        }
+        match &s.local {
+            None => {
+                for &n in &nodes {
+                    for (k, v) in s.fix.components().iter().enumerate() {
+                        if v.is_some() {
+                            prescribed[3 * n + k] = *v;
+                        }
+                    }
+                }
+            }
+            Some(LocalFix::Normal) => {
+                let normals = node_normals(model, &faces, &model.group_faces(&s.group, &faces)?);
+                for &n in &nodes {
+                    if let Some(nv) = normals.get(&n) {
+                        local_dirs.entry(n).or_default().push(*nv);
+                    }
+                }
+            }
+            Some(LocalFix::Cylindrical { origin, axis, radial, tangential, axial }) => {
+                let a = Vector3::from(*axis).normalize();
+                for &n in &nodes {
+                    let d = Vector3::from(mesh.nodes[n]) - Vector3::from(*origin);
+                    let r = d - a * d.dot(&a);
+                    if r.norm() <= mesh.tolerance() {
+                        return Err(FemError::BadLoad(s.group.clone(), "Knoten auf der Zylinderachse – Achse prüfen".into()));
+                    }
+                    let er = r.normalize();
+                    let dirs = local_dirs.entry(n).or_default();
+                    for (on, v) in [(*radial, er), (*tangential, a.cross(&er)), (*axial, a)] {
+                        if on {
+                            dirs.push(v);
+                        }
+                    }
+                }
+            }
+        }
+        support_nodes.push((s.group.clone(), nodes));
+    }
+    // Knoten mit lokalen Lagern: Basis aus den festgehaltenen Richtungen (inkl. globaler Lager am selben Knoten)
+    let mut frames = NodeFrames::new(n_nodes);
+    for (n, mut dirs) in local_dirs {
+        for k in 0..3 {
+            if let Some(v) = prescribed[3 * n + k] {
+                if v != 0.0 {
+                    return Err(FemError::Input("vorgegebene Verschiebung ≠ 0 an einem Knoten mit lokaler Lagerung".into()));
+                }
+                let mut e = Vector3::zeros();
+                e[k] = 1.0;
+                dirs.push(e);
+            }
+        }
+        let basis = orthonormal_basis(&dirs);
+        let fixed = basis.len();
+        if fixed == 0 {
+            continue;
+        }
+        for k in 0..3 {
+            prescribed[3 * n + k] = (k < fixed || fixed == 3).then_some(0.0);
+        }
+        if fixed < 3 {
+            frames.set(n, complete_basis(&basis));
+        }
+    }
+
+    Ok(Constraints { prescribed, support_nodes, frames })
+}
+
 /// Lokale Basis je Knoten (Zeilen = lokale Richtungen in globalen Koordinaten, u_lokal = R·u_global).
 /// Knoten ohne Eintrag rechnen global.
 pub struct NodeFrames {
@@ -499,8 +515,13 @@ impl NodeFrames {
         self.apply(v, true)
     }
 
+    /// lokale Komponenten an Knoten mit eigener Basis in globale umrechnen
+    pub(crate) fn to_global_pub(&self, v: &mut [f64]) {
+        self.apply(v, true)
+    }
+
     /// Elementsteifigkeit in die Knotenbasen drehen: K'_ab = R_a · K_ab · R_bᵀ
-    fn transform_element(&self, nodes: &[usize], ke: &mut DMatrix<f64>) {
+    pub(crate) fn transform_element(&self, nodes: &[usize], ke: &mut DMatrix<f64>) {
         if self.mats.is_empty() || nodes.iter().all(|&n| self.get(n).is_none()) {
             return;
         }

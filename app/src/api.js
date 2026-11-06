@@ -141,6 +141,10 @@ export async function saveBlob(blob, name, filterName, ext) {
   download(blob, name)
 }
 
+/// Eigenfrequenzen ('modal') bzw. Knicken ('buckling'); density in g/cm³
+export const modes = (setup, kind, count, density) =>
+  isDesktop ? invoke('modes', { setup, kind, count, density }) : http('/modes', { method: 'POST', json: { setup, kind, count, density } })
+
 export const solve = (setup) => (isDesktop ? invoke('solve', { setup }) : http('/solve', { method: 'POST', json: { setup } }))
 
 /// STEP auswählen → Pfad auf dem rechnenden Rechner (im Browser: hochladen)

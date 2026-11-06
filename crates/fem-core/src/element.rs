@@ -137,6 +137,88 @@ pub fn tet_nodal_stress(coords: &[[f64; 3]], u: &[f64], d: &DMat) -> Vec<[f64; 6
         .collect()
 }
 
+/// Formfunktionen an (ξ, η, ζ)
+pub fn tet_shape(npe: usize, xi: [f64; 3]) -> Vec<f64> {
+    let l = [1.0 - xi[0] - xi[1] - xi[2], xi[0], xi[1], xi[2]];
+    if npe == 4 {
+        return l.to_vec();
+    }
+    let mut n: Vec<f64> = l.iter().map(|&li| li * (2.0 * li - 1.0)).collect();
+    for &(a, b) in &TET_EDGES {
+        n.push(4.0 * l[a] * l[b]);
+    }
+    n
+}
+
+/// Genauere Integrationsregel im Einheitstetraeder (kollabierter 4×4×4-Gauß, exakt bis Grad 7):
+/// ξ = u, η = v·(1 − u), ζ = w·(1 − u)·(1 − v). Rückgabe (ξ, η, ζ, Gewicht), Summe der Gewichte = 1/6.
+pub fn tet_gauss_high() -> Vec<[f64; 4]> {
+    let x = [0.861_136_311_594_052_6, 0.339_981_043_584_856_3];
+    let w = [0.347_854_845_137_453_9, 0.652_145_154_862_546_1];
+    let mut pts1: Vec<(f64, f64)> = Vec::new();
+    for k in 0..2 {
+        for s in [-1.0f64, 1.0] {
+            pts1.push(((1.0 + s * x[k]) / 2.0, w[k] / 2.0));
+        }
+    }
+    let mut out = Vec::with_capacity(64);
+    for &(u, wu) in &pts1 {
+        for &(v, wv) in &pts1 {
+            for &(t, wt) in &pts1 {
+                let xi = [u, v * (1.0 - u), t * (1.0 - u) * (1.0 - v)];
+                out.push([xi[0], xi[1], xi[2], wu * wv * wt * (1.0 - u).powi(2) * (1.0 - v)]);
+            }
+        }
+    }
+    out
+}
+
+/// Konsistente Massenmatrix (3n × 3n), Dichte `rho` in Masse/Volumen der Modelleinheiten (mm, N → t/mm³)
+pub fn tet_mass(coords: &[[f64; 3]], rho: f64) -> DMatrix<f64> {
+    let npe = coords.len();
+    let mut m = DMatrix::zeros(3 * npe, 3 * npe);
+    for g in tet_gauss_high() {
+        let xi = [g[0], g[1], g[2]];
+        let n = tet_shape(npe, xi);
+        let (_, det) = tet_dshape_global(coords, xi);
+        let f = rho * det * g[3];
+        for a in 0..npe {
+            for b in 0..npe {
+                let v = f * n[a] * n[b];
+                for k in 0..3 {
+                    m[(3 * a + k, 3 * b + k)] += v;
+                }
+            }
+        }
+    }
+    m
+}
+
+/// Geometrische Steifigkeit (Spannungsversteifung) aus den Knotenverschiebungen eines Grundzustands:
+/// K_G[3a+i, 3b+i] = ∫ ∇N_aᵀ·S·∇N_b dV, S = Spannungstensor an den Gauß-Punkten
+pub fn tet_geometric_stiffness(coords: &[[f64; 3]], u: &[f64], d: &DMat) -> DMatrix<f64> {
+    let npe = coords.len();
+    let ue = nalgebra::DVector::from_column_slice(u);
+    let mut kg = DMatrix::zeros(3 * npe, 3 * npe);
+    for g in tet_gauss(npe) {
+        let (dndx, det) = tet_dshape_global(coords, [g[0], g[1], g[2]]);
+        let sv = d * nalgebra::SVector::<f64, 6>::from_iterator((b_matrix(&dndx) * &ue).iter().copied());
+        let sm = Matrix3::new(sv[0], sv[3], sv[5], sv[3], sv[1], sv[4], sv[5], sv[4], sv[2]);
+        let f = det * g[3];
+        for a in 0..npe {
+            let ga = Vector3::new(dndx[(0, a)], dndx[(1, a)], dndx[(2, a)]);
+            let sa = sm * ga;
+            for b in 0..npe {
+                let v = f * sa.dot(&Vector3::new(dndx[(0, b)], dndx[(1, b)], dndx[(2, b)]));
+                for k in 0..3 {
+                    kg[(3 * a + k, 3 * b + k)] += v;
+                }
+            }
+        }
+    }
+    kg
+}
+
 pub fn tet_volume(coords: &[[f64; 3]]) -> f64 {
     let p = |i: usize| Vector3::from(coords[i]);
     (p(1) - p(0)).cross(&(p(2) - p(0))).dot(&(p(3) - p(0))) / 6.0
@@ -306,6 +388,24 @@ mod tests {
             assert!((a1 - a2).norm() < 1e-12, "sub {sub}");
             // Formfunktionen summieren sich zu 1
             assert!(pts.iter().all(|p| (p.n.iter().sum::<f64>() - 1.0).abs() < 1e-12));
+        }
+    }
+
+    #[test]
+    fn masse_und_hohe_integration() {
+        let w: f64 = tet_gauss_high().iter().map(|g| g[3]).sum();
+        assert!((w - 1.0 / 6.0).abs() < 1e-14);
+        // ∫ ξ²·η² über das Einheitstetraeder = 2!·2!·0!/(4+3)! ·… = 4/5040
+        let i: f64 = tet_gauss_high().iter().map(|g| g[0] * g[0] * g[1] * g[1] * g[3]).sum();
+        assert!((i - 4.0 / 5040.0).abs() < 1e-15, "{i}");
+        for npe in [4, 10] {
+            let c = ref_tet(npe);
+            let v = tet_volume(&c[..4]);
+            let m = tet_mass(&c, 2.0);
+            // Summe je Richtung = Gesamtmasse, symmetrisch
+            let total: f64 = (0..npe).flat_map(|a| (0..npe).map(move |b| (a, b))).map(|(a, b)| m[(3 * a, 3 * b)]).sum();
+            assert!((total - 2.0 * v).abs() < 1e-12 * v, "{npe}: {total} vs {}", 2.0 * v);
+            assert!((m.clone() - m.transpose()).abs().max() < 1e-14);
         }
     }
 

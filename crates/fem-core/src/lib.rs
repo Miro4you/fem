@@ -4,6 +4,7 @@
 //! Empfohlen (wie im Maschinenbau üblich): mm, N, N/mm² (= MPa).
 
 pub mod amg;
+pub mod dynamics;
 pub mod element;
 pub mod generate;
 pub mod infill;

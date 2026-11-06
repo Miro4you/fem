@@ -357,6 +357,35 @@ pub fn zugstab_infill(kind: crate::SolverKind) -> Result<Vec<Check>> {
     ])
 }
 
+/// Kragbalken 200 × 10 × 10 (Stahl, eingespannt): Eigenfrequenzen nach Euler-Bernoulli
+/// f_i = (β_i·L)² / (2π·L²) · √(E·I / (ρ·A)), β₁L = 1,8751, β₂L = 4,6941; Querschnitt quadratisch → je zwei gleiche.
+/// Euler-Knicken (Fall 1, eingespannt–frei): P_kr = π²·E·I / (4·L²).
+pub fn kragbalken_dynamik() -> Result<Vec<Check>> {
+    let (l, a) = (200.0, 10.0);
+    let mat = Material::steel();
+    let rho = 7.85e-9; // t/mm³
+    let base = || -> Result<Model> {
+        Ok(Model::new(box_mesh([l, a, a], [40, 2, 2], Order::Quadratic)?, mat.clone())
+            .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
+            .group("ende", Selection::Plane { axis: Axis::X, value: l })
+            .support("x0", Fix::all()))
+    };
+    let i = a.powi(4) / 12.0;
+    let area = a * a;
+    let f = |bl: f64| bl * bl / (2.0 * std::f64::consts::PI * l * l) * (mat.e * i / (rho * area)).sqrt();
+    let modes = crate::dynamics::eigenfrequencies(&base()?, rho, 4)?;
+    let name = "Kragbalken 200×10×10 Stahl: Eigenfrequenzen / Knicken (TET10)";
+    let f_load = 1000.0;
+    let buck = crate::dynamics::buckling(&base()?.load(Load::Force { group: "ende".into(), force: [-f_load, 0.0, 0.0] }), 2)?;
+    let p_cr = std::f64::consts::PI.powi(2) * mat.e * i / (4.0 * l * l);
+    Ok(vec![
+        check(name, "1. Biegeeigenfrequenz [Hz]", modes.values[0], f(1.875_104), 0.02),
+        check(name, "1. Biegeeigenfrequenz, 2. Richtung [Hz]", modes.values[1], f(1.875_104), 0.02),
+        check(name, "2. Biegeeigenfrequenz [Hz]", modes.values[2], f(4.694_091), 0.03),
+        check(name, "Knicklast (Euler Fall 1) [N]", buck.values[0] * f_load, p_cr, 0.02),
+    ])
+}
+
 /// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
@@ -369,6 +398,7 @@ pub fn all() -> Result<Vec<Check>> {
     }
     v.extend(zugstab_gedruckt()?);
     v.extend(zugstab_infill(crate::SolverKind::Direct)?);
+    v.extend(kragbalken_dynamik()?);
     v.extend(zugstab_schraeg(crate::SolverKind::Direct)?);
     v.extend(zugstab_schraeg(crate::SolverKind::Iterative)?);
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");

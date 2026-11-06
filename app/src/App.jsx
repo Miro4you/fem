@@ -99,6 +99,10 @@ export default function App() {
   const [proof, setProof] = useState({ sF: '1.5', sB: '2', uMax: '' })
   // Leichtbau-Vorschlag: { view, threshold, show, surface }
   const [topo, setTopo] = useState(null)
+  // Analyseart: Statik, Eigenfrequenzen, Knicken; Ergebnis der Eigenwertrechnung
+  const [analysis, setAnalysis] = useState('static')
+  const [modeCount, setModeCount] = useState('6')
+  const [modes, setModes] = useState(null) // { kind, values, shapes, seconds, sel, animate }
   const [result, setResult] = useState(null)
   const [resultStale, setResultStale] = useState(false)
   const [view, setView] = useState('setup')
@@ -704,7 +708,8 @@ export default function App() {
       const f = supportFix(s)
       if (f.error) p.push(`Lager ${i + 1}: ${f.error}`)
     })
-    if (!loads.length) p.push('Mindestens eine Last anlegen')
+    if (!loads.length && analysis !== 'modal') p.push('Mindestens eine Last anlegen')
+    if (analysis === 'modal' && !(Number(material.rho) > 0)) p.push('Für Eigenfrequenzen die Dichte des Werkstoffs angeben')
     loads.forEach((l, i) => {
       if (!l.surfaces.length) p.push(`Last ${i + 1}: Flächen wählen`)
       if (l.kind === 'bearing' && l.surfaces.some((t) => !surfaceInfo.get(t)?.cylinder))
@@ -716,7 +721,7 @@ export default function App() {
       })
     return p
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mesh, supports, loads, surfaceInfo, drawing])
+  }, [mesh, supports, loads, surfaceInfo, drawing, analysis, material.rho])
 
   function buildSetup(mat, sups = supports, lds = loads) {
     return {
@@ -797,6 +802,24 @@ export default function App() {
     }
   }
 
+  async function onModes() {
+    setBusy(analysis === 'modal' ? 'Eigenfrequenzen berechnen …' : 'Knicklasten berechnen …')
+    setError(null)
+    setActive(null)
+    setDrawing(null)
+    setAim(null)
+    try {
+      const m = await api.modes(buildSetup(material), analysis, Number(modeCount) || 6, Number(material.rho) || null)
+      setModes({ ...m, sel: 0, animate: true })
+      setView('result')
+      setProbe(null)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function onExportVtu() {
     api.exportVtu(stepPath).catch((e) => setError(String(e)))
   }
@@ -834,7 +857,20 @@ export default function App() {
   }, [cutPlane, result, resultStale])
 
   // --- Ergebnisanzeige ----------------------------------------------------------------
+  const showModes = analysis !== 'static' && modes && modes.kind === analysis
   const display = useMemo(() => {
+    if (showModes && mesh) {
+      const sh = modes.shapes[modes.sel] ?? modes.shapes[0]
+      const n = sh.length / 3
+      const values = new Float32Array(n)
+      let imax = 0
+      for (let i = 0; i < n; i++) {
+        values[i] = Math.hypot(sh[3 * i], sh[3 * i + 1], sh[3 * i + 2])
+        if (values[i] > values[imax]) imax = i
+      }
+      const scale = 0.08 * diag
+      return { values, min: 0, max: 1, imin: 0, imax, reverse: false, displacement: sh, scale, auto: scale, cut: null, animate: modes.animate, modal: true }
+    }
     if (!result || !mesh) return null
     const n = result.von_mises.length
     let values
@@ -881,10 +917,10 @@ export default function App() {
     const scale = deform === 'off' ? 0 : deform === 'true' ? 1 : auto
     const cutView = cutData && cutValues && cutPlane ? { ...cutData, values: cutValues, plane: cutPlane } : null
     return { values, min, max, imin, imax, reverse, displacement: result.displacement, scale, auto, cut: cutView }
-  }, [result, mesh, quantity, deform, diag, cutData, cutPlane])
+  }, [result, mesh, quantity, deform, diag, cutData, cutPlane, showModes, modes])
 
   const markers = useMemo(() => {
-    if (!display) return []
+    if (!display || display.modal) return []
     const q = QUANTITIES[quantity]
     const u = q.unit ? ' ' + q.unit : ''
     const m = []
@@ -1115,7 +1151,7 @@ export default function App() {
           <button className={view === 'study' ? 'on' : ''} disabled={!mesh} onClick={() => { setActive(null); setDrawing(null); setView('study') }}>
             Studie
           </button>
-          <button className={view === 'result' ? 'on' : ''} disabled={!result} onClick={() => setView('result')}>
+          <button className={view === 'result' ? 'on' : ''} disabled={!result && !modes} onClick={() => setView('result')}>
             Ergebnis{resultStale && result ? ' (veraltet)' : ''}
           </button>
         </div>
@@ -1439,9 +1475,27 @@ export default function App() {
 
               {mesh && (
                 <div className="solve">
-                  <button className="btn primary wide big" disabled={problems.length > 0 || !!busy} onClick={() => onSolve()}>
-                    <Play size={16} /> Rechnen
+                  <div className="row analysis-row">
+                    <div className="segmented small">
+                      {[['static', 'Statik'], ['modal', 'Eigenfrequenzen'], ['buckling', 'Knicken']].map(([k, l]) => (
+                        <button key={k} className={analysis === k ? 'on' : ''} onClick={() => setAnalysis(k)}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                    {analysis !== 'static' && (
+                      <label className="field mini">
+                        <div className="input-unit">
+                          <input value={modeCount} onChange={(e) => setModeCount(e.target.value)} title="Anzahl Moden" />
+                          <em>Moden</em>
+                        </div>
+                      </label>
+                    )}
+                  </div>
+                  <button className="btn primary wide big" disabled={problems.length > 0 || !!busy} onClick={() => (analysis === 'static' ? onSolve() : onModes())}>
+                    <Play size={16} /> {analysis === 'static' ? 'Rechnen' : analysis === 'modal' ? 'Eigenfrequenzen rechnen' : 'Knicklasten rechnen'}
                   </button>
+                  {analysis === 'buckling' && <p className="hint">Knicklast = Lastfaktor × aufgebrachte Lasten (lineares Beulen/Knicken, ohne Imperfektionen).</p>}
                   {problems.length > 0 && (
                     <ul className="todo">
                       {problems.map((p) => (
@@ -1486,6 +1540,8 @@ export default function App() {
               onExport={() => api.exportStep(geoStep, (stepPath ?? 'geometrie').split(/[\\/]/).pop().replace(/\.(step|stp)$/i, '') + '_geaendert.step').catch((e) => setError(String(e)))}
               mesh={mesh}
             />
+          ) : showModes ? (
+            <ModesPanel modes={modes} setModes={setModes} loads={loads} />
           ) : (
             result && (
               <ResultPanel
@@ -1611,7 +1667,9 @@ export default function App() {
               </button>
             </div>
           )}
-          {mode === 'result' && display && <Legend display={display} quantity={QUANTITIES[quantity]} />}
+          {mode === 'result' && display && (
+            <Legend display={display} quantity={display.modal ? { label: modes.kind === 'modal' ? 'Schwingform' : 'Knickform', unit: '', hint: 'relativ' } : QUANTITIES[quantity]} />
+          )}
           {mode === 'result' && probe && display && (
             <div className="probe">
               <button className="icon-btn" onClick={() => setProbe(null)}>
@@ -1870,6 +1928,51 @@ function NumField({ label, unit, value, onChange }) {
         {unit && <em>{unit}</em>}
       </div>
     </label>
+  )
+}
+
+// --- Eigenfrequenzen / Knicken ------------------------------------------------------------------------
+
+function ModesPanel({ modes, setModes, loads }) {
+  const modal = modes.kind === 'modal'
+  const loadMag = loads.reduce((m, l) => Math.max(m, Math.hypot(...(l.kind === 'pressure' ? [0] : l.kind === 'moment' ? l.moment : l.force).map(Number))), 0)
+  return (
+    <>
+      <section className="section">
+        <h2>
+          <CircleGauge size={15} /> {modal ? 'Eigenfrequenzen' : 'Knicken'}
+        </h2>
+        <p className="hint">
+          {modal
+            ? 'Frequenzen, bei denen das gelagerte Bauteil von selbst schwingt. Eine Anregung (Motor, Unwucht) in der Nähe einer Eigenfrequenz führt zu Resonanz – Abstand halten (Faustregel ± 20 %).'
+            : 'Lastfaktor λ: Bei λ-facher Last knickt bzw. beult das Bauteil aus (ideal gerade, ohne Imperfektionen). Für die Auslegung deutliche Sicherheit einhalten (je nach Regelwerk λ ≥ 2–3).'}
+        </p>
+        <table className="orient-table modes-table">
+          <thead>
+            <tr>
+              <th>Nr.</th>
+              <th>{modal ? 'Frequenz' : 'Lastfaktor λ'}</th>
+              {!modal && loadMag > 0 && <th>Knicklast</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {modes.values.map((v, i) => (
+              <tr key={i} className={modes.sel === i ? 'current' : ''} onClick={() => setModes({ ...modes, sel: i })}>
+                <td>{i + 1}</td>
+                <td>{modal ? `${fmt(v)} Hz` : fmt(v)}</td>
+                {!modal && loadMag > 0 && <td>{fmt(v * loadMag)} {loads.some((l) => l.kind === 'moment') ? '' : 'N'}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <label className="check">
+          <input type="checkbox" checked={modes.animate} onChange={(e) => setModes({ ...modes, animate: e.target.checked })} /> Form animieren
+        </label>
+        <p className="hint">
+          Zeile anklicken, um die Form zu zeigen. Die Größe der Auslenkung ist frei gewählt (nur die Form zählt). Gerechnet in {fmt(modes.seconds)} s.
+        </p>
+      </section>
+    </>
   )
 }
 

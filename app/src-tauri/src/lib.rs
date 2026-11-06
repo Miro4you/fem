@@ -560,6 +560,43 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
     }
 }
 
+// --- Eigenfrequenzen und Knicken --------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct ModesView {
+    /// "modal" oder "buckling"
+    kind: String,
+    /// Eigenfrequenzen [Hz] bzw. Knicklastfaktoren
+    values: Vec<f64>,
+    /// je Mode Verschiebung je Anzeigeknoten (flach, auf 1 normiert)
+    shapes: Vec<Vec<f32>>,
+    seconds: f64,
+}
+
+pub fn modes_impl(state: &AppState, setup: Setup, kind: &str, count: usize, density: Option<f64>) -> Result<ModesView, String> {
+    let t0 = Instant::now();
+    let (model, _, disp_nodes, slot) = build_model(state, &setup)?;
+    let count = count.clamp(1, 30);
+    let r = match kind {
+        "modal" => fem_core::dynamics::eigenfrequencies(&model, density.unwrap_or(0.0) * 1e-9, count),
+        _ => fem_core::dynamics::buckling(&model, count),
+    };
+    *slot.lock().unwrap() = None;
+    let r = r.map_err(|e| e.to_string())?;
+    Ok(ModesView {
+        kind: kind.to_string(),
+        values: r.values,
+        shapes: r.shapes.iter().map(|sh| disp_nodes.iter().flat_map(|&n| sh[n].map(|v| v as f32)).collect()).collect(),
+        seconds: t0.elapsed().as_secs_f64(),
+    })
+}
+
+#[tauri::command]
+async fn modes(state: tauri::State<'_, AppState>, setup: Setup, kind: String, count: usize, density: Option<f64>) -> Result<ModesView, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || modes_impl(&state, setup, &kind, count, density)).await.map_err(|e| e.to_string())?
+}
+
 // --- Leichtbau: Topologieoptimierung -----------------------------------------------------
 
 #[derive(Deserialize)]
@@ -861,6 +898,7 @@ pub fn run() {
             section,
             orientation_scan,
             topopt,
+            modes,
             topo_surface,
             topo_stl,
             export_vtu,
