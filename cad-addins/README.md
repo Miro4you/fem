@@ -159,7 +159,7 @@ Stabwerk (Rahmen/Fachwerke aus einer Linienzeichnung) vorgemerkt.
 |---|---|
 | Projekt-FEM-Seite (Empfang, neue Version erkennen, Lager/Lasten übertragen, neu rechnen, Ergebnis bereitstellen) | getestet |
 | SolidCraft | gegen einen Nachbau des SolidCraft-Steuerkanals getestet (nach dessen Dokumentation: Schlüsseldatei, Mitlaufen, neue Version nach Maßänderung, Ergebnis als Parameter + Eigenschaft, Parameterstudie mit Rücksetzen). **Mit echtem SolidCraft noch nicht** (Programm konnte hier nicht gestartet werden) |
-| Onshape | gegen eine nachgebaute Onshape-API getestet (holen, neue Version, Ergebnis in die Beschreibung, falsche Schlüssel). **Mit echtem Onshape noch nicht** |
+| Onshape | **mit echtem Onshape getestet** (06.11.2026, kostenloses Konto): Teilestudio holen (STEP in ~8 s, Maße in mm korrekt), Baugruppe wird abgelehnt, Teile und Eigenschaft „Description“ lesen. Ergebnis in die Beschreibung schreiben: nur gegen Nachbau getestet. Lesezeichen im Browser: noch offen |
 | Fusion-Add-in, NX-Journale | Ablauf mit Platzhaltern statt Fusion/NX gegen Projekt-FEM getestet (senden, holen, Heimnetz, Fehler). **Im echten Programm noch nicht** |
 | SolidWorks-Makro, Solid-Edge-Skripte, „Senden an“ (Windows) | **ungetestet** (hier kein Windows) |
 | `an_projekt_fem.sh` (Mac/Linux) | getestet (lokal, Heimnetz, falscher Schlüssel, Umlaute im Namen) |
