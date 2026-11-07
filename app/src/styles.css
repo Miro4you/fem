@@ -707,3 +707,13 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .bolt-name small { color: var(--muted); font-size: 11.5px; }
 .bolt-row select { width: auto; height: 26px; font-size: 12px; }
 .sep-line { border: 0; border-top: 1px solid var(--line); width: 100%; margin: 4px 0; }
+
+/* Schrauben: Anziehmoment bzw. Vorspannkraft je Schraube, Reibung der Fuge, Ergebnis der Fugen */
+.bolt-val { width: 86px; flex: none; }
+.bolt-val input { height: 26px; font-size: 12px; padding-right: 30px; }
+.friction-row { display: flex; align-items: center; gap: 8px; }
+.inline-field { display: flex; align-items: center; gap: 6px; margin: 0; }
+.inline-field input { width: 64px; height: 28px; }
+.joint { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 6px; border-bottom: 1px solid var(--line); }
+.joint:last-of-type { border-bottom: 0; }
+.joint > b { font-size: 12.5px; font-weight: 600; }

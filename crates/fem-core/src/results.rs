@@ -40,6 +40,14 @@ pub struct Results {
     pub bodies: Vec<BodyResult>,
     /// Schraubenkräfte
     pub bolts: Vec<crate::bolt::BoltResult>,
+    /// Knoten an der Krafteinleitung der Schrauben (örtliche Spitzen, nicht im σv-Nachweis); leer = keine Schrauben
+    pub bolt_zone: Vec<bool>,
+    /// Kontakt in den Fugen (geschlossen, klafft, rutscht, Klemmkraft)
+    pub joints: Vec<crate::contact::JointResult>,
+    /// Rechendurchgänge für den Kontakt (1 = ohne Kontakt)
+    pub contact_passes: usize,
+    /// Kontaktzustände haben sich zuletzt nicht mehr geändert
+    pub contact_converged: bool,
 }
 
 /// Kennwerte eines Körpers der Baugruppe (Spannungen nur aus seinen eigenen Elementen gemittelt)
@@ -125,14 +133,25 @@ impl Results {
         argmax(self.von_mises.iter().copied())
     }
 
-    /// Sicherheit gegen Fließen: 1 / größte Auslastung (isotrop: Re / σv,max; ohne Re mit Rm)
-    pub fn safety_factor(&self, _material: &Material) -> Option<f64> {
-        self.utilization.as_ref().map(|u| 1.0 / u.iter().copied().fold(0.0, f64::max).max(1e-300))
+    /// Knoten zählt für den Nachweis (nicht an der Krafteinleitung einer Schraube)
+    pub fn rated(&self, n: usize) -> bool {
+        !self.bolt_zone.get(n).copied().unwrap_or(false)
     }
 
-    /// (Knoten, Wert) der größten Auslastung
+    /// (Knoten, Wert) der größten Vergleichsspannung außerhalb der Krafteinleitung der Schrauben
+    pub fn max_von_mises_rated(&self) -> (usize, f64) {
+        argmax(self.von_mises.iter().enumerate().map(|(n, &v)| if self.rated(n) { v } else { f64::NEG_INFINITY }))
+    }
+
+    /// Sicherheit gegen Fließen: 1 / größte Auslastung (isotrop: Re / σv,max; ohne Re mit Rm), ohne die
+    /// Krafteinleitung der Schrauben
+    pub fn safety_factor(&self, _material: &Material) -> Option<f64> {
+        self.max_utilization().map(|(_, u)| 1.0 / u.max(1e-300))
+    }
+
+    /// (Knoten, Wert) der größten Auslastung (ohne die Krafteinleitung der Schrauben)
     pub fn max_utilization(&self) -> Option<(usize, f64)> {
-        self.utilization.as_ref().map(|u| argmax(u.iter().copied()))
+        self.utilization.as_ref().map(|u| argmax(u.iter().enumerate().map(|(n, &v)| if self.rated(n) { v } else { f64::NEG_INFINITY })))
     }
 }
 

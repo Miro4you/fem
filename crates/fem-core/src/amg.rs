@@ -77,6 +77,21 @@ impl Amg {
         Ok(Amg { levels, coarse_a: a, coarse })
     }
 
+    /// Feinste Matrix austauschen, grobe Gitter behalten (gleiches Besetzungsmuster, kleine Änderungen wie
+    /// Kontaktfedern): bleibt ein gültiger symmetrischer Vorkonditionierer, spart den Neuaufbau
+    pub fn replace_fine(&mut self, a: Bsr) -> Result<()> {
+        match self.levels.first_mut() {
+            Some(l) => {
+                let dinv = block_inverses(&a)?;
+                l.rho = spectral_radius(&a, &dinv);
+                l.dinv = dinv;
+                l.a = a;
+                Ok(())
+            }
+            None => Err(FemError::Input("Vorkonditionierer ohne Gitterstufen".into())),
+        }
+    }
+
     /// Feinste Matrix
     pub fn matrix(&self) -> &Bsr {
         self.levels.first().map(|l| &l.a).unwrap_or(&self.coarse_a)

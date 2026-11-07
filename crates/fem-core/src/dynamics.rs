@@ -151,6 +151,15 @@ fn reduce(
         let ps: Vec<crate::bolt::Prepared> = model.bolts.iter().map(|b| crate::bolt::prepare(mesh, &faces, b)).collect::<Result<_>>()?;
         couplings.extend(crate::solver::bolt_elements(&ps, &c.frames));
     }
+    // geöffnete Fugen: für Schwingungen aufliegend und haftend (vorgespannte Verbindung, kleine Ausschläge)
+    if !model.joint_pairs.is_empty() {
+        let e_ref = std::iter::once(&model.material).chain(model.body_materials.iter().map(|(_, m)| m)).map(|m| m.e).fold(0.0, f64::max);
+        let contact = crate::contact::Contact::new(mesh, &model.joint_pairs, e_ref, crate::contact::Friction::Haftend).stuck();
+        for (nodes, mut k) in contact.elements() {
+            c.frames.transform_element(&nodes, &mut k);
+            couplings.push((nodes, k));
+        }
+    }
     {
         for (nodes, ke) in couplings {
             let dofs: Vec<usize> = nodes.iter().flat_map(|&n| [3 * n, 3 * n + 1, 3 * n + 2]).collect();

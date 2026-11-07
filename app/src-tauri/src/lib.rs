@@ -613,9 +613,12 @@ pub struct Setup {
     /// Schrauben als Verbindungselemente
     #[serde(default)]
     bolts: Vec<fem_core::bolt::Bolt>,
-    /// Fugen zwischen verschraubten Teilen öffnen (nur die Schrauben halten); sonst verklebt
+    /// Fugen zwischen verschraubten Teilen mit Kontakt (Druck ja, Zug nein, Reibung); sonst verklebt
     #[serde(default = "yes")]
     open_joints: bool,
+    /// Reibung in den Fugen (Standard: haftend)
+    #[serde(default)]
+    joint_friction: fem_core::contact::Friction,
     /// Gleichungslöser, Standard: automatisch nach Modellgröße
     #[serde(default)]
     solver: SolverKind,
@@ -668,6 +671,12 @@ pub struct ResultView {
     bodies: Vec<fem_core::results::BodyResult>,
     /// Schraubenkräfte
     bolts: Vec<fem_core::bolt::BoltResult>,
+    /// Kontakt in den Fugen verschraubter Teile
+    joints: Vec<fem_core::contact::JointResult>,
+    /// Rechendurchgänge für Kontakt und Reibung
+    contact_passes: usize,
+    /// je Anzeigeknoten: 1 = Krafteinleitung einer Schraube (Farbskala ohne diese Spitzen)
+    bolt_zone: Option<Vec<u8>>,
 }
 
 #[tauri::command]
@@ -695,6 +704,7 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
     model.bolts = setup.bolts.clone();
     if setup.open_joints && !model.bolts.is_empty() {
         model.joint_pairs = fem_core::bolt::open_joints(&mut model).map_err(|e| e.to_string())?;
+        model.joint_friction = setup.joint_friction;
     }
         for (i, s) in setup.supports.iter().enumerate() {
             let name = format!("Lager {}", i + 1);
@@ -745,20 +755,52 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         let m = &model.mesh;
 
         let mut warnings = Vec::new();
-        // geöffnete Fugen an Schrauben: Durchdringung = Fuge wird zusammengedrückt (Kontakt fehlt noch)
-        if !model.joint_pairs.is_empty() {
-            let pen = fem_core::bolt::penetration(&model.mesh, &model.joint_pairs, &res.displacement);
-            let (lo, hi) = model.mesh.bbox();
-            let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
-            if pen > 1e-5 * diag {
+        // Kontakt in den Fugen: Hinweise, wenn die Iteration nicht zur Ruhe kam oder die Fuge klafft bzw. rutscht
+        if !res.joints.is_empty() && !res.contact_converged {
+            warnings.push(format!(
+                "Kontakt und Reibung in der Fuge haben sich nach {} Durchgängen noch nicht ganz eingependelt – Ergebnis mit Vorsicht \
+                 betrachten (feineres Netz oder Reibung „haftend“ probieren).",
+                res.contact_passes
+            ));
+        }
+        let name = |b: i32| model.mesh.body_name(b);
+        for j in &res.joints {
+            let has_preload = res.bolts.iter().any(|b| b.preload > 0.0);
+            if j.closed < 0.05 {
                 warnings.push(format!(
-                    "An einer geöffneten Fuge schieben sich verschraubte Teile um bis zu {pen:.3} mm ineinander – dort drückt die Last die Teile \
-                     zusammen. Kontakt kommt noch; bis dahin gilt das Ergebnis für Zug und Querkraft. Sonst unter Verbindungen „Fugen verklebt“ wählen."
+                    "Die Fuge {} ↔ {} ist ganz offen – die Teile liegen nicht mehr aufeinander, nur die Schrauben halten.{}",
+                    name(j.body_a),
+                    name(j.body_b),
+                    if has_preload {
+                        " Die Last ist größer, als die Vorspannung zusammenhalten kann."
+                    } else {
+                        " Ohne Vorspannung hebt die Fuge schon bei kleiner Last ab."
+                    }
+                ));
+            } else if let Some(c0) = j.closed_preload.filter(|c0| j.closed < 0.5 * c0) {
+                warnings.push(format!(
+                    "Die Last öffnet die Fuge {} ↔ {}: nach dem Anziehen lagen {:.0} % der Fläche auf, unter Last noch {:.0} % (Restklemmkraft {:.1} kN).",
+                    name(j.body_a),
+                    name(j.body_b),
+                    100.0 * c0,
+                    100.0 * j.closed,
+                    j.pressure_force / 1000.0
+                ));
+            }
+            if let Some(lim) = j.friction_limit.filter(|l| *l > 0.0 && j.friction_force >= 0.95 * l) {
+                warnings.push(format!(
+                    "Die Fuge {} ↔ {} rutscht durch: der Reibschluss µ·F_K = {:.1} kN reicht nicht, den Rest der Querkraft tragen die Schrauben auf Abscherung.",
+                    name(j.body_a),
+                    name(j.body_b),
+                    lim / 1000.0
                 ));
             }
         }
-        if res.bolts.iter().any(|b| b.axial < 0.0) {
-            warnings.push("Mindestens eine Schraube wird auf Druck belastet – ohne Kontakt trägt sie Last, die eigentlich über die Fuge geht.".into());
+        if res.joints.is_empty() && res.bolts.iter().any(|b| b.axial < 0.0) {
+            warnings.push(
+                "Mindestens eine Schraube wird auf Druck belastet – mit „Fuge verklebt“ trägt sie Last, die eigentlich über die Fuge geht."
+                    .into(),
+            );
         }
         let (vm_node, vm) = res.max_von_mises();
         // Maximum auf einer gelagerten Fläche → wahrscheinlich Singularität
@@ -862,6 +904,9 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             welds: res.welds.clone(),
             bodies: res.bodies.clone(),
             bolts: res.bolts.clone(),
+            joints: res.joints.clone(),
+            contact_passes: res.contact_passes,
+            bolt_zone: (!res.bolt_zone.is_empty()).then(|| disp_nodes.iter().map(|&n| res.bolt_zone[n] as u8).collect()),
         };
         let mut s = state.lock().unwrap();
         s.model = Some(model);

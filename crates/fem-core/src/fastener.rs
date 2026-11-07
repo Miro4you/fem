@@ -159,7 +159,9 @@ fn cylinders(s: &Solid) -> Vec<Cyl> {
             sz += z;
         }
         let a = nalgebra::Matrix3::new(sxx, sxy, sx, sxy, syy, sy, sx, sy, k);
-        let Some(sol) = a.lu().solve(&Vector3::new(sxz, syz, sz)) else { continue };
+        let Some(sol) = a.lu().solve(&Vector3::new(sxz, syz, sz)) else {
+            continue;
+        };
         let (cx, cy) = (sol[0] / 2.0, sol[1] / 2.0);
         let r = (sol[2] + cx * cx + cy * cy).max(0.0).sqrt();
         let center = e1 * cx + e2 * cy;
@@ -198,7 +200,9 @@ pub fn detect(solids: &[Solid]) -> Vec<Detected> {
         }
         let cyls = cylinders(s);
         // Schaft: längster Zylinder im Verhältnis zum Radius
-        let Some(shaft) = cyls.iter().max_by(|a, b| ((a.t1 - a.t0) / a.r).partial_cmp(&((b.t1 - b.t0) / b.r)).unwrap()) else { continue };
+        let Some(shaft) = cyls.iter().max_by(|a, b| ((a.t1 - a.t0) / a.r).partial_cmp(&((b.t1 - b.t0) / b.r)).unwrap()) else {
+            continue;
+        };
         if shaft.t1 - shaft.t0 < 1.0 * shaft.r {
             continue;
         }
@@ -232,13 +236,18 @@ pub fn detect(solids: &[Solid]) -> Vec<Detected> {
             nut_d: None,
             thread_t0: head_t + 0.05 * d,
             thread_t1: end_t,
+            preload: None,
+            tighten: None,
+            rp: None,
         };
         let mut volumes = vec![s.tag];
         let mut parts = vec![s.name.clone()];
         // Mutter und Scheiben auf derselben Achse
         let mut extra: Vec<(Kind, f64, f64, f64, i32, String)> = Vec::new();
         for (j, o) in solids.iter().enumerate() {
-            let Some(k @ (Kind::Nut | Kind::Washer)) = kinds[j] else { continue };
+            let Some(k @ (Kind::Nut | Kind::Washer)) = kinds[j] else {
+                continue;
+            };
             let inner = cylinders(o).into_iter().min_by(|x, y| x.r.partial_cmp(&y.r).unwrap());
             let Some(c) = inner else { continue };
             let off = c.center - origin;

@@ -3,8 +3,11 @@ import { jsPDF } from 'jspdf'
 import { cssBandColor, BANDS } from './colormap.js'
 import { fmt, fmtVec } from './format.js'
 
-const GREEK = { σ: 's', ν: 'nu', ε: 'eps', τ: 'tau', ρ: 'rho', Δ: 'Delta', '≤': '<=', '≥': '>=', '≈': '~', '→': '->', '⇄': '', '★': '*', '₀': '0', '₁': '1', '⁺': '+' }
-const latin = (t) => String(t ?? '').replace(/[σνετρΔ≤≥≈→⇄★₀₁⁺]/g, (c) => GREEK[c] ?? '')
+const GREEK = {
+  σ: 's', ν: 'nu', ε: 'eps', τ: 'tau', ρ: 'rho', Δ: 'Delta', Φ: 'Phi', β: 'beta', γ: 'gamma', μ: 'µ', Σ: 'Summe ',
+  '≤': '<=', '≥': '>=', '≈': '~', '→': '->', '↔': '<->', '⇄': '', '★': '*', '√': 'Wurzel', '₀': '0', '₁': '1', '⁺': '+', '−': '-',
+}
+const latin = (t) => String(t ?? '').replace(/[σνετρΔΦβγμΣ≤≥≈→↔⇄★√₀₁⁺−]/g, (c) => GREEK[c] ?? '')
 
 /// Erzeugt den Bericht und gibt ihn als Blob zurück.
 /// data: { title, file, date, mesh, material, materialLines, supports, loads, result, resultLines, proofRows, warnings, images, notes }
@@ -106,15 +109,22 @@ export function buildReport(data) {
   if (data.boltRows?.length) {
     heading(`${sec++}  Schrauben`)
     table(
-      [['Schraube', 'Klasse', 'Zug', 'Querkraft', 'Sicherheit'], ...data.boltRows],
-      [CW * 0.36, CW * 0.12, CW * 0.17, CW * 0.17, CW * 0.18],
+      [['Schraube', 'Klasse', 'F_V / M_A', 'F_S', 'Querkraft', 'Sicherheit'], ...data.boltRows],
+      [CW * 0.26, CW * 0.1, CW * 0.2, CW * 0.13, CW * 0.13, CW * 0.18],
     )
     text(
-      'σv = √((F/As + M/W)² + 3·(Q/As)²) gegen Rp0,2 der Festigkeitsklasse; ohne Vorspannung (Querkraft auf dem Schaft), Fuge ' +
-        (data.openJoints ? 'offen (nur die Schrauben halten)' : 'verklebt') +
-        '. Vereinfacht nach VDI 2230.',
+      'σ_red = √((F_S/A_s + M_b/W)² + 3·(0,5·M_G/W_p + Q/A_s)²) gegen Rp0,2 der Festigkeitsklasse (VDI 2230, mit Gewindetorsion aus dem Anziehen). ' +
+        (data.tightText ? data.tightText + '. ' : '') +
+        (data.jointText ?? (data.openJoints ? 'Fuge mit Kontakt' : 'Fuge verklebt')) +
+        '. Gerechnet in zwei Schritten: Schrauben anziehen, dann Betriebslast. Streuung beim Anziehen und Setzen nicht berücksichtigt.',
       8.5,
     )
+    if (data.jointRows?.length) {
+      table(
+        [['Fuge', 'liegt auf', 'Restklemmkraft', 'max. Pressung', 'Reibkraft / µ·F_K'], ...data.jointRows],
+        [CW * 0.3, CW * 0.12, CW * 0.18, CW * 0.17, CW * 0.23],
+      )
+    }
   }
   if (data.warnings.length) {
     heading('Hinweise')

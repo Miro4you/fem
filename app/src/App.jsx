@@ -110,18 +110,43 @@ const BOLT_CLASSES = {
   'A4-80': [600, 800, 200000],
 }
 
-// Schraubennachweis ohne Vorspannung: σ = F/A_s + M/W_s, τ = Q/A_s, σ_v = √(σ² + 3τ²) ≤ Rp0,2
-function boltRows(result, bolts) {
+// Schraubennachweis (Rechenkern): σ_red = √((F_S/A_s + M_b/W)² + 3·(0,5·M_G/W_p + Q/A_s)²) ≤ Rp0,2
+function boltRows(result, bolts, sF = 1) {
   return (result.bolts ?? []).map((r) => {
     const b = bolts.find((x) => x.name === r.name)
     const cls = b?.cls ?? '8.8'
     const [rp, rm] = BOLT_CLASSES[cls] ?? BOLT_CLASSES['8.8']
-    const ds = Math.sqrt((4 * r.stress_area) / Math.PI)
-    const sigma = Math.max(r.axial, 0) / r.stress_area + (32 * r.moment) / (Math.PI * ds ** 3)
-    const tau = r.shear / r.stress_area
-    const sv = Math.sqrt(sigma * sigma + 3 * tau * tau)
-    return { ...r, cls, rp, rm, sv, safety: sv > 0 ? rp / sv : Infinity, util: sv / rp }
+    const sv = r.sigma_red
+    return { ...r, cls, rp, rm, sv, safety: sv > 0 ? rp / sv : Infinity, util: sv / rp, need: boltNeed(r, sF) }
   })
+}
+// nötige Sicherheit: vorgespannt nach VDI 2230 σ_red ≤ Rp0,2 (S ≥ 1), sonst wie beim Bauteil
+const boltNeed = (r, sF) => (r.preload > 0 ? 1 : sF)
+
+// Vorspannung: wie angezogen wird (VDI 2230)
+const TIGHTEN = {
+  vdi: 'Anziehen auf Ausnutzung der Streckgrenze (VDI 2230)',
+  moment: 'Anziehmoment je Schraube',
+  kraft: 'Vorspannkraft je Schraube',
+  none: 'ohne Vorspannung',
+}
+const posNum = (v, d) => {
+  const x = Number(String(v ?? '').replace(',', '.'))
+  return String(v ?? '').trim() !== '' && x >= 0 ? x : d
+}
+function tightenOf(t, b) {
+  if (t.mode === 'none') return null
+  const mu_g = posNum(t.muG, 0.12)
+  const mu_k = posNum(t.muK, 0.12)
+  if (t.mode === 'moment' && posNum(b.ma, 0) > 0) return { art: 'moment', m_a: posNum(b.ma, 0), mu_g, mu_k }
+  if (t.mode === 'kraft' && posNum(b.fv, 0) > 0) return { art: 'kraft', f_v: posNum(b.fv, 0) * 1000 }
+  return { art: 'ausnutzung', nu: posNum(t.nu, 90) / 100, mu_g, mu_k }
+}
+// Reibung in der Fuge
+function frictionOf(f) {
+  if (f.mode === 'stick') return { art: 'haftend' }
+  if (f.mode === 'free') return { art: 'coulomb', mu: 0 }
+  return { art: 'coulomb', mu: posNum(f.mu, 0.15) }
 }
 
 const ANALYSES = {
@@ -157,6 +182,9 @@ export default function App() {
   const [bolts, setBolts] = useState([])
   const boltPrefs = useRef({})
   const [openJoints, setOpenJoints] = useState(true)
+  // Fuge mit Kontakt: Reibung; Vorspannung der Schrauben
+  const [jointFric, setJointFric] = useState({ mode: 'mu', mu: '0.15' })
+  const [tight, setTight] = useState({ mode: 'vdi', nu: '90', muG: '0.12', muK: '0.12' })
   const [keepFasteners, setKeepFasteners] = useState(false)
   const keepFastenersRef = useRef(false)
   keepFastenersRef.current = keepFasteners
@@ -285,7 +313,7 @@ export default function App() {
   useEffect(() => {
     if (result) setResultStale(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [material, supports, loads, welds, bodyMats, bolts, openJoints])
+  }, [material, supports, loads, welds, bodyMats, bolts, openJoints, jointFric, tight])
 
   const surfaceInfo = useMemo(() => new Map((mesh?.surfaces ?? []).map((s) => [s.tag, s])), [mesh])
   // Baugruppe: Masse aus Volumen und Dichte je Körper (null = nicht ermittelbar bzw. ein Körper)
@@ -313,13 +341,15 @@ export default function App() {
         cls: prev?.cls ?? b.class ?? '8.8',
         classFromName: !!b.class,
         on: prev?.on ?? b.source === 'cad',
+        ma: prev?.ma ?? '',
+        fv: prev?.fv ?? '',
       }
     })
     setBolts(list)
     setSelBolt(null)
   }, [mesh])
   useEffect(() => {
-    for (const b of bolts) boltPrefs.current[b.name] = { cls: b.cls, on: b.on }
+    for (const b of bolts) boltPrefs.current[b.name] = { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }
   }, [bolts])
   // Darstellung der Schrauben im Bild (Schaft + Kopf)
   const boltGlyphs = useMemo(
@@ -516,7 +546,7 @@ export default function App() {
   async function onSaveProject() {
     if (!stepPath) return
     const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies,
-      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on }])), openJoints, keepFasteners }
+      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }])), openJoints, jointFriction: jointFric, tighten: tight, keepFasteners }
     try {
       const p = await api.saveProject(stepPath, data)
       if (p) addRecent({ kind: 'project', path: p, name: baseName(p), info: result ? `${material.name} · σv ${fmt(result.max_von_mises.value)} MPa` : material.name })
@@ -543,6 +573,8 @@ export default function App() {
       // Schrauben-Einstellungen vor dem Vernetzen (Erkennung läuft dabei)
       boltPrefs.current = d.bolts ?? {}
       setOpenJoints(d.openJoints ?? true)
+      if (d.jointFriction) setJointFric(d.jointFriction)
+      if (d.tighten) setTight(d.tighten)
       setKeepFasteners(!!d.keepFasteners)
       keepFastenersRef.current = !!d.keepFasteners
       const m = await loadGeometry(d.step, d.meshSize, true, true, [])
@@ -1232,8 +1264,11 @@ export default function App() {
             max_gap: num(w.maxGap) > 0 ? num(w.maxGap) : null,
           })),
         bodies: (mesh?.bodies ?? []).filter((b) => bodyMats[b.name]).map((b) => ({ body: b.body, material: materialPayload(bodyMats[b.name]) })),
-        bolts: bolts.filter((b) => b.on).map((b) => ({ ...b.bolt, name: b.name, e: BOLT_CLASSES[b.cls]?.[2] ?? 210000 })),
+        bolts: bolts
+          .filter((b) => b.on)
+          .map((b) => ({ ...b.bolt, name: b.name, e: BOLT_CLASSES[b.cls]?.[2] ?? 210000, rp: BOLT_CLASSES[b.cls]?.[0] ?? 640, tighten: tightenOf(tight, b) })),
         open_joints: openJoints,
+        joint_friction: frictionOf(jointFric),
         supports: sups.map((s) => {
           const f = supportFix(s)
           return { surfaces: s.surfaces, fix: f.fix, local: f.local ?? null, region: regionNumbers(s.region) }
@@ -1589,10 +1624,14 @@ export default function App() {
       values = Float32Array.from(result.shell_fraction ?? [])
     } else values = Float32Array.from(result[quantity])
     let min = Infinity, max = -Infinity, imin = 0, imax = 0
+    // Spannungsgrößen: Farbskala ohne die örtlichen Spitzen an der Krafteinleitung der Schrauben
+    const zone = quantity !== 'disp' && quantity !== 'shell' ? result.bolt_zone : null
     for (let i = 0; i < n; i++) {
+      if (zone?.[i]) continue
       if (values[i] < min) (min = values[i]), (imin = i)
       if (values[i] > max) (max = values[i]), (imax = i)
     }
+    if (!(max >= min)) (min = 0), (max = 1)
     // Werte auf der Schnittfläche (gleiche Farbskala, Bereich ggf. erweitert)
     let cutValues = null
     if (cutData) {
@@ -1858,14 +1897,32 @@ export default function App() {
         `${fmt(w.stress_max)} MPa`,
         w.util == null ? '–' : `${(100 * w.util).toFixed(0)} %${w.util <= 1 ? ' ok' : ' NICHT ERFÜLLT'}`,
       ]),
-      boltRows: boltRows(result, bolts).map((r) => [
+      boltRows: boltRows(result, bolts, Number(proof.sF) > 0 ? Number(proof.sF) : 1).map((r) => [
         r.name,
         r.cls,
-        `${fmt(r.axial)} N`,
+        r.preload > 0 ? `${fmt(r.preload / 1000)} kN / ${fmt(r.torque)} N·m` : '–',
+        `${fmt(r.axial / 1000)} kN`,
         `${fmt(r.shear)} N`,
-        `S = ${Number.isFinite(r.safety) ? fmt(Math.min(r.safety, 99)) : '–'}${r.safety >= (Number(proof.sF) > 0 ? Number(proof.sF) : 1) ? ' ok' : ' NICHT ERFÜLLT'}`,
+        `S = ${Number.isFinite(r.safety) ? fmt(Math.min(r.safety, 99)) : '–'} (nötig ${fmt(r.need)})${r.safety >= r.need ? ' ok' : ' NICHT ERFÜLLT'}`,
       ]),
+      jointRows: (result.joints ?? []).map((j) => {
+        const nameOf = (id) => (result.bodies ?? []).find((b) => b.body === id)?.name ?? `Körper ${id}`
+        return [
+          `${nameOf(j.body_a)} ↔ ${nameOf(j.body_b)}`,
+          `${(100 * j.closed).toFixed(0)} %${j.closed_preload != null ? ` (angezogen ${(100 * j.closed_preload).toFixed(0)} %)` : ''}`,
+          `${fmt(j.pressure_force / 1000)} kN`,
+          `${fmt(j.max_pressure)} MPa`,
+          j.friction_limit == null ? `${fmt(j.friction_force / 1000)} kN (haftet)` : `${fmt(j.friction_force / 1000)} / ${fmt(j.friction_limit / 1000)} kN`,
+        ]
+      }),
       openJoints,
+      jointText: openJoints
+        ? `Fuge mit Kontakt (Druck ja, Zug nein), ${jointFric.mode === 'stick' ? 'haftend' : jointFric.mode === 'free' ? 'reibungsfrei' : `Reibung µ = ${fmt(posNum(jointFric.mu, 0.15))}`}`
+        : 'Fuge verklebt',
+      tightText:
+        tight.mode === 'none'
+          ? 'ohne Vorspannung'
+          : `Vorspannung: ${TIGHTEN[tight.mode]}${tight.mode === 'vdi' ? ` ν = ${fmt(posNum(tight.nu, 90))} %` : ''}, µ_G = ${fmt(posNum(tight.muG, 0.12))}, µ_K = ${fmt(posNum(tight.muK, 0.12))}`,
       weldNote: (result.welds ?? []).length
         ? 'τw = größte Linienkraft entlang der Naht / a-Maß; zulässig f_vw,d = Rm / (√3·β_w·γ_M2), vereinfachtes Verfahren EN 1993-1-8 (4.5.3.3). Stumpfnaht durchgeschweißt: a = Blechdicke.'
         : null,
@@ -2239,6 +2296,10 @@ export default function App() {
             setSelBolt={setSelBolt}
             openJoints={openJoints}
             setOpenJoints={setOpenJoints}
+            jointFric={jointFric}
+            setJointFric={setJointFric}
+            tight={tight}
+            setTight={setTight}
             keepFasteners={keepFasteners}
             onKeepFasteners={(v) => {
               setKeepFasteners(v)
@@ -3242,7 +3303,8 @@ function NumInput({ value, unit, onChange }) {
 // Schrauben: Kräfte und Nachweis (ohne Vorspannung)
 function BoltCard({ rows, sF }) {
   if (!rows.length) return null
-  const ok = rows.every((r) => r.safety >= sF)
+  const ok = rows.every((r) => r.safety >= r.need)
+  const pre = rows.some((r) => r.preload > 0)
   return (
     <div className={'proof ' + (ok ? 'good' : 'bad')}>
       <div className="item-head">
@@ -3253,8 +3315,9 @@ function BoltCard({ rows, sF }) {
         <thead>
           <tr>
             <th />
-            <th>Zug</th>
-            <th>Quer</th>
+            {pre && <th title="Vorspannkraft nach dem Anziehen">F_V</th>}
+            <th title="Schraubenkraft im Betrieb (mit Vorspannung)">F_S</th>
+            <th title="Querkraft auf dem Schaft">Quer</th>
             <th>S</th>
           </tr>
         </thead>
@@ -3262,21 +3325,76 @@ function BoltCard({ rows, sF }) {
           {rows.map((r) => (
             <tr
               key={r.name}
-              title={`M${fmt(r.d)} ${r.cls}: Rp0,2 = ${r.rp} MPa, A_s = ${fmt(r.stress_area)} mm² · σ_v = ${fmt(r.sv)} MPa · Biegemoment ${fmt(r.moment / 1000)} N·m · Klemmlänge ${fmt(r.clamp)} mm`}
+              title={`M${fmt(r.d)} ${r.cls}: Rp0,2 = ${r.rp} MPa, A_s = ${fmt(r.stress_area)} mm²${r.preload > 0 ? ` · Anziehmoment M_A = ${fmt(r.torque)} N·m · Zusatzkraft aus Last ${fmt((r.axial - r.preload) / 1000)} kN` : ''} · Flächenpressung unter Kopf ${fmt(r.bearing_pressure)} MPa · σ_red = ${fmt(r.sv)} MPa · Biegemoment ${fmt(r.moment / 1000)} N·m · Klemmlänge ${fmt(r.clamp)} mm`}
             >
               <td>
                 {r.name} <em className="muted">{r.cls}</em>
               </td>
-              <td>{fmt(r.axial)} N</td>
+              {pre && <td>{r.preload > 0 ? `${fmt(r.preload / 1000)} kN` : '–'}</td>}
+              <td>{Math.abs(r.axial) >= 1000 ? `${fmt(r.axial / 1000)} kN` : `${fmt(r.axial)} N`}</td>
               <td>{fmt(r.shear)} N</td>
-              <td className={r.safety >= sF ? 'good' : 'bad'}>{Number.isFinite(r.safety) ? fmt(Math.min(r.safety, 99)) : '–'}</td>
+              <td className={r.safety >= r.need ? 'good' : 'bad'}>{Number.isFinite(r.safety) ? fmt(Math.min(r.safety, 99)) : '–'}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {pre && (
+        <p className="hint">
+          Anziehmomente: {rows.filter((r) => r.preload > 0).map((r) => `${r.name} ${fmt(r.torque)} N·m`).join(' · ')}
+        </p>
+      )}
       <p className="hint">
-        σ_v = √((F/A_s + M/W)² + 3·(Q/A_s)²) gegen Rp0,2 der Festigkeitsklasse, nötig S ≥ {fmt(sF)}. Ohne Vorspannung – Querkraft wirkt auf den
-        Schaft (kein Reibschluss). Vereinfacht nach VDI 2230; Gewinde-Ausreißen und Flächenpressung nicht geprüft.
+        σ_red = √((F_S/A_s + M_b/W)² + 3·(0,5·M_G/W_p + Q/A_s)²) gegen Rp0,2
+        {pre
+          ? ', mit Gewindetorsion aus dem Anziehen; vorgespannt nötig S ≥ 1 (VDI 2230: Schraube wird absichtlich hoch ausgenutzt)'
+          : `, nötig S ≥ ${fmt(sF)}`}
+        . Flächenpressung unter dem Kopf im Tooltip; Gewinde-Ausreißen und Dauerfestigkeit nicht geprüft.
+      </p>
+    </div>
+  )
+}
+
+// Fugen verschraubter Teile mit Kontakt: aufliegend/klafft, Restklemmkraft, Pressung, Rutschen
+function JointCard({ result }) {
+  const joints = result.joints ?? []
+  if (!joints.length) return null
+  const nameOf = (id) => (result.bodies ?? []).find((b) => b.body === id)?.name ?? `Körper ${id}`
+  const pct = (x) => `${(100 * x).toFixed(0)} %`
+  return (
+    <div className="proof bodies-card">
+      <div className="item-head">
+        <I.IcLink size={15} />
+        <strong>Fugen (Kontakt)</strong>
+      </div>
+      {joints.map((j, i) => {
+        const gap = 1 - j.closed
+        return (
+          <div key={i} className="joint">
+            <b>
+              {nameOf(j.body_a)} ↔ {nameOf(j.body_b)}
+            </b>
+            <Stat
+              label="liegt auf"
+              value={(gap > 0.005 ? pct(j.closed) : 'ganz') + (j.closed_preload != null && Math.abs(j.closed_preload - j.closed) > 0.005 ? ` (angezogen ${pct(j.closed_preload)})` : '')}
+            />
+            <Stat label="Restklemmkraft" value={`${fmt(j.pressure_force / 1000)} kN`} />
+            <Stat label="max. Flächenpressung" value={`${fmt(j.max_pressure)} MPa`} />
+            <Stat
+              label="Querkraft über Reibung"
+              value={
+                j.friction_limit == null
+                  ? `${fmt(j.friction_force / 1000)} kN (haftet)`
+                  : j.friction_limit > 0
+                    ? `${fmt(j.friction_force / 1000)} von ${fmt(j.friction_limit / 1000)} kN (${pct(j.friction_force / j.friction_limit)})`
+                    : 'reibungsfrei'
+              }
+            />
+          </div>
+        )
+      })}
+      <p className="hint">
+        Außerhalb der Druckkegel um die Schrauben liegen Platten oft nicht auf – das ist normal. Öffnet erst die Last die Fuge oder reicht der
+        Reibschluss µ·F_K nicht, steht ein Hinweis unter Details. Gerechnet: erst Schrauben anziehen, dann Last.
       </p>
     </div>
   )
@@ -3345,9 +3463,9 @@ function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, 
   const rows = proofRows(result, proof)
   const wrows = weldRows(result, material)
   const weldBad = wrows.some((w) => w.util != null && w.util > 1)
-  const brows = boltRows(result, bolts)
+  const brows = boltRows(result, bolts, Number(proof.sF) > 0 ? Number(proof.sF) : 1)
   const sF = Number(proof.sF) > 0 ? Number(proof.sF) : 1
-  const boltBad = brows.some((b) => b.safety < sF)
+  const boltBad = brows.some((b) => b.safety < b.need)
   const sf = result.safety
   const hasYield = material.yield !== '' && material.yield != null
   let tone
@@ -3424,6 +3542,7 @@ function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, 
       </div>
       <WeldCard result={result} material={material} />
       <BoltCard rows={brows} sF={sF} />
+      <JointCard result={result} />
       <BodiesCard result={result} />
       <div className="quantities" role="radiogroup" aria-label="Ergebnisgröße">
         {Object.entries(QUANTITIES)
@@ -3535,11 +3654,13 @@ function clean(v, ref) {
   return v.map((x) => (Math.abs(x) < 1e-6 * ref ? 0 : x))
 }
 
-// Schrauben: aus dem CAD erkannt bzw. aus fluchtenden Bohrungen vorgeschlagen; Festigkeitsklasse je Schraube
-function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpenJoints, keepFasteners, onKeepFasteners }) {
+// Schrauben: aus dem CAD erkannt bzw. aus fluchtenden Bohrungen vorgeschlagen; Festigkeitsklasse je Schraube,
+// Vorspannung (VDI 2230) und Fuge (Kontakt mit Reibung oder verklebt)
+function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpenJoints, jointFric, setJointFric, tight, setTight, keepFasteners, onKeepFasteners }) {
   const upd = (id, patch) => setBolts(bolts.map((b) => (b.id === id ? { ...b, ...patch } : b)))
   const cad = bolts.filter((b) => b.source === 'cad')
   const holes = bolts.filter((b) => b.source !== 'cad')
+  const perBolt = tight.mode === 'moment' ? ['ma', 'N·m', 'Anziehmoment M_A (leer = nach VDI 2230)'] : tight.mode === 'kraft' ? ['fv', 'kN', 'Vorspannkraft F_V (leer = nach VDI 2230)'] : null
   const row = (b) => (
     <div key={b.id} className={'bolt-row' + (selBolt === b.id ? ' on' : '') + (b.on ? '' : ' off')} onClick={() => setSelBolt(selBolt === b.id ? null : b.id)}>
       <input type="checkbox" checked={b.on} title={b.on ? 'wird gerechnet' : 'nicht rechnen'} onClick={(e) => e.stopPropagation()} onChange={(e) => upd(b.id, { on: e.target.checked })} />
@@ -3550,6 +3671,12 @@ function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpen
           {b.parts?.length > 1 ? ` · ${b.parts.length - 1} Zubehör` : ''}
         </small>
       </span>
+      {perBolt && b.on && (
+        <span className="input-unit bolt-val" onClick={(e) => e.stopPropagation()} title={perBolt[2]}>
+          <input value={b[perBolt[0]]} placeholder="VDI" aria-label={perBolt[2]} onChange={(e) => upd(b.id, { [perBolt[0]]: e.target.value })} />
+          <em>{perBolt[1]}</em>
+        </span>
+      )}
       <select value={b.cls} onClick={(e) => e.stopPropagation()} onChange={(e) => upd(b.id, { cls: e.target.value })} title="Festigkeitsklasse">
         {Object.keys(BOLT_CLASSES).map((c) => (
           <option key={c} value={c}>
@@ -3559,6 +3686,7 @@ function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpen
       </select>
     </div>
   )
+  const setT = (patch) => setTight({ ...tight, ...patch })
   return (
     <>
       <div className="props-head">
@@ -3595,19 +3723,65 @@ function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpen
       {bolts.length === 0 && <p className="hint">Keine Schrauben gefunden (weder Normteile im CAD noch fluchtende Bohrungen in mehreren Teilen).</p>}
       {bolts.length > 0 && (
         <>
+          <span className="mat-head">Vorspannung</span>
+          <select value={tight.mode} onChange={(e) => setT({ mode: e.target.value })} aria-label="Vorspannung">
+            {Object.entries(TIGHTEN).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+          {tight.mode !== 'none' && (
+            <div className="grid3">
+              {tight.mode === 'vdi' && <NumField label="Ausnutzung ν" unit="%" value={tight.nu} onChange={(v) => setT({ nu: v })} />}
+              {tight.mode !== 'kraft' && <NumField label="µ Gewinde" unit="" value={tight.muG} onChange={(v) => setT({ muG: v })} />}
+              {tight.mode !== 'kraft' && <NumField label="µ Kopf" unit="" value={tight.muK} onChange={(v) => setT({ muK: v })} />}
+            </div>
+          )}
+          <p className="hint">
+            {tight.mode === 'vdi'
+              ? 'Vorspannkraft so, dass beim Anziehen Zug und Gewindetorsion zusammen ν·Rp0,2 erreichen (VDI 2230, üblich 90 %). Anziehmoment steht im Ergebnis. '
+              : tight.mode === 'moment'
+                ? 'Vorspannkraft aus dem Anziehmoment je Schraube und den Reibwerten (VDI 2230). '
+                : tight.mode === 'kraft'
+                  ? 'Vorspannkraft je Schraube direkt (z. B. aus Messung). '
+                  : 'Schrauben ohne Vorspannung – die Fuge hebt schon bei kleiner Zuglast ab. '}
+            Gerechnet wird in zwei Schritten: erst anziehen, dann kommt die Last dazu.
+          </p>
+          <span className="mat-head">Fuge zwischen den verschraubten Teilen</span>
           <div className="segmented small">
-            <button className={openJoints ? 'on' : ''} onClick={() => setOpenJoints(true)} title="Die verschraubten Teile hängen nur über die Schrauben zusammen">
-              Fuge offen
+            <button className={openJoints ? 'on' : ''} onClick={() => setOpenJoints(true)} title="Die Teile drücken aufeinander, können abheben und rutschen">
+              Kontakt
             </button>
-            <button className={!openJoints ? 'on' : ''} onClick={() => setOpenJoints(false)} title="Die verschraubten Teile sind an der Fuge zusätzlich verklebt">
-              Fuge verklebt
+            <button className={!openJoints ? 'on' : ''} onClick={() => setOpenJoints(false)} title="Die Teile sind an der Berührfläche fest verbunden">
+              verklebt
             </button>
           </div>
+          {openJoints && (
+            <div className="row friction-row">
+              <div className="segmented small">
+                {[
+                  ['mu', 'Reibung'],
+                  ['stick', 'haftet'],
+                  ['free', 'reibungsfrei'],
+                ].map(([k, l]) => (
+                  <button key={k} className={jointFric.mode === k ? 'on' : ''} onClick={() => setJointFric({ ...jointFric, mode: k })}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              {jointFric.mode === 'mu' && (
+                <label className="field inline-field">
+                  <span>µ</span>
+                  <input value={jointFric.mu} aria-label="Reibwert der Fuge" onChange={(e) => setJointFric({ ...jointFric, mu: e.target.value })} />
+                </label>
+              )}
+            </div>
+          )}
           <p className="hint">
             {openJoints
-              ? 'Fuge offen: nur die Schrauben halten die Teile zusammen – Schraubenkräfte auf der sicheren Seite. Drückt die Last die Teile aufeinander, fehlt noch der Kontakt (Hinweis im Ergebnis).'
-              : 'Fuge verklebt: die Teile kleben an der Berührfläche zusammen, die Schrauben tragen nur einen kleinen Teil – Schraubenkräfte zu klein.'}{' '}
-            Ohne Vorspannung; Vorspannung und Reibschluss kommen mit dem Kontakt.
+              ? 'Kontakt: Druck geht über die Fuge, bei Zug hebt sie ab (klafft); quer hält die Reibung µ·Pressung, darüber rutschen die Teile und die Schrauben werden auf Abscherung belastet. Stahl/Stahl trocken etwa µ = 0,1 … 0,2.'
+              : 'Verklebt: die Teile hängen an der Berührfläche fest zusammen, die Schrauben tragen nur einen kleinen Teil – Schraubenkräfte zu klein.'}
           </p>
         </>
       )}

@@ -548,6 +548,60 @@ mod tests {
     }
 
     #[test]
+    fn verschraubung_vorgespannt() {
+        if find_gmsh().is_none() {
+            eprintln!("Gmsh fehlt – Test übersprungen");
+            return;
+        }
+        // Baugruppe aus dem CAD: M8 10.9 in Gewindebohrung, M8 8.8 mit Mutter; angezogen nach VDI 2230, Kontakt mit Reibung
+        let path = step("verschraubung.step");
+        let solids = inspect_step(&path).unwrap();
+        let det = crate::fastener::detect(&solids);
+        let exclude: Vec<i32> = det.iter().flat_map(|d| d.volumes.clone()).collect();
+        let m = mesh_step(&path, &MeshOptions { size: Some(4.0), exclude, ..Default::default() }).unwrap();
+        let f = 4000.0;
+        let mut model = crate::Model::new(m, crate::Material::steel())
+            .group("unten", crate::Selection::Plane { axis: crate::Axis::Z, value: 0.0 })
+            .group("oben", crate::Selection::Plane { axis: crate::Axis::Z, value: 25.0 })
+            .support("unten", crate::Fix::all())
+            .load(crate::Load::Force { group: "oben".into(), force: [0.0, 0.0, f] });
+        model.bolts = det.iter().map(|d| d.bolt.clone()).collect();
+        for (b, rp) in model.bolts.iter_mut().zip([940.0, 640.0]) {
+            b.rp = Some(rp);
+            b.tighten = Some(crate::bolt::Tighten::Ausnutzung { nu: 0.9, mu_g: 0.12, mu_k: 0.12 });
+        }
+        model.joint_pairs = crate::bolt::open_joints(&mut model).unwrap();
+        model.joint_friction = crate::contact::Friction::Coulomb { mu: 0.15 };
+        let res = crate::solve(&model).unwrap();
+        assert!(res.contact_converged, "{} Durchgänge", res.contact_passes);
+        // F_V nach VDI 2230 (Tab. A1: M8 10.9 27,3 kN, 8.8 18,6 kN); Last erhöht die Schraubenkraft nur wenig
+        let fv: Vec<f64> = res.bolts.iter().map(|b| b.preload).collect();
+        assert!((fv[0] - 27350.0).abs() < 300.0 && (fv[1] - 18620.0).abs() < 200.0, "{fv:?}");
+        for b in &res.bolts {
+            assert!(b.axial > b.preload && b.axial < b.preload + f, "{b:?}");
+            assert!(b.utilization.unwrap() < 1.0, "{b:?}");
+        }
+        // Gleichgewicht Deckel: Σ F_S = F + Klemmkraft der Fuge
+        let sum: f64 = res.bolts.iter().map(|b| b.axial).sum();
+        let j = &res.joints[0];
+        assert!((sum - f - j.pressure_force).abs() < 1e-3 * sum, "{sum} vs {} + {}", f, j.pressure_force);
+        // örtliche Spitzen an der Krafteinleitung zählen nicht zum Nachweis
+        let (_, vm_all) = res.max_von_mises();
+        let (_, vm) = res.max_von_mises_rated();
+        assert!(vm < 0.5 * vm_all && vm < 400.0, "σv {vm} (alle {vm_all})");
+
+        // kleines Anziehmoment 10 N·m: wenig Vorspannung, viel Rutschen beim Anziehen – muss trotzdem konvergieren
+        for b in model.bolts.iter_mut() {
+            b.tighten = Some(crate::bolt::Tighten::Moment { m_a: 10.0, mu_g: 0.12, mu_k: 0.12 });
+        }
+        let res = crate::solve(&model).unwrap();
+        assert!(res.contact_converged, "{} Durchgänge", res.contact_passes);
+        assert!((res.bolts[0].preload - 7384.0).abs() < 50.0, "{:?}", res.bolts[0]);
+        let sum: f64 = res.bolts.iter().map(|b| b.axial).sum();
+        assert!((sum - f - res.joints[0].pressure_force).abs() < 1e-3 * sum);
+    }
+
+    #[test]
     fn verfeinerung_kugel_und_oberflaeche() {
         if find_gmsh().is_none() {
             eprintln!("Gmsh fehlt – Test übersprungen");

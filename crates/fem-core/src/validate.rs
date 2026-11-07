@@ -551,6 +551,9 @@ pub fn verschraubt(kind: crate::SolverKind) -> Result<Vec<Check>> {
             nut_d: Some(13.0),
             thread_t0: 0.0,
             thread_t1: 0.0,
+            preload: None,
+            tighten: None,
+            rp: None,
         });
     }
     model.solver = kind;
@@ -565,6 +568,149 @@ pub fn verschraubt(kind: crate::SolverKind) -> Result<Vec<Check>> {
         check(&name, "1 + größte Querkraft / F", shear / f + 1.0, 1.0, 5e-3),
         check(&name, "Lagerkraft Fz [N]", -res.reactions[0].1[2], f, 1e-6),
     ])
+}
+
+/// zwei gleiche Quader übereinander (ein Netz, Körper 1 unten, 2 oben, Fuge bei z = h noch verbunden)
+fn zwei_kloetze(a: f64, h: f64, cells: [usize; 3]) -> Result<crate::Mesh> {
+    let mut mesh = box_mesh([a, a, 2.0 * h], cells, Order::Quadratic)?;
+    mesh.elem_body = (0..mesh.n_elems())
+        .map(|e| {
+            let c = mesh.elem_coords(e);
+            if (c[0][2] + c[1][2] + c[2][2] + c[3][2]) / 4.0 < h {
+                1
+            } else {
+                2
+            }
+        })
+        .collect();
+    Ok(mesh)
+}
+
+fn kind_name(kind: crate::SolverKind) -> &'static str {
+    if kind == crate::SolverKind::Iterative {
+        "iterativ"
+    } else {
+        "direkt"
+    }
+}
+
+/// Kontakt unter Druck: zwei Klötze (ν = 0) liegen lose aufeinander und werden zusammengedrückt –
+/// Verkürzung wie ein Stück (σ·2h/E), Druck in der Fuge gleich der Last, keine Durchdringung
+pub fn kontakt_druck(kind: crate::SolverKind) -> Result<Vec<Check>> {
+    let (a, h, f) = (20.0, 10.0, 40000.0);
+    let mut steel = Material::steel();
+    steel.nu = 0.0;
+    let mut model = Model::new(zwei_kloetze(a, h, [4, 4, 4])?, steel.clone())
+        .group("unten", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("oben", Selection::Plane { axis: Axis::Z, value: 2.0 * h })
+        .support("unten", Fix::all())
+        .load(Load::Force { group: "oben".into(), force: [0.0, 0.0, -f] });
+    model.joint_pairs = model.mesh.split_bodies(1, 2);
+    model.solver = kind;
+    let res = solve(&model)?;
+    let m = &model.mesh;
+    let tol = m.tolerance();
+    let name = format!("Kontakt unter Druck ({})", kind_name(kind));
+    let top = mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[2] - 2.0 * h).abs() < tol).map(|(_, u)| u[2]));
+    let pen = model.joint_pairs.iter().map(|&(o, c)| res.displacement[o][2] - res.displacement[c][2]).fold(0.0, f64::max);
+    let j = res.joints.first().ok_or(crate::FemError::Input("keine Fuge".into()))?;
+    Ok(vec![
+        check(&name, "Verkürzung [mm]", -top, f * 2.0 * h / (steel.e * a * a), 2e-3),
+        check(&name, "Druckkraft in der Fuge [N]", j.pressure_force, f, 1e-5),
+        check(&name, "Flächenpressung [MPa]", j.max_pressure, f / (a * a), 3e-3),
+        check(&name, "aufliegender Anteil", j.closed, 1.0, 1e-9),
+        check(&name, "1 + Durchdringung / Verkürzung", 1.0 + pen / -top, 1.0, 5e-3),
+    ])
+}
+
+fn m8_vorgespannt(x: f64, y: f64, h: f64, fv: f64, i: usize) -> crate::bolt::Bolt {
+    crate::bolt::Bolt {
+        name: format!("Schraube {i}"),
+        d: 8.0,
+        stress_area: None,
+        e: 210000.0,
+        origin: [x, y, 2.0 * h],
+        axis: [0.0, 0.0, -1.0],
+        head_t: 0.0,
+        head_d: 13.0,
+        nut_t: Some(2.0 * h),
+        nut_d: Some(13.0),
+        thread_t0: 0.0,
+        thread_t1: 0.0,
+        preload: Some(fv),
+        tighten: None,
+        rp: None,
+    }
+}
+
+/// Vorgespannte Verschraubung: zwei Klötze, 4 × M8 mit F_V, Fuge mit Kontakt. Ohne Last trägt jede Schraube F_V
+/// und die Fuge 4·F_V; mit Zuglast gilt Σ F_S = F_A + Restklemmkraft; bei großer Last klafft die Fuge.
+pub fn vorgespannt(kind: crate::SolverKind, fa: f64) -> Result<(Vec<Check>, crate::Results)> {
+    let (a, h, fv) = (40.0, 10.0, 10000.0);
+    let mut model = Model::new(zwei_kloetze(a, h, [8, 8, 4])?, Material::steel())
+        .group("unten", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("oben", Selection::Plane { axis: Axis::Z, value: 2.0 * h })
+        .support("unten", Fix::all())
+        .load(Load::Force { group: "oben".into(), force: [0.0, 0.0, fa] });
+    for (i, (x, y)) in [(10.0, 10.0), (30.0, 10.0), (10.0, 30.0), (30.0, 30.0)].into_iter().enumerate() {
+        model.bolts.push(m8_vorgespannt(x, y, h, fv, i + 1));
+    }
+    model.joint_pairs = crate::bolt::open_joints(&mut model)?;
+    model.solver = kind;
+    let res = solve(&model)?;
+    let name = format!("Vorgespannt 4 × M8, F_A = {:.0} kN ({})", fa / 1000.0, kind_name(kind));
+    let sum: f64 = res.bolts.iter().map(|b| b.axial).sum();
+    let j = res.joints.first().ok_or(crate::FemError::Input("keine Fuge".into()))?;
+    let tol = if kind == crate::SolverKind::Iterative { 1e-4 } else { 1e-6 };
+    let mut v = vec![
+        check(&name, "Σ Schraubenkräfte = F_A + Restklemmkraft [N]", sum, fa + j.pressure_force, tol),
+        check(&name, "Kontakt konvergiert (1 = ja)", res.contact_converged as u8 as f64, 1.0, 0.0),
+    ];
+    if fa == 0.0 {
+        v.push(check(&name, "Schraube 1 Kraft = F_V [N]", res.bolts[0].axial, fv, tol));
+        v.push(check(&name, "Schraube 4 Kraft = F_V [N]", res.bolts[3].axial, fv, tol));
+        v.push(check(&name, "Klemmkraft in der Fuge = 4·F_V [N]", j.pressure_force, 4.0 * fv, tol));
+    } else if fa > 1.5 * 4.0 * fv {
+        // weit über der Klaffgrenze F_V/(1 − Φ): Fuge offen, Schrauben tragen alles
+        v.push(check(&name, "1 + aufliegender Anteil der Fuge", 1.0 + j.closed, 1.0, 1e-9));
+        v.push(check(&name, "Schraube 1 Kraft = F_A/4 (Fuge offen) [N]", res.bolts[0].axial, fa / 4.0, 1e-3));
+    }
+    Ok((v, res))
+}
+
+/// Vorgespannte Verschraubung mit Querkraft: bis µ·F_K hält die Reibung, darüber rutscht die Fuge und die
+/// Schrauben tragen den Rest (Σ Querkraft Schrauben = F_Q − µ·F_K)
+pub fn vorgespannt_quer(kind: crate::SolverKind, fq: f64, mu: f64) -> Result<(Vec<Check>, crate::Results)> {
+    let (a, h, fv) = (40.0, 10.0, 10000.0);
+    let mut model = Model::new(zwei_kloetze(a, h, [8, 8, 4])?, Material::steel())
+        .group("unten", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("oben", Selection::Plane { axis: Axis::Z, value: 2.0 * h })
+        .support("unten", Fix::all())
+        .load(Load::Force { group: "oben".into(), force: [fq, 0.0, 0.0] });
+    for (i, (x, y)) in [(10.0, 10.0), (30.0, 10.0), (10.0, 30.0), (30.0, 30.0)].into_iter().enumerate() {
+        model.bolts.push(m8_vorgespannt(x, y, h, fv, i + 1));
+    }
+    model.joint_pairs = crate::bolt::open_joints(&mut model)?;
+    model.joint_friction = crate::contact::Friction::Coulomb { mu };
+    model.solver = kind;
+    let res = solve(&model)?;
+    let name = format!("Vorgespannt, Querkraft {:.0} kN, µ = {mu} ({})", fq / 1000.0, kind_name(kind));
+    let shear: f64 = res.bolts.iter().map(|b| b.shear).sum();
+    let j = res.joints.first().ok_or(crate::FemError::Input("keine Fuge".into()))?;
+    let mut v = vec![check(&name, "Kontakt konvergiert (1 = ja)", res.contact_converged as u8 as f64, 1.0, 0.0)];
+    if mu == 0.0 {
+        v.push(check(&name, "Σ Querkraft Schrauben = F_Q (reibungsfrei) [N]", shear, fq, 1e-4));
+    } else if fq > 1.2 * mu * 4.0 * fv {
+        // rutscht durch: überall Reibkraft µ·p, Schrauben tragen den Rest
+        v.push(check(&name, "1 + Anteil, der haftet", 2.0 - j.slipping, 1.0, 1e-9));
+        v.push(check(&name, "Reibkraft = µ · Klemmkraft [N]", j.friction_force, mu * j.pressure_force, 1e-3));
+        v.push(check(&name, "Σ Querkraft Schrauben = F_Q − µ·F_K [N]", shear, fq - mu * j.pressure_force, 2e-3));
+    } else {
+        // hält über Reibung (am Rand rutscht es etwas): Schrauben fast unbelastet
+        v.push(check(&name, "Σ Querkraft Schrauben + Reibkraft [N]", shear + j.friction_force, fq, 1e-2));
+        v.push(check(&name, "1 + Querkraft Schrauben / F_Q", 1.0 + shear / fq, 1.0, 0.05));
+    }
+    Ok((v, res))
 }
 
 pub fn all() -> Result<Vec<Check>> {
@@ -588,6 +734,16 @@ pub fn all() -> Result<Vec<Check>> {
     v.extend(zugstab_zwei_werkstoffe(crate::SolverKind::Iterative)?);
     v.extend(verschraubt(crate::SolverKind::Direct)?);
     v.extend(verschraubt(crate::SolverKind::Iterative)?);
+    v.extend(kontakt_druck(crate::SolverKind::Direct)?);
+    v.extend(kontakt_druck(crate::SolverKind::Iterative)?);
+    v.extend(vorgespannt(crate::SolverKind::Direct, 0.0)?.0);
+    v.extend(vorgespannt(crate::SolverKind::Iterative, 0.0)?.0);
+    v.extend(vorgespannt(crate::SolverKind::Direct, 10000.0)?.0);
+    v.extend(vorgespannt(crate::SolverKind::Direct, 80000.0)?.0);
+    v.extend(vorgespannt_quer(crate::SolverKind::Direct, 2000.0, 0.15)?.0);
+    v.extend(vorgespannt_quer(crate::SolverKind::Direct, 10000.0, 0.15)?.0);
+    v.extend(vorgespannt_quer(crate::SolverKind::Iterative, 10000.0, 0.15)?.0);
+    v.extend(vorgespannt_quer(crate::SolverKind::Direct, 10000.0, 0.0)?.0);
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");
     if crate::gmsh::find_gmsh().is_some() && step.exists() {
         v.extend(balken_gelenk(&step)?);

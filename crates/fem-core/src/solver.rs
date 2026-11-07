@@ -1,4 +1,5 @@
 use faer::linalg::solvers::Solve;
+use faer::sparse::linalg::solvers::{Llt, SymbolicLlt};
 use faer::sparse::{SparseColMat, Triplet};
 use faer::{Col, Side};
 use nalgebra::{DMatrix, Matrix3, Vector3};
@@ -15,6 +16,8 @@ use crate::{pcg, FemError, Result};
 pub const AUTO_ITERATIVE_FROM: usize = 50_000;
 /// Abbruchgenauigkeit des iterativen Lösers (‖r‖/‖f‖)
 pub const PCG_TOLERANCE: f64 = 1e-9;
+/// höchstens so viele Durchgänge je Schritt, bis sich Kontakt und Reibung nicht mehr ändern
+const MAX_CONTACT_PASSES: usize = 40;
 const PCG_MAX_ITER: usize = 2_000;
 
 /// Zusätzliche Einstellungen einer Rechnung (z. B. für die Topologieoptimierung)
@@ -88,21 +91,18 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         progress.report("Schweißnähte koppeln", None);
         Some(crate::weld::prepare(model, &faces)?)
     };
-    let mut extra = tie_elements(welds.as_ref(), &frames);
+    let base_extra = tie_elements(welds.as_ref(), &frames);
     // Schrauben: Kopplung Kopfauflage ↔ Gewinde/Mutter
-    let bolts: Vec<crate::bolt::Prepared> = if model.bolts.is_empty() {
+    let mut bolts: Vec<crate::bolt::Prepared> = if model.bolts.is_empty() {
         vec![]
     } else {
         progress.report("Schrauben koppeln", None);
         model.bolts.iter().map(|b| crate::bolt::prepare(mesh, &faces, b)).collect::<Result<_>>()?
     };
-    extra.extend(bolt_elements(&bolts, &frames));
+    let preloads: Vec<f64> = model.bolts.iter().map(|b| b.assembly().map(|a| a.f_v).unwrap_or(0.0)).collect();
 
     progress.report("Lasten verteilen", None);
     let f_ext = load_vector(model, &faces)?;
-    // im Gleichungssystem: lokale Komponenten an Knoten mit lokaler Basis
-    let mut f_sys = f_ext.clone();
-    frames.to_local(&mut f_sys);
     let elem_k = |e: usize| -> Result<DMatrix<f64>> {
         let mut ke = tet_stiffness(&mesh.elem_coords(e), &elem_d(e)).ok_or(FemError::DegenerateElement(e))?;
         frames.transform_element(mesh.elem(e), &mut ke);
@@ -118,18 +118,187 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         SolverKind::Iterative => true,
         SolverKind::Auto => neq >= AUTO_ITERATIVE_FROM,
     };
-    let (u, iterations) = if iterative {
-        progress.report(&format!("Steifigkeitsmatrix aufbauen ({neq} Unbekannte)"), None);
-        let sys = pcg::assemble(n_nodes, &mesh.conn, mesh.npe, &prescribed, &f_sys, elem_k, &extra)?;
-        let fixed: Vec<bool> = prescribed.iter().map(Option::is_some).collect();
-        let sol = pcg::solve(sys, &mesh.nodes, &fixed, &frames, opts.tolerance.unwrap_or(PCG_TOLERANCE), PCG_MAX_ITER, progress)?;
-        (sol.x, Some(sol.iterations))
-    } else {
-        progress.report(&format!("Direkter Löser: Matrix aufbauen und zerlegen ({neq} Unbekannte)"), None);
-        (solve_direct(model, &prescribed, &f_sys, &elem_k, &extra)?, None)
+    // lineares System mit Zusatzelementen (global) und Lastvektor (global) lösen
+    let direct_cache = std::cell::RefCell::new(DirectCache::default());
+    let pcg_cache = std::cell::RefCell::new(PcgCache::default());
+    let tol_final = opts.tolerance.unwrap_or(PCG_TOLERANCE);
+    let solve_lin = |extra: &[(Vec<usize>, DMatrix<f64>)],
+                     rhs: &[f64],
+                     prescribed: &[Option<f64>],
+                     key: Option<u64>,
+                     tol: f64|
+     -> Result<(Vec<f64>, Option<usize>)> {
+        let mut f_sys = rhs.to_vec();
+        frames.to_local(&mut f_sys);
+        let (u, it) = if iterative {
+            let mut pc = pcg_cache.borrow_mut();
+            let fixed: Vec<bool> = prescribed.iter().map(Option::is_some).collect();
+            // gleiche Matrix wie zuletzt: Vorkonditionierer behalten, nur die rechte Seite neu
+            let reuse = matches!((&pc.amg, key), (Some((k0, _, _, p0)), Some(k)) if *k0 == k && p0.as_slice() == prescribed);
+            let t0 = std::time::Instant::now();
+            let mut t_asm = std::time::Duration::ZERO;
+            if !reuse {
+                progress.report(&format!("Steifigkeitsmatrix aufbauen ({neq} Unbekannte)"), None);
+                let sys = pcg::assemble(n_nodes, &mesh.conn, mesh.npe, prescribed, &f_sys, &elem_k, extra)?;
+                t_asm = t0.elapsed();
+                // Anteil der rechten Seite aus vorgegebenen Verschiebungen (ohne äußere Lasten)
+                let b_presc: Vec<f64> = sys.b.iter().zip(&f_sys).zip(&fixed).map(|((b, f), &fx)| if fx { *b } else { b - f }).collect();
+                // nur Kontaktfedern geändert (gleiche Lagerung): grobe Gitter behalten, sonst neu aufbauen
+                let keep = !pc.rebuild
+                    && matches!(&pc.amg, Some((_, _, _, p0)) if p0.iter().zip(prescribed).all(|(a, b)| a.is_some() == b.is_some()))
+                    && sys.k.col.len() == pc.amg.as_ref().map(|a| a.1.matrix().col.len()).unwrap_or(0);
+                let amg = match (keep, pc.amg.take()) {
+                    (true, Some((_, mut amg, _, _))) => {
+                        amg.replace_fine(sys.k)?;
+                        amg
+                    }
+                    _ => {
+                        progress.report("Mehrgitter-Vorkonditionierer vorbereiten", None);
+                        pc.fresh_iters = None;
+                        crate::amg::Amg::new(sys.k, &mesh.nodes, &fixed, &frames)?
+                    }
+                };
+                pc.rebuild = false;
+                pc.amg = Some((key.unwrap_or(u64::MAX), amg, b_presc, prescribed.to_vec()));
+            }
+            let (_, amg, b_presc, _) = pc.amg.as_ref().expect("gesetzt");
+            let b: Vec<f64> = b_presc.iter().zip(&f_sys).zip(&fixed).map(|((b, f), &fx)| if fx { *b } else { b + f }).collect();
+            // Startwert: Lösung des vorigen Durchgangs (vorgegebene Werte eingesetzt)
+            let x0: Option<Vec<f64>> =
+                pc.x_last.as_ref().map(|x| x.iter().zip(&b).zip(&fixed).map(|((x, b), &fx)| if fx { *b } else { *x }).collect());
+            let t1 = std::time::Instant::now();
+            let sol = pcg::solve_amg(amg, b, x0.as_deref(), tol, PCG_MAX_ITER, progress)?;
+            if std::env::var("FEM_KONTAKT_DEBUG").is_ok() {
+                eprintln!("  PCG: Matrix {t_asm:.2?}, AMG {:.2?}, {} Iterationen {:.2?}", t1 - t0 - t_asm, sol.iterations, t1.elapsed());
+            }
+            pc.x_last = Some(sol.x.clone());
+            // mit behaltenen groben Gittern deutlich mehr Iterationen als frisch aufgebaut → nächstes Mal neu aufbauen
+            match pc.fresh_iters {
+                None => pc.fresh_iters = Some(sol.iterations.max(10)),
+                Some(f) if sol.iterations > 3 * f => pc.rebuild = true,
+                _ => {}
+            }
+            (sol.x, Some(sol.iterations))
+        } else {
+            progress.report(&format!("Direkter Löser: Matrix aufbauen und zerlegen ({neq} Unbekannte)"), None);
+            (solve_direct(model, prescribed, &f_sys, &elem_k, extra, &mut direct_cache.borrow_mut(), key)?, None)
+        };
+        let mut u = u;
+        frames.to_global(&mut u);
+        Ok((u, it))
     };
-    let mut u = u;
-    frames.to_global(&mut u);
+    // Schraubenelemente; `force_mode`: Schrauben mit Vorspannung ohne Längsfeder (Kraft statt Länge vorgegeben)
+    let bolt_elems = |bolts: &[crate::bolt::Prepared], force_mode: bool| -> Vec<(Vec<usize>, DMatrix<f64>)> {
+        bolts
+            .iter()
+            .zip(&preloads)
+            .map(|(p, &fv)| {
+                let mut k = if force_mode && fv > 0.0 { p.stiffness_without_axial() } else { p.stiffness() };
+                frames.transform_element(&p.nodes, &mut k);
+                (p.nodes.clone(), k)
+            })
+            .collect()
+    };
+    // Schraubenkräfte als Knotenlasten: Vorspannkraft (Schritt 1) bzw. Vorspannweg k·s (Schritt 2)
+    let bolt_loads = |bolts: &[crate::bolt::Prepared], force_mode: bool| -> Vec<f64> {
+        let mut f = vec![0.0; ndof];
+        for (p, &fv) in bolts.iter().zip(&preloads) {
+            if fv <= 0.0 {
+                continue;
+            }
+            let t = p.tension_forces(if force_mode { fv } else { p.k_ax * p.offset });
+            for (j, &n) in p.nodes.iter().enumerate() {
+                for c in 0..3 {
+                    f[3 * n + c] += t[3 * j + c];
+                }
+            }
+        }
+        f
+    };
+    // Kontakt in geöffneten Fugen
+    let e_ref = std::iter::once(&model.material).chain(model.body_materials.iter().map(|(_, m)| m)).map(|m| m.e).fold(0.0, f64::max);
+    let mut contact = (!model.joint_pairs.is_empty())
+        .then(|| crate::contact::Contact::new(mesh, &model.joint_pairs, e_ref, model.joint_friction))
+        .filter(|c| !c.is_empty());
+    // rechnen, Kontaktzustände prüfen, wiederholen, bis sich nichts mehr ändert
+    let mut contact_iters = 0usize;
+    let mut matrix_version = 0u64;
+    let mut contact_open_changes = 0usize;
+    type Extra = Vec<(Vec<usize>, DMatrix<f64>)>;
+    let mut run = |contact: &mut Option<crate::contact::Contact>,
+                   bolt_extra: &Extra,
+                   rhs: &[f64],
+                   presc: &[Option<f64>],
+                   label: &str|
+     -> Result<(Vec<f64>, Option<usize>)> {
+        let mut pass = 0;
+        // iterativer Löser: Kontaktzustände mit gröberer Genauigkeit suchen, zum Schluss genau nachrechnen
+        let mut tight = contact.is_none() || !iterative;
+        loop {
+            let mut extra = base_extra.clone();
+            extra.extend(bolt_extra.iter().cloned());
+            let mut r = rhs.to_vec();
+            if let Some(c) = contact.as_ref() {
+                for (nodes, mut k) in c.elements() {
+                    frames.transform_element(&nodes, &mut k);
+                    extra.push((nodes, k));
+                }
+                for (i, v) in c.forces(ndof).into_iter().enumerate() {
+                    r[i] += v;
+                }
+            }
+            // neue Matrix nur bei neuem Schritt oder geänderten Kontaktfedern, sonst nur neue rechte Seite
+            if pass == 0 || contact.as_ref().is_some_and(|c| c.matrix_dirty) {
+                matrix_version += 1;
+            }
+            if let Some(c) = contact.as_mut() {
+                c.matrix_dirty = false;
+            }
+            let t_pass = std::time::Instant::now();
+            let tol = if tight { tol_final } else { (tol_final * 1e3).max(tol_final).min(1e-6) };
+            let (u, it) = solve_lin(&extra, &r, presc, Some(matrix_version), tol)?;
+            if std::env::var("FEM_KONTAKT_DEBUG").is_ok() {
+                eprintln!("{label}: Durchgang {} in {:.2?}", pass + 1, t_pass.elapsed());
+            }
+            pass += 1;
+            contact_iters += 1;
+            let changes = contact.as_mut().map(|c| c.update(&u)).unwrap_or(0);
+            if changes == 0 && !tight {
+                tight = true;
+                continue;
+            }
+            if changes == 0 || pass >= MAX_CONTACT_PASSES {
+                contact_open_changes = changes;
+                return Ok((u, it));
+            }
+            progress.report(&format!("{label}: Kontakt, Durchgang {} ({changes} Änderungen)", pass + 1), None);
+        }
+    };
+    // Schritt 1: Schrauben anziehen (Vorspannkraft vorgegeben), Vorspannweg merken
+    if preloads.iter().any(|&f| f > 0.0) {
+        progress.report("Schrauben vorspannen", None);
+        // nur die Schrauben ziehen an; vorgegebene Verschiebungen kommen erst mit der Betriebslast
+        let presc0: Vec<Option<f64>> = prescribed.iter().map(|p| p.map(|_| 0.0)).collect();
+        let (u1, _) = run(&mut contact, &bolt_elems(&bolts, true), &bolt_loads(&bolts, true), &presc0, "Vorspannen")?;
+        if let Some(c) = contact.as_mut() {
+            c.commit_step();
+        }
+        for (p, &fv) in bolts.iter_mut().zip(&preloads) {
+            if fv > 0.0 {
+                p.offset = fv / p.k_ax - p.axial_delta(&u1);
+            }
+        }
+    }
+    // Schritt 2: Betriebslast (Schraubenlänge festgehalten)
+    let mut rhs = f_ext.clone();
+    for (i, v) in bolt_loads(&bolts, false).into_iter().enumerate() {
+        rhs[i] += v;
+    }
+    let (u, iterations) = run(&mut contact, &bolt_elems(&bolts, false), &rhs, &prescribed, "Last")?;
+
+    // Krafteinleitung der Schrauben: örtliche Spitzen, nicht im σv-Nachweis
+    let bolt_zone = crate::bolt::load_zone(mesh, &model.bolts, &bolts);
+    let rated = |n: usize| !bolt_zone.get(n).copied().unwrap_or(false);
 
     // --- Spannungen und Reaktionen -------------------------------------------
     progress.report("Spannungen berechnen", None);
@@ -208,16 +377,23 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         }
     }
 
-    // Schraubenkräfte gehören ebenfalls zu den inneren Kräften
-    for p in &bolts {
+    // Schraubenkräfte gehören ebenfalls zu den inneren Kräften (mit Vorspannweg: K·u − Last aus k·s)
+    for (p, &fv) in bolts.iter().zip(&preloads) {
         let k = p.stiffness();
         let ut: Vec<f64> = p.nodes.iter().flat_map(|&n| [u[3 * n], u[3 * n + 1], u[3 * n + 2]]).collect();
-        let ft = k * nalgebra::DVector::from_column_slice(&ut);
+        let mut ft = k * nalgebra::DVector::from_column_slice(&ut);
+        if fv > 0.0 {
+            ft -= p.tension_forces(p.k_ax * p.offset);
+        }
         for (a, &n) in p.nodes.iter().enumerate() {
             for c in 0..3 {
                 f_int[3 * n + c] += ft[3 * a + c];
             }
         }
+    }
+    // Kontaktkräfte ebenso
+    if let Some(c) = &contact {
+        c.add_internal(&u, &mut f_int);
     }
 
     // Lagerkraft am Knoten: nur in den festgehaltenen (ggf. lokalen) Richtungen
@@ -265,11 +441,17 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
                     cnt[n] += 1;
                 }
             }
-            let avg = |n: usize, c: usize| if cnt[n] > 0 { acc[n][c] / cnt[n] as f64 } else { 0.0 };
+            let avg = |n: usize, c: usize| {
+                if cnt[n] > 0 {
+                    acc[n][c] / cnt[n] as f64
+                } else {
+                    0.0
+                }
+            };
             let has = st.iter().any(|x| x.0.is_some());
             let has_brk = st.iter().any(|x| x.1.is_some());
             let layered = mats.iter().any(|m| m.layers.is_some());
-            let brk = (0..n_nodes).map(|n| avg(n, 2)).fold(0.0, f64::max);
+            let brk = (0..n_nodes).filter(|&n| rated(n)).map(|n| avg(n, 2)).fold(0.0, f64::max);
             (
                 has.then(|| (0..n_nodes).map(|n| avg(n, 0)).collect()),
                 (has && layered).then(|| (0..n_nodes).map(|n| avg(n, 1)).collect()),
@@ -281,7 +463,7 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         None => {
             let util = crate::results::utilization(&model.material, &stress, false);
             let safety_break = crate::results::utilization(&model.material, &stress, true)
-                .map(|(u, _)| 1.0 / u.iter().copied().fold(0.0, f64::max).max(1e-300));
+                .map(|(u, _)| 1.0 / u.iter().enumerate().filter(|(n, _)| rated(*n)).map(|(_, v)| *v).fold(0.0, f64::max).max(1e-300));
             match util {
                 Some((u, l)) => (Some(u), l, safety_break, None, None),
                 None => (None, None, safety_break, None, None),
@@ -411,8 +593,13 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
             let (mut vm_max, mut u_max, mut util_max) = (0.0f64, 0.0f64, 0.0f64);
             for &n in &touched {
                 let s: [f64; 6] = std::array::from_fn(|c| buf[n][c] / cnt[n] as f64);
-                vm_max = vm_max.max(von_mises(&s));
                 u_max = u_max.max((u[3 * n].powi(2) + u[3 * n + 1].powi(2) + u[3 * n + 2].powi(2)).sqrt());
+                if !rated(n) {
+                    buf[n] = [0.0; 6];
+                    cnt[n] = 0;
+                    continue;
+                }
+                vm_max = vm_max.max(von_mises(&s));
                 if let Some(t) = &strength {
                     util_max = util_max.max(t.eval(&s).0);
                 }
@@ -438,9 +625,14 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         }
     }
 
-    let bolts = model.bolts.iter().zip(&bolts).map(|(b, p)| crate::bolt::evaluate(b, p, &u)).collect();
+    let bolt_results = model.bolts.iter().zip(&bolts).map(|(b, p)| crate::bolt::evaluate(b, p, &u)).collect();
+    let joints = contact.as_ref().map(|c| c.results()).unwrap_or_default();
     Ok(Results {
-        bolts,
+        bolts: bolt_results,
+        bolt_zone,
+        joints,
+        contact_passes: contact_iters,
+        contact_converged: contact_open_changes == 0,
         bodies,
         welds,
         solid_volume,
@@ -468,6 +660,8 @@ fn solve_direct(
     f_ext: &[f64],
     elem_k: &(dyn Fn(usize) -> Result<DMatrix<f64>> + Sync),
     extra: &[(Vec<usize>, DMatrix<f64>)],
+    cache: &mut DirectCache,
+    key: Option<u64>,
 ) -> Result<Vec<f64>> {
     let mesh = &model.mesh;
     let ndof = prescribed.len();
@@ -482,6 +676,29 @@ fn solve_direct(
         }
     }
     let u_presc: Vec<f64> = prescribed.iter().map(|p| p.unwrap_or(0.0)).collect();
+    let finish = |x: &Col<f64>, mut u: Vec<f64>| -> Result<Vec<f64>> {
+        if x.iter().any(|v| !v.is_finite()) {
+            return Err(FemError::Underconstrained);
+        }
+        for i in 0..ndof {
+            if eq[i] != usize::MAX {
+                u[i] = x[eq[i]];
+            }
+        }
+        Ok(u)
+    };
+    // gleiche Matrix wie zuletzt (nur andere rechte Seite): Zerlegung wiederverwenden
+    if let (Some(k), Some((fk, llt, b_presc, up))) = (key, &cache.factor) {
+        if *fk == k && *up == u_presc {
+            let mut b = b_presc.clone();
+            for i in 0..ndof {
+                if eq[i] != usize::MAX {
+                    b[eq[i]] += f_ext[i];
+                }
+            }
+            return finish(&llt.solve(&b), u_presc);
+        }
+    }
 
     // --- Assemblierung (parallel je Element) -------------------------------
     let npe = mesh.npe;
@@ -515,37 +732,69 @@ fn solve_direct(
         })
         .collect();
 
-    let mut b = Col::<f64>::zeros(neq);
-    for i in 0..ndof {
-        if eq[i] != usize::MAX {
-            b[eq[i]] = f_ext[i];
-        }
-    }
+    // rechte Seite: Anteil aus vorgegebenen Verschiebungen getrennt (bleibt bei gleicher Matrix gleich)
+    let mut b_presc = Col::<f64>::zeros(neq);
     let mut triplets = Vec::new();
     for r in per_elem {
         let (t, rhs) = r?;
         triplets.extend(t);
         for (i, v) in rhs {
-            b[i] += v;
+            b_presc[i] += v;
+        }
+    }
+    let mut b = b_presc.clone();
+    for i in 0..ndof {
+        if eq[i] != usize::MAX {
+            b[eq[i]] += f_ext[i];
         }
     }
 
+    let t_asm = std::time::Instant::now();
     let k = SparseColMat::<usize, f64>::try_new_from_triplets(neq, neq, &triplets)
         .map_err(|e| FemError::Input(format!("Matrixaufbau fehlgeschlagen: {e:?}")))?;
     drop(triplets);
-    let llt = k.sp_cholesky(Side::Lower).map_err(|_| FemError::Underconstrained)?;
+    // symbolische Zerlegung (Umordnung) bei gleichem Besetzungsmuster wiederverwenden
+    let same = matches!(&cache.pattern, Some((cp, ri, _)) if cp.as_slice() == k.col_ptr() && ri.as_slice() == k.row_idx());
+    if !same {
+        let sym = SymbolicLlt::try_new(k.symbolic(), Side::Lower).map_err(|_| FemError::Underconstrained)?;
+        cache.pattern = Some((k.col_ptr().to_vec(), k.row_idx().to_vec(), sym));
+    }
+    let sym = cache.pattern.as_ref().map(|p| p.2.clone()).expect("gesetzt");
+    let t_num = std::time::Instant::now();
+    let llt = Llt::try_new_with_symbolic(sym, k.as_ref(), Side::Lower).map_err(|_| FemError::Underconstrained)?;
+    let t_sol = std::time::Instant::now();
     let x = llt.solve(&b);
-    if x.iter().any(|v| !v.is_finite()) {
-        return Err(FemError::Underconstrained);
+    if std::env::var("FEM_KONTAKT_DEBUG").is_ok() {
+        eprintln!(
+            "  direkt: Matrix {:.2?}, Symbolik {} {:.2?}, Zerlegung {:.2?}, Lösen {:.2?}, {} Einträge",
+            t_num - t_asm,
+            same,
+            t_num.elapsed() - t_sol.elapsed(),
+            t_sol - t_num,
+            t_sol.elapsed(),
+            k.compute_nnz()
+        );
     }
-
-    let mut u = u_presc;
-    for i in 0..ndof {
-        if eq[i] != usize::MAX {
-            u[i] = x[eq[i]];
-        }
-    }
+    let u = finish(&x, u_presc.clone())?;
+    cache.factor = key.map(|k| (k, llt, b_presc, u_presc));
     Ok(u)
+}
+
+/// iterativer Löser über mehrere Durchgänge: Vorkonditionierer bei gleicher Matrix, letzte Lösung als Startwert
+#[derive(Default)]
+pub(crate) struct PcgCache {
+    amg: Option<(u64, crate::amg::Amg, Vec<f64>, Vec<Option<f64>>)>,
+    x_last: Option<Vec<f64>>,
+    /// Iterationen mit frisch aufgebautem Vorkonditionierer (Vergleich, ob die behaltenen Gitter noch taugen)
+    fresh_iters: Option<usize>,
+    rebuild: bool,
+}
+
+/// Zerlegungen für mehrere Rechnungen mit gleichem Besetzungsmuster (Durchgänge für Kontakt und Vorspannung)
+#[derive(Default)]
+pub(crate) struct DirectCache {
+    pattern: Option<(Vec<usize>, Vec<usize>, SymbolicLlt<usize>)>,
+    factor: Option<(u64, Llt<usize, f64>, Col<f64>, Vec<f64>)>,
 }
 
 /// Kopplungen der Schweißnähte als Zusatzelemente (Knoten, Steifigkeit in den Knotenbasen)

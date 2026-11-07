@@ -4,7 +4,8 @@
 //! Mittelwert auf der Gewindeseite (Wand der Gewindebohrung bzw. Ring unter der Mutter) – wie ein RBE3-Verbinder.
 //! Steifigkeit: längs E·A_s / (l_k + 0,9·d) (Klemmlänge + Anteile Kopf und Gewinde nach VDI 2230), quer
 //! 12·E·I / l_k³ (beidseitig eingespannter Schaft). Ergebnis: Schraubenkraft längs (Zug +) und quer.
-//! Vorspannung kommt mit dem Kontakt zwischen den verschraubten Teilen (später).
+//! Vorspannung in zwei Schritten (siehe Löser): erst anziehen (Kraft F_V vorgegeben, Fuge mit Kontakt), dann ist die
+//! Schraubenlänge fest und die Betriebslast kommt dazu. F_V nach VDI 2230 aus Ausnutzung oder Anziehmoment.
 
 use nalgebra::{DMatrix, Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,137 @@ pub struct Bolt {
     pub thread_t0: f64,
     #[serde(default)]
     pub thread_t1: f64,
+    /// Vorspannkraft F_V [N] (leer = aus `tighten` bzw. ohne Vorspannung)
+    #[serde(default)]
+    pub preload: Option<f64>,
+    /// Anziehen nach VDI 2230 (Vorspannkraft aus Ausnutzung der Streckgrenze oder aus dem Anziehmoment)
+    #[serde(default)]
+    pub tighten: Option<Tighten>,
+    /// Streckgrenze Rp0,2 der Schraube [MPa] (Festigkeitsklasse) – für Vorspannkraft und Nachweis
+    #[serde(default)]
+    pub rp: Option<f64>,
+}
+
+/// Wie die Schraube angezogen wird (VDI 2230)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "art", rename_all = "lowercase")]
+pub enum Tighten {
+    /// Montagevorspannkraft für die Ausnutzung ν der Streckgrenze beim Anziehen (VDI 2230: ν = 0,9)
+    Ausnutzung {
+        nu: f64,
+        #[serde(default = "mu_default")]
+        mu_g: f64,
+        #[serde(default = "mu_default")]
+        mu_k: f64,
+    },
+    /// Anziehmoment M_A [N·m]
+    Moment {
+        m_a: f64,
+        #[serde(default = "mu_default")]
+        mu_g: f64,
+        #[serde(default = "mu_default")]
+        mu_k: f64,
+    },
+    /// Vorspannkraft direkt [N]
+    Kraft { f_v: f64 },
+}
+
+fn mu_default() -> f64 {
+    0.12
+}
+
+/// Steigung P des Regelgewindes [mm] (ISO 261); sonst etwa 0,15·d
+pub fn pitch(d: f64) -> f64 {
+    const T: [(f64, f64); 15] = [
+        (3.0, 0.5),
+        (4.0, 0.7),
+        (5.0, 0.8),
+        (6.0, 1.0),
+        (8.0, 1.25),
+        (10.0, 1.5),
+        (12.0, 1.75),
+        (14.0, 2.0),
+        (16.0, 2.0),
+        (18.0, 2.5),
+        (20.0, 2.5),
+        (22.0, 2.5),
+        (24.0, 3.0),
+        (27.0, 3.0),
+        (30.0, 3.5),
+    ];
+    T.iter().find(|(m, _)| (m - d).abs() < 0.05).map(|(_, p)| *p).unwrap_or(0.15 * d)
+}
+
+/// Flankendurchmesser d₂ [mm]
+pub fn d2(d: f64) -> f64 {
+    d - 0.649519 * pitch(d)
+}
+
+/// Durchmesser zum Spannungsquerschnitt d_S [mm]
+fn d_s(a_s: f64) -> f64 {
+    (4.0 * a_s / std::f64::consts::PI).sqrt()
+}
+
+/// zulässige Montagevorspannkraft F_M,zul [N] (VDI 2230 Gl. R7/1): beim Anziehen erreicht die Vergleichsspannung aus
+/// Zug und Gewindetorsion ν·Rp0,2
+pub fn assembly_preload(d: f64, a_s: f64, rp: f64, mu_g: f64, nu: f64) -> f64 {
+    let (p, d2) = (pitch(d), d2(d));
+    let x = 1.5 * d2 / d_s(a_s) * (p / (std::f64::consts::PI * d2) + 1.155 * mu_g);
+    nu * rp * a_s / (1.0 + 3.0 * x * x).sqrt()
+}
+
+/// Gewindemoment M_G [N·mm] bei Vorspannkraft F (VDI 2230 Gl. R7/2, Teil Gewinde)
+pub fn thread_torque(d: f64, f: f64, mu_g: f64) -> f64 {
+    f * (0.16 * pitch(d) + 0.58 * d2(d) * mu_g)
+}
+
+/// Anziehmoment M_A [N·mm] für Vorspannkraft F; `d_km`: mittlerer Durchmesser der Kopfauflage
+pub fn tightening_torque(d: f64, f: f64, mu_g: f64, mu_k: f64, d_km: f64) -> f64 {
+    thread_torque(d, f, mu_g) + f * d_km / 2.0 * mu_k
+}
+
+/// Vorspannung einer Schraube aus den Angaben
+#[derive(Debug, Clone, Copy, Serialize, Default)]
+pub struct Assembly {
+    /// Vorspannkraft F_V [N]
+    pub f_v: f64,
+    /// Anziehmoment M_A [N·m]
+    pub m_a: f64,
+    /// Gewindemoment M_G [N·mm] (verdreht die Schraube beim Anziehen)
+    pub m_g: f64,
+}
+
+impl Bolt {
+    /// mittlerer Durchmesser der Kopfauflage D_Km = (d_w + d_h)/2, Bohrung d_h ≈ 1,1·d (ISO 273 mittel)
+    pub fn d_km(&self) -> f64 {
+        (self.head_d.max(1.3 * self.d) + 1.1 * self.d) / 2.0
+    }
+
+    /// tragende Fläche unter dem Kopf A_p = π/4·(d_w² − d_h²), Bohrung d_h ≈ 1,1·d
+    pub fn bearing_area(&self) -> f64 {
+        let dw = self.head_d.max(1.3 * self.d);
+        std::f64::consts::FRAC_PI_4 * (dw * dw - (1.1 * self.d).powi(2))
+    }
+
+    /// Vorspannkraft, Anziehmoment und Gewindemoment (leer = ohne Vorspannung)
+    pub fn assembly(&self) -> Option<Assembly> {
+        let a_s = self.stress_area.unwrap_or_else(|| stress_area(self.d));
+        let (f_v, mu) = match (&self.tighten, self.preload) {
+            (_, Some(f)) if f > 0.0 => (f, None),
+            (Some(Tighten::Kraft { f_v }), _) if *f_v > 0.0 => (*f_v, None),
+            (Some(Tighten::Ausnutzung { nu, mu_g, mu_k }), _) if *nu > 0.0 => {
+                (assembly_preload(self.d, a_s, self.rp.unwrap_or(640.0), *mu_g, *nu), Some((*mu_g, *mu_k)))
+            }
+            (Some(Tighten::Moment { m_a, mu_g, mu_k }), _) if *m_a > 0.0 => {
+                let per_n = tightening_torque(self.d, 1.0, *mu_g, *mu_k, self.d_km());
+                (m_a * 1000.0 / per_n, Some((*mu_g, *mu_k)))
+            }
+            _ => return None,
+        };
+        // ohne Reibwerte (Kraft vorgegeben): Gewindemoment und Anziehmoment mit µ = 0,12 abgeschätzt
+        let (mu_g, mu_k) = mu.unwrap_or((mu_default(), mu_default()));
+        Some(Assembly { f_v, m_a: tightening_torque(self.d, f_v, mu_g, mu_k, self.d_km()) / 1000.0, m_g: thread_torque(self.d, f_v, mu_g) })
+    }
 }
 
 fn steel_e() -> f64 {
@@ -63,6 +195,12 @@ pub struct Prepared {
     pub g: DMatrix<f64>,
     /// 12 × 12 Balkensteifigkeit (global)
     pub kb: DMatrix<f64>,
+    /// nur der Längsanteil davon (für den Vorspann-Schritt, in dem die Kraft statt der Länge vorgegeben ist)
+    pub kb_axial: DMatrix<f64>,
+    /// ∂(Längenänderung)/∂u über alle Knoten (3m)
+    pub b_ax: nalgebra::DVector<f64>,
+    /// Vorspannweg s: Schraube ist um s kürzer als der Abstand der Auflagen → Kraft k·(Δ + s)
+    pub offset: f64,
     /// globale → lokale Achsen (Zeilen: Schraubenachse, e1, e2)
     pub q: Matrix3<f64>,
     pub k_ax: f64,
@@ -75,6 +213,21 @@ impl Prepared {
     /// Steifigkeitsmatrix über alle beteiligten Knoten (3m × 3m): Gᵀ·K·G
     pub fn stiffness(&self) -> DMatrix<f64> {
         self.g.transpose() * &self.kb * &self.g
+    }
+
+    /// Steifigkeit ohne Längsfeder (Vorspann-Schritt mit vorgegebener Kraft)
+    pub fn stiffness_without_axial(&self) -> DMatrix<f64> {
+        self.g.transpose() * (&self.kb - &self.kb_axial) * &self.g
+    }
+
+    /// Längenänderung zwischen den Auflagen (+ = länger)
+    pub fn axial_delta(&self, u: &[f64]) -> f64 {
+        self.nodes.iter().enumerate().map(|(j, &n)| (0..3).map(|c| self.b_ax[3 * j + c] * u[3 * n + c]).sum::<f64>()).sum()
+    }
+
+    /// Knotenkräfte (je beteiligtem Knoten, 3m) einer Schraubenkraft F (Zug): Kopf zur Mutter hin, Mutter zum Kopf
+    pub fn tension_forces(&self, f: f64) -> nalgebra::DVector<f64> {
+        -&self.b_ax * f
     }
 
     /// Endverschiebungen [u, θ]×2 im lokalen System
@@ -96,8 +249,18 @@ pub struct BoltResult {
     pub name: String,
     pub d: f64,
     pub stress_area: f64,
-    /// Kraft längs der Achse [N], positiv = Zug
+    /// Kraft längs der Achse [N], positiv = Zug (mit Vorspannung: Betriebskraft)
     pub axial: f64,
+    /// Vorspannkraft F_V [N] (0 = ohne)
+    pub preload: f64,
+    /// Anziehmoment M_A [N·m] (0 = ohne Vorspannung)
+    pub torque: f64,
+    /// Vergleichsspannung im Betrieb [MPa]: √((F_S/A_s + M_b/W)² + 3·(k_τ·M_G/W_p + Q/A_s)²), k_τ = 0,5 (VDI 2230)
+    pub sigma_red: f64,
+    /// Ausnutzung σ_red / Rp0,2 (leer = Festigkeitsklasse unbekannt)
+    pub utilization: Option<f64>,
+    /// Flächenpressung unter Kopf bzw. Mutter p = F_S / A_p, A_p = π/4·(d_w² − d_h²) [MPa]
+    pub bearing_pressure: f64,
     /// Querkraft [N]
     pub shear: f64,
     /// größtes Biegemoment im Schaft [N·mm]
@@ -109,16 +272,60 @@ pub struct BoltResult {
 }
 
 /// höchstens so viele Knoten je Seite (gleichmäßig über den Umfang verteilt)
-const MAX_SIDE_NODES: usize = 72;
+const MAX_SIDE_NODES: usize = 96;
 
-fn pick_ring(mut cand: Vec<(usize, f64)>) -> Vec<usize> {
-    // nach Winkel sortieren, gleichmäßig ausdünnen
-    cand.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    if cand.len() <= MAX_SIDE_NODES {
-        return cand.into_iter().map(|c| c.0).collect();
+/// Auflageknoten mit Gewicht (Flächenanteil) auswählen: Randflächen, deren Knoten alle die Bedingung erfüllen.
+/// Gewichte wie eine gleichmäßige Pressung (quadratische Dreiecke: Ecken 0, Kanten je A/3), damit die Schraubenkraft
+/// ohne künstliche Spitzen eingeleitet wird. Mehr als MAX_SIDE_NODES Knoten: je Winkelabschnitt einer, mit dem Gewicht
+/// des ganzen Abschnitts.
+fn weighted_side(mesh: &Mesh, faces: &[Face], cand: &[(usize, f64)]) -> Vec<(usize, f64)> {
+    let mut angle = std::collections::HashMap::new();
+    for &(k, a) in cand {
+        angle.insert(k, a);
     }
-    let step = cand.len() as f64 / MAX_SIDE_NODES as f64;
-    (0..MAX_SIDE_NODES).map(|i| cand[(i as f64 * step) as usize].0).collect()
+    let mut w: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+    for f in faces {
+        if !f.nodes.iter().all(|k| angle.contains_key(k)) {
+            continue;
+        }
+        let p: Vec<Vector3<f64>> = f.nodes[..3].iter().map(|&k| Vector3::from(mesh.nodes[k])).collect();
+        let af = (p[1] - p[0]).cross(&(p[2] - p[0])).norm() * 0.5;
+        if f.nodes.len() == 6 {
+            for &k in &f.nodes[3..] {
+                *w.entry(k).or_default() += af / 3.0;
+            }
+        } else {
+            for &k in &f.nodes {
+                *w.entry(k).or_default() += af / f.nodes.len() as f64;
+            }
+        }
+    }
+    let mut out: Vec<(usize, f64, f64)> = w.into_iter().filter(|(_, v)| *v > 0.0).map(|(k, v)| (k, v, angle[&k])).collect();
+    if out.len() < 3 {
+        // keine ganze Fläche in der Auflage (sehr grobes Netz): alle Knoten gleich gewichtet
+        out = cand.iter().map(|&(k, a)| (k, 1.0, a)).collect();
+    }
+    out.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap().then(a.0.cmp(&b.0)));
+    if out.len() <= MAX_SIDE_NODES {
+        return out.into_iter().map(|(k, v, _)| (k, v)).collect();
+    }
+    let mut bins: Vec<(usize, f64, f64)> = Vec::new(); // (Knoten, Gewicht des Knotens, Summe des Abschnitts)
+    let bin_of = |a: f64| (((a + std::f64::consts::PI) / std::f64::consts::TAU * MAX_SIDE_NODES as f64) as usize).min(MAX_SIDE_NODES - 1);
+    let mut cur = usize::MAX;
+    for (k, v, a) in out {
+        let bi = bin_of(a);
+        if bi != cur {
+            bins.push((k, v, 0.0));
+            cur = bi;
+        }
+        let last = bins.last_mut().unwrap();
+        last.2 += v;
+        if v > last.1 {
+            last.0 = k;
+            last.1 = v;
+        }
+    }
+    bins.into_iter().map(|(k, _, sum)| (k, sum)).collect()
 }
 
 /// Knoten auf der Oberfläche finden und die Schraube vorbereiten
@@ -146,7 +353,7 @@ pub fn prepare(mesh: &Mesh, faces: &[Face], b: &Bolt) -> Result<Prepared> {
         let r = v - n * t;
         (t, r.norm(), r.dot(&e2).atan2(r.dot(&e1)))
     };
-    let ring = |t0: f64, r0: f64, r1: f64| -> Vec<usize> {
+    let ring = |t0: f64, r0: f64, r1: f64| -> Vec<(usize, f64)> {
         let cand: Vec<(usize, f64)> = mesh
             .nodes
             .iter()
@@ -157,7 +364,7 @@ pub fn prepare(mesh: &Mesh, faces: &[Face], b: &Bolt) -> Result<Prepared> {
                 ((t - t0).abs() < tol_t && r >= r0 && r <= r1).then_some((k, a))
             })
             .collect();
-        pick_ring(cand)
+        weighted_side(mesh, faces, &cand)
     };
     let head = ring(b.head_t, 0.45 * b.d, 0.5 * b.head_d.max(1.2 * b.d) * 1.05);
     let (thread, t_thread) = match b.nut_t {
@@ -177,8 +384,8 @@ pub fn prepare(mesh: &Mesh, faces: &[Face], b: &Bolt) -> Result<Prepared> {
                 .collect();
             // tragende Gewindegänge: die ersten 1,2·d ab Beginn der Gewindebohrung
             let first = cand.iter().map(|c| c.2).fold(f64::MAX, f64::min);
-            let ring: Vec<(usize, f64)> = cand.iter().filter(|c| c.2 <= first + 1.2 * b.d).map(|c| (c.0, c.1)).collect();
-            (pick_ring(ring), first)
+            let ring: Vec<(usize, f64)> = cand.iter().filter(|c| c.2 <= first + 1.2 * b.d + tol_t).map(|c| (c.0, c.1)).collect();
+            (weighted_side(mesh, faces, &ring), first)
         }
     };
     if head.len() < 3 {
@@ -198,27 +405,29 @@ pub fn prepare(mesh: &Mesh, faces: &[Face], b: &Bolt) -> Result<Prepared> {
     let i = std::f64::consts::PI * d_s.powi(4) / 64.0;
     let g_mod = b.e / 2.6;
     let (nh, nt) = (head.len(), thread.len());
-    let nodes: Vec<usize> = head.iter().chain(&thread).copied().collect();
+    let nodes: Vec<usize> = head.iter().chain(&thread).map(|x| x.0).collect();
+    let weights: Vec<f64> = head.iter().chain(&thread).map(|x| x.1).collect();
     let m = nodes.len();
-    // Mittelpunkt und Verdrehungsschätzung je Seite: θ = I_p⁻¹ Σ wᵢ rᵢ × uᵢ
+    // Mittelpunkt und Verdrehungsschätzung je Seite (gewichtet wie RBE3): θ = I_p⁻¹ Σ wᵢ rᵢ × uᵢ
     let mut g = DMatrix::zeros(12, 3 * m);
     let mut centers = [Vector3::zeros(); 2];
     for (side, (range, off)) in [(0..nh, 0usize), (nh..m, 6usize)].into_iter().enumerate() {
-        let k = range.len() as f64;
-        let c: Vector3<f64> = range.clone().map(|j| Vector3::from(mesh.nodes[nodes[j]])).sum::<Vector3<f64>>() / k;
+        let wsum: f64 = range.clone().map(|j| weights[j]).sum();
+        let c: Vector3<f64> = range.clone().map(|j| Vector3::from(mesh.nodes[nodes[j]]) * weights[j]).sum::<Vector3<f64>>() / wsum;
         centers[side] = c;
         let mut ip = Matrix3::zeros();
         for j in range.clone() {
             let r = Vector3::from(mesh.nodes[nodes[j]]) - c;
-            ip += (Matrix3::identity() * r.norm_squared() - r * r.transpose()) / k;
+            ip += (Matrix3::identity() * r.norm_squared() - r * r.transpose()) * (weights[j] / wsum);
         }
         let ip_inv = ip.try_inverse().ok_or_else(|| FemError::Input(format!("{}: Auflage zu klein für die Schraube", b.name)))?;
         for j in range {
             let r = Vector3::from(mesh.nodes[nodes[j]]) - c;
             let skew = Matrix3::new(0.0, -r.z, r.y, r.z, 0.0, -r.x, -r.y, r.x, 0.0);
-            let t = ip_inv * skew / k;
+            let wj = weights[j] / wsum;
+            let t = ip_inv * skew * wj;
             for a in 0..3 {
-                g[(off + a, 3 * j + a)] = 1.0 / k;
+                g[(off + a, 3 * j + a)] = wj;
                 for c2 in 0..3 {
                     g[(off + 3 + a, 3 * j + c2)] = t[(a, c2)];
                 }
@@ -262,8 +471,15 @@ pub fn prepare(mesh: &Mesh, faces: &[Face], b: &Bolt) -> Result<Prepared> {
     for blk in 0..4 {
         tm.view_mut((3 * blk, 3 * blk), (3, 3)).copy_from(&q);
     }
-    let kb = tm.transpose() * kl * &tm;
-    Ok(Prepared { nodes, g, kb, q, k_ax, clamp, n_head: nh, n_thread: nt })
+    let kb = tm.transpose() * &kl * &tm;
+    let mut kla = DMatrix::<f64>::zeros(12, 12);
+    for (r, c, v) in [(0, 0, k_ax), (0, 6, -k_ax), (6, 0, -k_ax), (6, 6, k_ax)] {
+        kla[(r, c)] = v;
+    }
+    let kb_axial = tm.transpose() * kla * &tm;
+    let gn = |r0: usize| -> nalgebra::DVector<f64> { (g.rows(r0, 3).transpose() * n).into_owned() };
+    let b_ax = gn(6) - gn(0);
+    Ok(Prepared { nodes, g, kb, kb_axial, b_ax, offset: 0.0, q, k_ax, clamp, n_head: nh, n_thread: nt })
 }
 
 /// Körper, die eine Schraube zusammenhält: Körper an Kopf- und Gewindeseite sowie alle Körper, deren Elemente
@@ -353,6 +569,45 @@ pub fn penetration(mesh: &Mesh, pairs: &[(usize, usize)], u: &[[f64; 3]]) -> f64
     worst
 }
 
+/// Knoten im Bereich der Krafteinleitung (Kopf- bzw. Mutterauflage, tragendes Gewinde). Dort entstehen örtliche
+/// Spannungsspitzen aus der Modellierung als Verbinder (Kraft auf eine Fläche bzw. Bohrungswand, Kante zur Fuge);
+/// der Nachweis gilt dort über Flächenpressung und Einschraubtiefe (VDI 2230), nicht über σv.
+pub fn load_zone(mesh: &Mesh, bolts: &[Bolt], prepared: &[Prepared]) -> Vec<bool> {
+    let mut zone = vec![false; mesh.nodes.len()];
+    if bolts.is_empty() {
+        return zone;
+    }
+    let vol: f64 = (0..mesh.n_elems()).map(|e| crate::element::tet_volume(&mesh.elem_coords(e)[..4]).abs()).sum();
+    let h = (vol / mesh.n_elems().max(1) as f64 * 8.5).cbrt();
+    for (b, p) in bolts.iter().zip(prepared) {
+        let n = Vector3::from(b.axis).normalize();
+        let o = Vector3::from(b.origin);
+        let pad = (0.6 * b.d).max(1.2 * h);
+        // Lage und Ausdehnung der beiden Seiten aus den Auflageknoten
+        let side = |nodes: &[usize]| -> (f64, f64, f64) {
+            let (mut t0, mut t1, mut r1) = (f64::MAX, f64::MIN, 0.0f64);
+            for &k in nodes {
+                let v = Vector3::from(mesh.nodes[k]) - o;
+                let t = v.dot(&n);
+                t0 = t0.min(t);
+                t1 = t1.max(t);
+                r1 = r1.max((v - n * t).norm());
+            }
+            (t0, t1, r1)
+        };
+        let sides = [side(&p.nodes[..p.n_head]), side(&p.nodes[p.n_head..])];
+        for (k, x) in mesh.nodes.iter().enumerate() {
+            let v = Vector3::from(*x) - o;
+            let t = v.dot(&n);
+            let r = (v - n * t).norm();
+            if sides.iter().any(|&(t0, t1, r1)| t >= t0 - pad && t <= t1 + pad && r <= r1 + pad) {
+                zone[k] = true;
+            }
+        }
+    }
+    zone
+}
+
 /// Schraubenkräfte aus der Lösung
 pub fn evaluate(b: &Bolt, p: &Prepared, u: &[f64]) -> BoltResult {
     let l = p.local(u);
@@ -363,14 +618,27 @@ pub fn evaluate(b: &Bolt, p: &Prepared, u: &[f64]) -> BoltResult {
     }
     let kl = &tm * &p.kb * tm.transpose();
     let f = kl * &l;
-    let axial = p.k_ax * (l[6] - l[0]);
+    let axial = p.k_ax * (l[6] - l[0] + p.offset);
     let shear = (f[7] * f[7] + f[8] * f[8]).sqrt();
     let moment = (f[4] * f[4] + f[5] * f[5]).sqrt().max((f[10] * f[10] + f[11] * f[11]).sqrt());
+    let a_s = b.stress_area.unwrap_or_else(|| stress_area(b.d));
+    let asm = b.assembly().unwrap_or_default();
+    let ds = d_s(a_s);
+    let w = std::f64::consts::PI * ds.powi(3) / 32.0;
+    let sigma = axial.max(0.0) / a_s + moment / w;
+    // Torsion aus dem Anziehen klingt im Betrieb teilweise ab (k_τ = 0,5); Querkraft dazu, falls die Fuge rutscht
+    let tau = 0.5 * asm.m_g / (2.0 * w) + shear / a_s;
+    let sigma_red = (sigma * sigma + 3.0 * tau * tau).sqrt();
     BoltResult {
         name: b.name.clone(),
         d: b.d,
-        stress_area: b.stress_area.unwrap_or_else(|| stress_area(b.d)),
+        stress_area: a_s,
         axial,
+        preload: asm.f_v,
+        torque: asm.m_a,
+        sigma_red,
+        utilization: b.rp.filter(|r| *r > 0.0).map(|r| sigma_red / r),
+        bearing_pressure: axial.max(0.0) / b.bearing_area(),
         shear,
         moment,
         clamp: p.clamp,
@@ -461,10 +729,15 @@ pub fn suggest(holes: &[Hole], existing: &[Bolt]) -> Vec<Bolt> {
             nut_d: nut.map(|_| 1.6 * d),
             thread_t0: thread.0,
             thread_t1: thread.1,
+            preload: None,
+            tighten: None,
+            rp: None,
         };
         let bolt = if rmin < 0.95 * rmax && (first_small || last_small) {
             // Gewindebohrung am Ende, Kopf an der anderen Seite
-            let Some(d) = d_from_tapped(2.0 * rmin).or_else(|| d_from_clearance(2.0 * rmax)) else { continue };
+            let Some(d) = d_from_tapped(2.0 * rmin).or_else(|| d_from_clearance(2.0 * rmax)) else {
+                continue;
+            };
             let k = if last_small { chain.len() - 1 } else { 0 };
             let (th0, th1) = (chain[k].1, chain[k].2);
             if last_small {
@@ -473,7 +746,9 @@ pub fn suggest(holes: &[Hole], existing: &[Bolt]) -> Vec<Bolt> {
                 mk(d, -n, -t_hi, None, (-th1, -th0))
             }
         } else {
-            let Some(d) = d_from_clearance(2.0 * rmax) else { continue };
+            let Some(d) = d_from_clearance(2.0 * rmax) else {
+                continue;
+            };
             // Kopf oben (Achse zeigt nach unten), sonst am Anfang
             if n.z > 0.1 { mk(d, -n, -t_hi, Some(-t_lo), (0.0, 0.0)) } else { mk(d, n, t_lo, Some(t_hi), (0.0, 0.0)) }
         };
@@ -493,6 +768,42 @@ pub fn suggest(holes: &[Hole], existing: &[Bolt]) -> Vec<Bolt> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vorspannung_vdi2230() {
+        // VDI 2230 Tab. A1: M8 8.8, µ_G = 0,12, ν = 0,9 → F_M,Tab = 18,6 kN; M_A = 25 N·m (µ_K = 0,12, d_w 11,6, d_h 9)
+        let f = super::assembly_preload(8.0, 36.6, 640.0, 0.12, 0.9);
+        assert!((f - 18600.0).abs() < 100.0, "{f}");
+        let m = super::tightening_torque(8.0, f, 0.12, 0.12, (11.6 + 9.0) / 2.0) / 1000.0;
+        assert!((m - 24.6).abs() < 0.6, "{m}");
+        // M12 10.9: F_M,Tab = 63,4 kN (µ_G = 0,12)
+        let f = super::assembly_preload(12.0, 84.3, 940.0, 0.12, 0.9);
+        assert!((f - 63400.0).abs() < 700.0, "{f}");
+        // Anziehmoment vorgegeben → dieselbe Kraft zurück
+        let mut b = super::Bolt {
+            name: "M8".into(),
+            d: 8.0,
+            stress_area: None,
+            e: 210000.0,
+            origin: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            head_t: 0.0,
+            head_d: 13.0,
+            nut_t: None,
+            nut_d: None,
+            thread_t0: 0.0,
+            thread_t1: 0.0,
+            preload: None,
+            tighten: Some(super::Tighten::Ausnutzung { nu: 0.9, mu_g: 0.12, mu_k: 0.12 }),
+            rp: Some(640.0),
+        };
+        let a = b.assembly().unwrap();
+        b.tighten = Some(super::Tighten::Moment { m_a: a.m_a, mu_g: 0.12, mu_k: 0.12 });
+        let a2 = b.assembly().unwrap();
+        assert!((a2.f_v - a.f_v).abs() < 1e-6 * a.f_v);
+        b.tighten = None;
+        assert!(b.assembly().is_none());
+    }
 
     #[test]
     fn spannungsquerschnitt() {

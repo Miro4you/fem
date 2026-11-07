@@ -157,15 +157,32 @@ pub fn solve(
     let System { k, b } = sys;
     progress.report("Mehrgitter-Vorkonditionierer vorbereiten", None);
     let amg = Amg::new(k, coords, fixed, frames)?;
+    solve_amg(&amg, b, None, tol, max_iter, progress)
+}
+
+/// Wie `solve` mit fertigem Vorkonditionierer (Matrix darin) und Startwert `x0` (z. B. die Lösung des vorigen
+/// Kontakt-Durchgangs – dann reichen wenige Iterationen)
+pub fn solve_amg(amg: &Amg, b: Vec<f64>, x0: Option<&[f64]>, tol: f64, max_iter: usize, progress: &crate::Progress) -> Result<Solution> {
     let k = amg.matrix();
     let n = b.len();
 
     let b_norm = dot(&b, &b).sqrt();
-    let mut x = vec![0.0; n];
+    let mut x = match x0 {
+        Some(x0) if x0.len() == n => x0.to_vec(),
+        _ => vec![0.0; n],
+    };
     if b_norm == 0.0 {
-        return Ok(Solution { x, iterations: 0, residual: 0.0 });
+        return Ok(Solution { x: vec![0.0; n], iterations: 0, residual: 0.0 });
     }
     let mut r = b;
+    if x0.is_some() {
+        let mut kx = vec![0.0; n];
+        k.mul(&x, &mut kx);
+        r.par_iter_mut().zip(kx.par_iter()).for_each(|(r, kx)| *r -= kx);
+        if dot(&r, &r).sqrt() / b_norm < tol {
+            return Ok(Solution { x, iterations: 0, residual: dot(&r, &r).sqrt() / b_norm });
+        }
+    }
     let mut z = vec![0.0; n];
     amg.apply(&r, &mut z);
     let mut p = z.clone();

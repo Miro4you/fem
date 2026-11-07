@@ -183,6 +183,8 @@ pub struct Model {
     pub bolts: Vec<crate::bolt::Bolt>,
     /// geöffnete Fugen zwischen verschraubten Körpern (Knotenpaare Original/Kopie, siehe `bolt::open_joints`)
     pub joint_pairs: Vec<(usize, usize)>,
+    /// Reibung in den geöffneten Fugen (Kontakt)
+    pub joint_friction: crate::contact::Friction,
     pub solver: SolverKind,
     /// Fortschrittsmeldungen (Oberfläche)
     pub progress: crate::Progress,
@@ -209,6 +211,7 @@ impl Model {
             body_materials: vec![],
             bolts: vec![],
             joint_pairs: vec![],
+            joint_friction: Default::default(),
             solver: SolverKind::Auto,
             progress: Default::default(),
         }
