@@ -103,6 +103,19 @@ export function buildReport(data) {
     )
     if (data.weldNote) text(data.weldNote, 8.5)
   }
+  if (data.boltRows?.length) {
+    heading(`${sec++}  Schrauben`)
+    table(
+      [['Schraube', 'Klasse', 'Zug', 'Querkraft', 'Sicherheit'], ...data.boltRows],
+      [CW * 0.36, CW * 0.12, CW * 0.17, CW * 0.17, CW * 0.18],
+    )
+    text(
+      'σv = √((F/As + M/W)² + 3·(Q/As)²) gegen Rp0,2 der Festigkeitsklasse; ohne Vorspannung (Querkraft auf dem Schaft), Fuge ' +
+        (data.openJoints ? 'offen (nur die Schrauben halten)' : 'verklebt') +
+        '. Vereinfacht nach VDI 2230.',
+      8.5,
+    )
+  }
   if (data.warnings.length) {
     heading('Hinweise')
     for (const w of data.warnings) text('• ' + w, 9.5)

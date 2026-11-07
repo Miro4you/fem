@@ -697,3 +697,13 @@ select.chip { padding-right: 26px; max-width: 120px; }
   .topbar .file { display: none; }
 }
 .stage.is-frame .viewport { visibility: hidden; }
+.bolt-list { display: flex; flex-direction: column; gap: 4px; }
+.bolt-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; background: var(--panel); }
+.bolt-row.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.bolt-row.off { opacity: 0.7; }
+.bolt-row input[type='checkbox'] { width: auto; height: auto; }
+.bolt-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bolt-name b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bolt-name small { color: var(--muted); font-size: 11.5px; }
+.bolt-row select { width: auto; height: 26px; font-size: 12px; }
+.sep-line { border: 0; border-top: 1px solid var(--line); width: 100%; margin: 4px 0; }

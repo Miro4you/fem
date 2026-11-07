@@ -24,13 +24,13 @@ Bedienung auch im Browser über das Heimnetz.
 | **Nachweis & Bericht** | Werkstoffdatenbank (Stahl, Alu, Kunststoffe, Druckwerkstoffe, eigene), Masse, Festigkeitsnachweis mit erforderlichen Sicherheiten, PDF-Bericht, MathPad-Rechenblatt, ParaView-Export |
 | **3D-Druck** | Schichtaufbau mit Werten in und quer zu den Schichten, Aufbaurichtung frei optimieren (≈ 400 Richtungen) inkl. Überhänge, Wände + Infill (Gyroid, Gitter, Waben …), Kalibrierung mit eigenem Zugstab |
 | **Schweißnähte** | Spalte an Blechecken automatisch finden, Stumpf-/Kehlnaht, Nahtkraft und Nachweis nach EN 1993-1-8 (vereinfacht) |
-| **Baugruppen** | mehrere Körper aus einer STEP-Datei bzw. Onshape-Baugruppe mit Namen, Werkstoff je Körper, ein-/ausblenden, Berührflächen verbunden, Spalte als Naht oder flächige Verbindung, Ergebnis und Kräfte je Körper |
+| **Baugruppen** | mehrere Körper aus einer STEP-Datei bzw. Onshape-Baugruppe mit Namen, Werkstoff je Körper, ein-/ausblenden, Berührflächen verbunden, Spalte als Naht oder flächige Verbindung, **Schrauben** automatisch erkennen (Normteile, Bohrungen) mit Festigkeitsklasse und Nachweis, Ergebnis und Kräfte je Körper |
 | **Studien** | Parameterstudie (Netz, Füllgrad, Maße, **Onshape-Variablen**, **SolidCraft-Parameter**), Vergleich mit voriger Version |
 | **Weitere Analysen** | Eigenfrequenzen, Knicken (Lanczos), Leichtbau-Vorschlag (Topologieoptimierung, STL-Export), Stabwerk (Balken, Rahmen, Fachwerke mit IPE-Profilen) |
 | **Geometrie anpassen** | Radien/Bohrungen ändern, Material per Skizze hinzufügen oder entfernen, Ergebnis mit vorher vergleichen |
 | **CAD-Anbindung** | Onshape (**Bibliothek** mit Vorschaubildern, Lesezeichen, API), SolidWorks (Makro), Fusion (Add-in), SolidCraft (live), NX, Solid Edge, „Senden an“ für jedes CAD – Ergebnis zurück ins CAD |
 | **Heimnetz & Server** | starker PC rechnet, Laptop/Arbeits-PC bedient im Browser – ohne Installation; oder als Docker-Container auf einem Server (wie MathPad) |
-| **Rechenkern** | Rust, direkter Löser (Cholesky) und iterativer Löser (PCG + algebraisches Mehrgitter) bis über 2 Mio. Unbekannte, 66 Lehrbuchprüfungen |
+| **Rechenkern** | Rust, direkter Löser (Cholesky) und iterativer Löser (PCG + algebraisches Mehrgitter) bis über 2 Mio. Unbekannte, 76 Lehrbuchprüfungen |
 
 ## Bilder
 
@@ -40,6 +40,8 @@ Bedienung auch im Browser über das Heimnetz.
 | **Startseite:** Datei öffnen oder hierher ziehen, aus Onshape holen, zuletzt geöffnet mit Vorschaubild | **Modell:** Studienbaum wie im CAD, darunter die Eigenschaften des gewählten Eintrags – hier die Kraft mit Betrag und Richtung als Symbole |
 | ![Onshape-Bibliothek](docs/bilder/onshape-bibliothek.png) | ![Iso-Clip](docs/bilder/iso-clip.png) |
 | **Onshape-Bibliothek:** eigene Dokumente durchsuchen, Teilestudio wählen, holen – ohne Adresse kopieren | **Iso-Clip:** nur die Bereiche über 84 MPa farbig, der Rest grau – wie in SolidWorks Simulation |
+| ![Schrauben aus dem CAD erkannt](docs/bilder/schrauben-erkannt.png) | ![Schraubenkräfte und Nachweis](docs/bilder/schrauben-ergebnis.png) |
+| **Schrauben erkannt:** zwei Normteile aus dem CAD (10.9 mit Gewindebohrung, 8.8 mit Scheibe und Mutter), Klasse je Schraube | **Schraubenkräfte:** Zug, Querkraft und Nachweis gegen Rp0,2 je Festigkeitsklasse |
 | ![Baugruppe: Körper mit eigenem Werkstoff](docs/bilder/baugruppe-modell.png) | ![Baugruppe: Ergebnis je Körper](docs/bilder/baugruppe-ergebnis.png) |
 | **Baugruppe:** Körper mit Namen aus dem CAD, Block aus Alu, loser Zapfen flächig verbunden (türkis) | **Ergebnis je Körper:** Spannung, Verformung, Sicherheit mit eigenem Werkstoff, Kräfte zwischen den Körpern |
 | ![3D-Druck: Wand/Infill im Schnitt](docs/bilder/3d-druck-infill-schnitt.png) | ![Schweißnähte am Blechkasten](docs/bilder/schweissnaehte-blechkasten.png) |
@@ -244,7 +246,14 @@ Onshape-Bibliothek) wird zu mehreren **Körpern** mit ihren Namen aus dem CAD:
 - Ergebnis: Tabelle **je Körper** (σv, u, Sicherheit mit dem eigenen Werkstoff, Spannungen nur aus den eigenen
   Elementen gemittelt) und **Kräfte zwischen den Körpern**. Das Urteil oben richtet sich nach dem schwächsten Körper;
   Masse aus den Dichten der Körper.
-- Noch nicht: Kontakt, der sich öffnen/rutschen kann, Schrauben mit Vorspannung, Bewegung (Gelenke) – siehe Roadmap.
+- **Schrauben:** Normteile aus dem CAD (ISO 4762, ISO 4017, DIN 912/933 …, „M8x25“, mit Scheiben und Muttern) werden
+  am Namen und an der Form erkannt und nicht als Körper vernetzt, sondern als **Schraubenelement** gerechnet (Balken
+  zwischen Kopfauflage und Gewinde bzw. Mutter). Ohne modellierte Schrauben schlägt Projekt-FEM Schrauben an
+  **fluchtenden Bohrungen** vor (Gewinde- oder Durchgangsbohrung nach ISO 273). Je Schraube **Festigkeitsklasse**
+  (4.6 … 12.9, A2/A4-50/70/80; aus dem Namen übernommen, z. B. „… 10.9“). Ergebnis: Zug, Querkraft, Biegemoment und
+  Nachweis σv ≤ Rp0,2 (vereinfacht nach VDI 2230). Die Fuge zwischen verschraubten Teilen ist standardmäßig **offen**
+  (nur die Schrauben halten – auf der sicheren Seite); drückt die Last die Teile zusammen, warnt das Ergebnis.
+- Noch nicht: Kontakt, der sich öffnen/rutschen kann, Vorspannung und Reibschluss, Bewegung (Gelenke) – siehe Roadmap.
 
 ### Onshape: API-Aufrufe sparen
 
@@ -292,12 +301,13 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 
 ## Validierung
 
-`projekt-fem validieren` vergleicht mit der Theorie (läuft auch bei `cargo test`) – derzeit **66 von 66 Prüfungen** bestanden:
+`projekt-fem validieren` vergleicht mit der Theorie (läuft auch bei `cargo test`) – derzeit **76 von 76 Prüfungen** bestanden:
 
 | Fall | Größe | Abweichung |
 |---|---|---|
 | Zugstab TET4/TET10 | σ, Δl, Querkontraktion, Lagerkraft | exakt |
 | Zugstab Stahl + Alu (Baugruppe, ν = 0, direkt und iterativ) | Δl, σ, Sicherheit je Körper, Kraft an der Trennfläche | exakt |
+| Zwei Blöcke, 4 × M8 (nur Schrauben verbinden), Zug | Summe Schraubenkräfte = Last; je Schraube F/4 | exakt / ±0,01 % |
 | Kragbalken TET10 (40×2×4) | Durchbiegung (Timoshenko) | −0,5 % |
 | Kragbalken TET10 (40×2×4) | Biegespannung bei l/2 | +0,2 % |
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
@@ -351,7 +361,7 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
    (Schnitt, Iso-Clip, Animation), Ansichtswürfel, CAD-Maussteuerung, Onshape-Bibliothek
 8. ✅ **Baugruppen (Stufe 1):** Körper mit Namen, Werkstoff je Körper, ein-/ausblenden, Verbindungen, Ergebnis und Kräfte je Körper,
    Onshape-Baugruppen · **Server-Betrieb** (Docker)
-9. **Als Nächstes:** „Fläche teilen“ (Skizze auf der Fläche statt Rechteck ziehen) → Baugruppen Stufe 2 (Kontakt, Schrauben) → Bewegungssimulation mit
+9. **Als Nächstes:** Kontakt + Schrauben-Vorspannung → „Fläche teilen“ (Skizze auf der Fläche statt Rechteck ziehen) → Bewegungssimulation mit
    FEM entlang der Bewegung (z. B. Koppelstange und Bolzen) → Onshape-Konfigurationen, SolidWorks-Konfigurationen,
    DXF → Stabwerk, Slicer-Einstellungen (3MF) übernehmen
 

@@ -51,6 +51,7 @@ export default function Viewport({
   nav,
   look,
   hiddenSurfaces,
+  bolts,
   ref,
 }) {
   const host = useRef(null)
@@ -325,6 +326,8 @@ export default function Viewport({
       // Schichtlinien (3D-Druck) im Flächen-Shader
       layerUniforms: { uLayerDir: { value: new THREE.Vector3(0, 0, 1) }, uLayerStep: { value: 1 }, uLayerOn: { value: 0 } },
     }
+    state.boltGroup = new THREE.Group()
+    scene.add(state.boltGroup)
     scene.add(state.bed)
     scene.add(state.overlays)
     scene.add(state.aimGroup)
@@ -714,6 +717,36 @@ export default function Viewport({
     }
     s.dirty = true
   }, [result, mode])
+
+  // --- Schrauben: Schaft, Kopf und ggf. Mutter ------------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    s.boltGroup.traverse((x) => (x.geometry?.dispose(), x.material?.dispose()))
+    s.boltGroup.clear()
+    const up = new THREE.Vector3(0, 1, 0)
+    const cyl = (p, dir, len, r, color, ghost) => {
+      const m = new THREE.Mesh(
+        new THREE.CylinderGeometry(r, r, Math.max(len, 1e-3), 24),
+        new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.35, transparent: ghost, opacity: ghost ? 0.45 : 1 }),
+      )
+      m.quaternion.setFromUnitVectors(up, dir)
+      m.position.copy(p)
+      s.boltGroup.add(m)
+    }
+    for (const b of bolts ?? []) {
+      const n = new THREE.Vector3(...b.axis).normalize()
+      const h = new THREE.Vector3(...b.head)
+      const e = new THREE.Vector3(...b.end)
+      const len = e.clone().sub(h).dot(n)
+      // Schaft (ragt bei Gewinde etwas über)
+      cyl(h.clone().addScaledVector(n, len / 2), n, len, b.d / 2, b.color, b.ghost)
+      // Kopf über der Auflage
+      const kh = 0.65 * b.d
+      cyl(h.clone().addScaledVector(n, -kh / 2), n, kh, b.headD / 2, b.color, b.ghost)
+      if (b.nut) cyl(new THREE.Vector3(...b.nut.at).addScaledVector(n, 0.4 * b.d), n, 0.8 * b.d, b.nut.d / 2, b.color, b.ghost)
+    }
+    s.dirty = true
+  }, [bolts])
 
   // --- Pfeile und Markierungen -------------------------------------------------
   useEffect(() => {

@@ -95,6 +95,35 @@ const LOAD_CHOICES = [
   ['moment', 'Moment', I.IcMoment],
   ['bearing', 'Bolzenlast', I.IcBearing],
 ]
+// Festigkeitsklassen: Rp0,2 bzw. ReL, Rm [MPa], E [MPa] (ISO 898-1, ISO 3506-1)
+const BOLT_CLASSES = {
+  '4.6': [240, 400, 210000],
+  '5.6': [300, 500, 210000],
+  '8.8': [640, 800, 210000],
+  '10.9': [940, 1000, 210000],
+  '12.9': [1100, 1200, 210000],
+  'A2-50': [210, 500, 200000],
+  'A2-70': [450, 700, 200000],
+  'A2-80': [600, 800, 200000],
+  'A4-50': [210, 500, 200000],
+  'A4-70': [450, 700, 200000],
+  'A4-80': [600, 800, 200000],
+}
+
+// Schraubennachweis ohne Vorspannung: σ = F/A_s + M/W_s, τ = Q/A_s, σ_v = √(σ² + 3τ²) ≤ Rp0,2
+function boltRows(result, bolts) {
+  return (result.bolts ?? []).map((r) => {
+    const b = bolts.find((x) => x.name === r.name)
+    const cls = b?.cls ?? '8.8'
+    const [rp, rm] = BOLT_CLASSES[cls] ?? BOLT_CLASSES['8.8']
+    const ds = Math.sqrt((4 * r.stress_area) / Math.PI)
+    const sigma = Math.max(r.axial, 0) / r.stress_area + (32 * r.moment) / (Math.PI * ds ** 3)
+    const tau = r.shear / r.stress_area
+    const sv = Math.sqrt(sigma * sigma + 3 * tau * tau)
+    return { ...r, cls, rp, rm, sv, safety: sv > 0 ? rp / sv : Infinity, util: sv / rp }
+  })
+}
+
 const ANALYSES = {
   static: ['Statik', 'Spannung, Verformung, Sicherheit'],
   modal: ['Eigenfrequenzen', 'Schwingformen, Hz'],
@@ -124,6 +153,14 @@ export default function App() {
   // Baugruppe: eigener Werkstoff je Körper (nach Körpername, bleibt bei neuer CAD-Version) und ausgeblendete Körper
   const [bodyMats, setBodyMats] = useState({})
   const [hiddenBodies, setHiddenBodies] = useState([])
+  // Schrauben: aus dem CAD erkannt oder Vorschläge aus Bohrungen; Klasse und an/aus je Name (bleibt bei neuer Version)
+  const [bolts, setBolts] = useState([])
+  const boltPrefs = useRef({})
+  const [openJoints, setOpenJoints] = useState(true)
+  const [keepFasteners, setKeepFasteners] = useState(false)
+  const keepFastenersRef = useRef(false)
+  keepFastenersRef.current = keepFasteners
+  const [selBolt, setSelBolt] = useState(null)
   // Herkunft des offenen Teils (Onshape-Adresse) – für die Parameterstudie über Onshape-Variablen
   const [partOrigin, setPartOrigin] = useState(null)
   const [gaps, setGaps] = useState({ max: '1', list: null })
@@ -248,7 +285,7 @@ export default function App() {
   useEffect(() => {
     if (result) setResultStale(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [material, supports, loads, welds, bodyMats])
+  }, [material, supports, loads, welds, bodyMats, bolts, openJoints])
 
   const surfaceInfo = useMemo(() => new Map((mesh?.surfaces ?? []).map((s) => [s.tag, s])), [mesh])
   // Baugruppe: Masse aus Volumen und Dichte je Körper (null = nicht ermittelbar bzw. ein Körper)
@@ -262,6 +299,50 @@ export default function App() {
     }
     return m
   }, [mesh, bodyMats, material])
+  // Schrauben aus dem Netz übernehmen; Klasse und an/aus je Name beibehalten
+  useEffect(() => {
+    const list = (mesh?.bolts ?? []).map((b, i) => {
+      const name = b.bolt.name || `Schraube ${i + 1}`
+      const prev = boltPrefs.current[name]
+      return {
+        id: i,
+        name,
+        source: b.source,
+        parts: b.parts,
+        bolt: b.bolt,
+        cls: prev?.cls ?? b.class ?? '8.8',
+        classFromName: !!b.class,
+        on: prev?.on ?? b.source === 'cad',
+      }
+    })
+    setBolts(list)
+    setSelBolt(null)
+  }, [mesh])
+  useEffect(() => {
+    for (const b of bolts) boltPrefs.current[b.name] = { cls: b.cls, on: b.on }
+  }, [bolts])
+  // Darstellung der Schrauben im Bild (Schaft + Kopf)
+  const boltGlyphs = useMemo(
+    () =>
+      bolts
+        .filter((b) => b.on || sel === 'verb')
+        .map((b) => {
+          const { origin: o, axis: a, head_t, head_d, nut_t, nut_d, thread_t1, d } = b.bolt
+          const at = (t) => [0, 1, 2].map((k) => o[k] + a[k] * t)
+          return {
+            id: b.id,
+            head: at(head_t),
+            end: at(nut_t ?? thread_t1),
+            axis: a,
+            d,
+            headD: head_d,
+            nut: nut_t != null ? { at: at(nut_t), d: nut_d ?? 1.6 * d } : null,
+            color: selBolt === b.id ? '#4c8dff' : b.on ? '#8d96a6' : '#e0b341',
+            ghost: !b.on,
+          }
+        }),
+    [bolts, sel, selBolt],
+  )
   // ausgeblendete Körper → ihre Flächen werden in der 3D-Ansicht nicht gezeichnet
   const hiddenSurfaces = useMemo(
     () => new Set((mesh?.surfaces ?? []).filter((x) => hiddenBodies.includes(x.body)).map((x) => x.tag)),
@@ -326,9 +407,18 @@ export default function App() {
     setError(null)
     try {
       const ref = refineOverride ?? (keepSetup ? currentRefine(size) : [])
-      const m = await api.openStep(path, size ? Number(size) : null, false, ref)
+      const m = await api.openStep(path, size ? Number(size) : null, false, ref, keepFastenersRef.current)
       setMeshRefineKey(JSON.stringify(ref))
+      if (!keepSetup) boltPrefs.current = {}
       setMesh(m)
+      const nCad = (m.bolts ?? []).filter((b) => b.source === 'cad').length
+      const nSug = (m.bolts ?? []).length - nCad
+      if (!keepSetup && (nCad || nSug))
+        setNotice(
+          [nCad && `${nCad} Schraube${nCad > 1 ? 'n' : ''} aus dem CAD erkannt`, nSug && `${nSug} mögliche Schraube${nSug > 1 ? 'n' : ''} an Bohrungen`]
+            .filter(Boolean)
+            .join(', ') + ' – unter Verbindungen Festigkeitsklasse wählen',
+        )
       setMeshSize(String(Number(m.mesh_size.toPrecision(3))))
       setResult(null)
       setResultStale(false)
@@ -425,7 +515,8 @@ export default function App() {
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
     if (!stepPath) return
-    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies }
+    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies,
+      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on }])), openJoints, keepFasteners }
     try {
       const p = await api.saveProject(stepPath, data)
       if (p) addRecent({ kind: 'project', path: p, name: baseName(p), info: result ? `${material.name} · σv ${fmt(result.max_von_mises.value)} MPa` : material.name })
@@ -449,6 +540,11 @@ export default function App() {
   async function applyProject(d) {
     try {
       if (d.format !== 'projekt-fem') throw new Error('Keine Projekt-FEM-Datei')
+      // Schrauben-Einstellungen vor dem Vernetzen (Erkennung läuft dabei)
+      boltPrefs.current = d.bolts ?? {}
+      setOpenJoints(d.openJoints ?? true)
+      setKeepFasteners(!!d.keepFasteners)
+      keepFastenersRef.current = !!d.keepFasteners
       const m = await loadGeometry(d.step, d.meshSize, true, true, [])
       if (!m) return
       const ops = d.geoOps ?? []
@@ -1136,6 +1232,8 @@ export default function App() {
             max_gap: num(w.maxGap) > 0 ? num(w.maxGap) : null,
           })),
         bodies: (mesh?.bodies ?? []).filter((b) => bodyMats[b.name]).map((b) => ({ body: b.body, material: materialPayload(bodyMats[b.name]) })),
+        bolts: bolts.filter((b) => b.on).map((b) => ({ ...b.bolt, name: b.name, e: BOLT_CLASSES[b.cls]?.[2] ?? 210000 })),
+        open_joints: openJoints,
         supports: sups.map((s) => {
           const f = supportFix(s)
           return { surfaces: s.surfaces, fix: f.fix, local: f.local ?? null, region: regionNumbers(s.region) }
@@ -1258,7 +1356,7 @@ export default function App() {
     setBusy(`${inc.source}: neue Version von „${inc.name}“ übernehmen …`)
     try {
       const ref = currentRefine(meshSize)
-      const m = await api.openStep(inc.path, Number(meshSize) || null, false, ref)
+      const m = await api.openStep(inc.path, Number(meshSize) || null, false, ref, keepFastenersRef.current)
       const map = remapSurfaces(mesh.surfaces, m.surfaces)
       let lost = 0
       const re = (items) =>
@@ -1760,6 +1858,14 @@ export default function App() {
         `${fmt(w.stress_max)} MPa`,
         w.util == null ? '–' : `${(100 * w.util).toFixed(0)} %${w.util <= 1 ? ' ok' : ' NICHT ERFÜLLT'}`,
       ]),
+      boltRows: boltRows(result, bolts).map((r) => [
+        r.name,
+        r.cls,
+        `${fmt(r.axial)} N`,
+        `${fmt(r.shear)} N`,
+        `S = ${Number.isFinite(r.safety) ? fmt(Math.min(r.safety, 99)) : '–'}${r.safety >= (Number(proof.sF) > 0 ? Number(proof.sF) : 1) ? ' ok' : ' NICHT ERFÜLLT'}`,
+      ]),
+      openJoints,
       weldNote: (result.welds ?? []).length
         ? 'τw = größte Linienkraft entlang der Naht / a-Maß; zulässig f_vw,d = Rm / (√3·β_w·γ_M2), vereinfachtes Verfahren EN 1993-1-8 (4.5.3.3). Stumpfnaht durchgeschweißt: a = Blechdicke.'
         : null,
@@ -2124,6 +2230,23 @@ export default function App() {
     }
     if (sel === 'verb') {
       return (
+        <>
+        {(bolts.length > 0 || mesh.bodies?.length > 1) && (
+          <BoltSection
+            bolts={bolts}
+            setBolts={setBolts}
+            selBolt={selBolt}
+            setSelBolt={setSelBolt}
+            openJoints={openJoints}
+            setOpenJoints={setOpenJoints}
+            keepFasteners={keepFasteners}
+            onKeepFasteners={(v) => {
+              setKeepFasteners(v)
+              keepFastenersRef.current = v
+              loadGeometry(geoStep ?? stepPath, meshSize, true, !geoStep)
+            }}
+          />
+        )}
         <WeldSection
           welds={welds}
           setWelds={setWelds}
@@ -2136,6 +2259,7 @@ export default function App() {
           }}
           onFind={onFindGaps}
         />
+        </>
       )
     }
     const s = sel.startsWith('s:') ? supports.find((x) => 's:' + x.id === sel) : null
@@ -2482,19 +2606,21 @@ export default function App() {
         <TreeRow
           icon={I.IcLink}
           title="Verbindungen"
-          muted={!welds.length}
+          muted={!welds.length && !bolts.some((b) => b.on)}
           sum={
-            welds.length
+            welds.length || bolts.length
               ? [
+                  [bolts.filter((b) => b.on).length, 'Schraube', 'Schrauben'],
                   [welds.filter((w) => w.kind !== 'bond').length, 'Schweißnaht', 'Schweißnähte'],
                   [welds.filter((w) => w.kind === 'bond').length, 'Verbindung', 'Verbindungen'],
+                  [bolts.filter((b) => !b.on).length, 'Vorschlag', 'Vorschläge'],
                 ]
                   .filter(([n]) => n)
                   .map(([n, a, b]) => `${n} ${n > 1 ? b : a}`)
                   .join(' · ')
               : 'optional – Schweißnähte, lose Teile'
           }
-          state={welds.length ? itemState('verb') : null}
+          state={welds.length || bolts.some((b) => b.on) ? itemState('verb') : null}
           on={sel === 'verb'}
           onClick={() => selectItem('verb')}
         />
@@ -2658,6 +2784,7 @@ export default function App() {
                       onUnpin={() => setReference(null)}
                       detailsOpen={detailsOpen}
                       mass={assemblyMass}
+                      bolts={bolts}
                       setDetailsOpen={setDetailsOpen}
                     />
                   )
@@ -2769,6 +2896,7 @@ export default function App() {
                 nav={nav}
                 look={look}
                 hiddenSurfaces={hiddenSurfaces}
+                bolts={view === 'frame' ? [] : boltGlyphs}
               />
               {aim && aimView && view === 'setup' && (
                 <div className="pick-hint aim-bar">
@@ -3111,6 +3239,49 @@ function NumInput({ value, unit, onChange }) {
   )
 }
 
+// Schrauben: Kräfte und Nachweis (ohne Vorspannung)
+function BoltCard({ rows, sF }) {
+  if (!rows.length) return null
+  const ok = rows.every((r) => r.safety >= sF)
+  return (
+    <div className={'proof ' + (ok ? 'good' : 'bad')}>
+      <div className="item-head">
+        <I.IcPin size={15} />
+        <strong>Schrauben{ok ? ' – Nachweis erfüllt' : ' – Nachweis NICHT erfüllt'}</strong>
+      </div>
+      <table className="weld-table">
+        <thead>
+          <tr>
+            <th />
+            <th>Zug</th>
+            <th>Quer</th>
+            <th>S</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+              key={r.name}
+              title={`M${fmt(r.d)} ${r.cls}: Rp0,2 = ${r.rp} MPa, A_s = ${fmt(r.stress_area)} mm² · σ_v = ${fmt(r.sv)} MPa · Biegemoment ${fmt(r.moment / 1000)} N·m · Klemmlänge ${fmt(r.clamp)} mm`}
+            >
+              <td>
+                {r.name} <em className="muted">{r.cls}</em>
+              </td>
+              <td>{fmt(r.axial)} N</td>
+              <td>{fmt(r.shear)} N</td>
+              <td className={r.safety >= sF ? 'good' : 'bad'}>{Number.isFinite(r.safety) ? fmt(Math.min(r.safety, 99)) : '–'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="hint">
+        σ_v = √((F/A_s + M/W)² + 3·(Q/A_s)²) gegen Rp0,2 der Festigkeitsklasse, nötig S ≥ {fmt(sF)}. Ohne Vorspannung – Querkraft wirkt auf den
+        Schaft (kein Reibschluss). Vereinfacht nach VDI 2230; Gewinde-Ausreißen und Flächenpressung nicht geprüft.
+      </p>
+    </div>
+  )
+}
+
 // Baugruppe: Kennwerte je Körper und Kräfte zwischen den Körpern
 function BodiesCard({ result }) {
   const bodies = result.bodies ?? []
@@ -3168,19 +3339,22 @@ function BodiesCard({ result }) {
 }
 
 // Ergebnis: Urteil oben (grün/rot), Größe wählen, Kennwerte, Details zum Aufklappen
-function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, canRerun, onRerun, reference, current, onPin, onUnpin, detailsOpen, setDetailsOpen, mass }) {
+function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, canRerun, onRerun, reference, current, onPin, onUnpin, detailsOpen, setDetailsOpen, mass, bolts = [] }) {
   const rho = Number(material.rho)
   const massG = mass ?? (rho > 0 ? (result.solid_volume / 1000) * rho : null)
   const rows = proofRows(result, proof)
   const wrows = weldRows(result, material)
   const weldBad = wrows.some((w) => w.util != null && w.util > 1)
+  const brows = boltRows(result, bolts)
+  const sF = Number(proof.sF) > 0 ? Number(proof.sF) : 1
+  const boltBad = brows.some((b) => b.safety < sF)
   const sf = result.safety
   const hasYield = material.yield !== '' && material.yield != null
   let tone
   let title
   const lines = []
   if (rows.length) {
-    const ok = rows.every((r) => r[3] <= 1) && !weldBad
+    const ok = rows.every((r) => r[3] <= 1) && !weldBad && !boltBad
     tone = ok ? 'good' : 'bad'
     title = ok ? 'Nachweis erfüllt' : 'Nachweis nicht erfüllt'
     for (const [lab, have, need] of rows)
@@ -3196,6 +3370,7 @@ function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, 
         ),
       )
     if (weldBad) lines.push(<>Schweißnaht überlastet – siehe unten</>)
+    if (boltBad) lines.push(<>Schraube nicht ausreichend – siehe unten</>)
   } else if (sf != null) {
     tone = sf >= 1.5 ? 'good' : sf >= 1 ? 'ok' : 'bad'
     title = `Sicherheit S = ${fmt(sf)}`
@@ -3248,6 +3423,7 @@ function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, 
         </div>
       </div>
       <WeldCard result={result} material={material} />
+      <BoltCard rows={brows} sF={sF} />
       <BodiesCard result={result} />
       <div className="quantities" role="radiogroup" aria-label="Ergebnisgröße">
         {Object.entries(QUANTITIES)
@@ -3357,6 +3533,92 @@ function Compare({ reference, current, onUnpin }) {
 // Rundungsrauschen (z. B. 3e-9 N bei 1500 N Last, iterativer Löser ~1e-7) als 0 anzeigen
 function clean(v, ref) {
   return v.map((x) => (Math.abs(x) < 1e-6 * ref ? 0 : x))
+}
+
+// Schrauben: aus dem CAD erkannt bzw. aus fluchtenden Bohrungen vorgeschlagen; Festigkeitsklasse je Schraube
+function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpenJoints, keepFasteners, onKeepFasteners }) {
+  const upd = (id, patch) => setBolts(bolts.map((b) => (b.id === id ? { ...b, ...patch } : b)))
+  const cad = bolts.filter((b) => b.source === 'cad')
+  const holes = bolts.filter((b) => b.source !== 'cad')
+  const row = (b) => (
+    <div key={b.id} className={'bolt-row' + (selBolt === b.id ? ' on' : '') + (b.on ? '' : ' off')} onClick={() => setSelBolt(selBolt === b.id ? null : b.id)}>
+      <input type="checkbox" checked={b.on} title={b.on ? 'wird gerechnet' : 'nicht rechnen'} onClick={(e) => e.stopPropagation()} onChange={(e) => upd(b.id, { on: e.target.checked })} />
+      <span className="bolt-name" title={b.parts?.length ? 'ersetzt: ' + b.parts.join(', ') : ''}>
+        <b>{b.name}</b>
+        <small>
+          M{fmt(b.bolt.d)} · {b.bolt.nut_t != null ? 'mit Mutter' : 'Gewindebohrung'}
+          {b.parts?.length > 1 ? ` · ${b.parts.length - 1} Zubehör` : ''}
+        </small>
+      </span>
+      <select value={b.cls} onClick={(e) => e.stopPropagation()} onChange={(e) => upd(b.id, { cls: e.target.value })} title="Festigkeitsklasse">
+        {Object.keys(BOLT_CLASSES).map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+  return (
+    <>
+      <div className="props-head">
+        <h3>Schrauben</h3>
+        <span className="spacer" />
+        {bolts.length > 1 && (
+          <select
+            className="chip"
+            value=""
+            title="Klasse für alle eingeschalteten Schrauben"
+            onChange={(e) => e.target.value && setBolts(bolts.map((b) => (b.on ? { ...b, cls: e.target.value } : b)))}
+          >
+            <option value="">alle: …</option>
+            {Object.keys(BOLT_CLASSES).map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {cad.length > 0 && (
+        <>
+          <span className="mat-head">Aus dem CAD erkannt – werden als Schraubenelement gerechnet</span>
+          <div className="bolt-list">{cad.map(row)}</div>
+        </>
+      )}
+      {holes.length > 0 && (
+        <>
+          <span className="mat-head">Vorschläge aus Bohrungen – anhaken, wenn dort eine Schraube sitzt</span>
+          <div className="bolt-list">{holes.map(row)}</div>
+        </>
+      )}
+      {bolts.length === 0 && <p className="hint">Keine Schrauben gefunden (weder Normteile im CAD noch fluchtende Bohrungen in mehreren Teilen).</p>}
+      {bolts.length > 0 && (
+        <>
+          <div className="segmented small">
+            <button className={openJoints ? 'on' : ''} onClick={() => setOpenJoints(true)} title="Die verschraubten Teile hängen nur über die Schrauben zusammen">
+              Fuge offen
+            </button>
+            <button className={!openJoints ? 'on' : ''} onClick={() => setOpenJoints(false)} title="Die verschraubten Teile sind an der Fuge zusätzlich verklebt">
+              Fuge verklebt
+            </button>
+          </div>
+          <p className="hint">
+            {openJoints
+              ? 'Fuge offen: nur die Schrauben halten die Teile zusammen – Schraubenkräfte auf der sicheren Seite. Drückt die Last die Teile aufeinander, fehlt noch der Kontakt (Hinweis im Ergebnis).'
+              : 'Fuge verklebt: die Teile kleben an der Berührfläche zusammen, die Schrauben tragen nur einen kleinen Teil – Schraubenkräfte zu klein.'}{' '}
+            Ohne Vorspannung; Vorspannung und Reibschluss kommen mit dem Kontakt.
+          </p>
+        </>
+      )}
+      {cad.length > 0 || keepFasteners ? (
+        <label className="check">
+          <input type="checkbox" checked={keepFasteners} onChange={(e) => onKeepFasteners(e.target.checked)} /> Schrauben aus dem CAD als Körper rechnen (neu vernetzen)
+        </label>
+      ) : null}
+      <hr className="sep-line" />
+    </>
+  )
 }
 
 // Schweißnähte: Spalte suchen, Nähte anlegen (Fläche A wird über den Spalt an Fläche B gekoppelt)

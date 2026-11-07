@@ -1,7 +1,7 @@
 # Testprotokoll Projekt-FEM
 
-Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 66 von 66 Lehrbuchprüfungen bestanden
-(`./target/release/projekt-fem validieren`), 45 automatische Tests grün.
+Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 76 von 76 Lehrbuchprüfungen bestanden
+(`./target/release/projekt-fem validieren`), 48 automatische Tests grün.
 
 **So ausfüllen:** Jeden Punkt durchgehen, abhaken wenn es passt, sonst Anmerkung dazuschreiben (was du gemacht hast,
 was passiert ist, gern mit Screenshot). Die Datei oder ein Foto des ausgedruckten PDFs kannst du mir einfach schicken.
@@ -237,6 +237,19 @@ selbst starten.
 | 18.6 | **Eigene Baugruppe** aus SolidWorks (Makro, jetzt auch für Baugruppen) bzw. Fusion | Körpernamen = Teilenamen | [ ] |
 | 18.7 | **Onshape:** Bibliothek → „Assembly 1“ in „Projekt-FEM Test 1“ holen | Körper je Teil (kostet ≈ 5 API-Aufrufe) | [ ] |
 | 18.8 | Projekt speichern und öffnen | Werkstoffe je Körper und ausgeblendete Körper wieder da | [ ] |
+
+## 18a. Schrauben (neu) – Testteil `examples/geometrie/verschraubung.step`
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 18a.1 | `verschraubung.step` öffnen | Hinweis „2 Schrauben aus dem CAD erkannt“; im Baum nur Unterteil und Deckel; Schraubenköpfe im Bild | [ ] |
+| 18a.2 | Verbindungen → Schrauben | „ISO 4762 M8x25 - 10.9“ (Gewindebohrung, Klasse 10.9) und „ISO 4762 M8x35 - 8.8“ (mit Mutter, 2 Zubehör) | [ ] |
+| 18a.3 | Unterteil vorne fest, Deckel oben 4000 N nach oben (+Z), rechnen | Karte „Schrauben“: je ≈ 2000 N Zug, Sicherheit je Klasse; Klasse ändern → neu rechnen → S ändert sich | [ ] |
+| 18a.4 | Last nach unten (Fuge wird zusammengedrückt) | Hinweis „… schieben sich ineinander – Kontakt kommt noch“ | [ ] |
+| 18a.5 | „Fuge verklebt“ | Schraubenkräfte deutlich kleiner (Fuge trägt mit) | [ ] |
+| 18a.6 | „Schrauben aus dem CAD als Körper rechnen“ | neu vernetzt, Schrauben als Körper im Baum | [ ] |
+| 18a.7 | **Deine Baugruppe mit Normteil-Schrauben** (Onshape Standard Content, SolidWorks Toolbox) | Schrauben erkannt? Namen/Klasse richtig? | [ ] |
+| 18a.8 | Baugruppe **ohne** modellierte Schrauben, aber mit Bohrungen | Vorschläge „Bohrung 1 (M8)“ … anhaken → wird gerechnet | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
