@@ -88,7 +88,15 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         progress.report("Schweißnähte koppeln", None);
         Some(crate::weld::prepare(model, &faces)?)
     };
-    let extra = tie_elements(welds.as_ref(), &frames);
+    let mut extra = tie_elements(welds.as_ref(), &frames);
+    // Schrauben: Kopplung Kopfauflage ↔ Gewinde/Mutter
+    let bolts: Vec<crate::bolt::Prepared> = if model.bolts.is_empty() {
+        vec![]
+    } else {
+        progress.report("Schrauben koppeln", None);
+        model.bolts.iter().map(|b| crate::bolt::prepare(mesh, &faces, b)).collect::<Result<_>>()?
+    };
+    extra.extend(bolt_elements(&bolts, &frames));
 
     progress.report("Lasten verteilen", None);
     let f_ext = load_vector(model, &faces)?;
@@ -196,6 +204,18 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
                 for c in 0..3 {
                     f_int[3 * n + c] += ft[3 * a + c];
                 }
+            }
+        }
+    }
+
+    // Schraubenkräfte gehören ebenfalls zu den inneren Kräften
+    for p in &bolts {
+        let k = p.stiffness();
+        let ut: Vec<f64> = p.nodes.iter().flat_map(|&n| [u[3 * n], u[3 * n + 1], u[3 * n + 2]]).collect();
+        let ft = k * nalgebra::DVector::from_column_slice(&ut);
+        for (a, &n) in p.nodes.iter().enumerate() {
+            for c in 0..3 {
+                f_int[3 * n + c] += ft[3 * a + c];
             }
         }
     }
@@ -418,7 +438,9 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         }
     }
 
+    let bolts = model.bolts.iter().zip(&bolts).map(|(b, p)| crate::bolt::evaluate(b, p, &u)).collect();
     Ok(Results {
+        bolts,
         bodies,
         welds,
         solid_volume,
@@ -527,6 +549,17 @@ fn solve_direct(
 }
 
 /// Kopplungen der Schweißnähte als Zusatzelemente (Knoten, Steifigkeit in den Knotenbasen)
+pub(crate) fn bolt_elements(bolts: &[crate::bolt::Prepared], frames: &NodeFrames) -> Vec<(Vec<usize>, DMatrix<f64>)> {
+    bolts
+        .iter()
+        .map(|p| {
+            let mut k = p.stiffness();
+            frames.transform_element(&p.nodes, &mut k);
+            (p.nodes.clone(), k)
+        })
+        .collect()
+}
+
 pub(crate) fn tie_elements(welds: Option<&crate::weld::Prepared>, frames: &NodeFrames) -> Vec<(Vec<usize>, DMatrix<f64>)> {
     welds
         .map(|p| {

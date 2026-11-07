@@ -19,11 +19,13 @@ pub struct MeshOptions {
     pub curvature_points: u32,
     /// örtliche Verfeinerungen (Lastflächen, Druckwände)
     pub refine: Vec<Refine>,
+    /// Körper (Volumennummern der STEP-Datei), die nicht vernetzt werden – z. B. Schrauben, die als Verbinder gerechnet werden
+    pub exclude: Vec<i32>,
 }
 
 impl Default for MeshOptions {
     fn default() -> Self {
-        MeshOptions { size: None, order: Order::Quadratic, curvature_points: 16, refine: vec![] }
+        MeshOptions { size: None, order: Order::Quadratic, curvature_points: 16, refine: vec![], exclude: vec![] }
     }
 }
 
@@ -134,7 +136,7 @@ pub fn mesh_step(step: &Path, opts: &MeshOptions) -> Result<Mesh> {
         r#"SetFactory("OpenCASCADE");
 Geometry.OCCTargetUnit = "MM";
 Merge "{step}";
-Coherence;
+{exclude}Coherence;
 Save "{xao}";
 {size}
 Mesh.MeshSizeFromCurvature = {curv};
@@ -151,6 +153,11 @@ Save "{msh}";
         step = escape(&step),
         msh = escape(&msh),
         xao = escape(&dir.join("geometrie.geo_unrolled")),
+        exclude = if opts.exclude.is_empty() {
+            String::new()
+        } else {
+            format!("Recursive Delete {{ Volume{{{}}}; }}\n", opts.exclude.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", "))
+        },
         curv = opts.curvature_points,
         fields = refine_fields(&opts.refine),
         order = if opts.order == Order::Quadratic { 2 } else { 1 },
@@ -178,10 +185,134 @@ Save "{msh}";
     let mut mesh = read_msh(&text)?;
     // Körpernamen: Reihenfolge der Volumen in der Geometrie = Gmsh-Volumennummer
     let bodies = mesh.bodies();
-    if bodies.len() > 1 && names.len() == bodies.len() && bodies.iter().enumerate().all(|(i, &b)| b == i as i32 + 1) {
+    if bodies.len() > 1 && names.len() == bodies.len() {
         mesh.body_names = bodies.into_iter().zip(names).filter(|(_, n)| !n.is_empty()).collect();
     }
     Ok(mesh)
+}
+
+/// Körper einer STEP-Datei mit Namen und Oberflächendreiecken (ohne Volumennetz, ohne Verschmelzen) – für die
+/// Erkennung von Schrauben, Muttern und Scheiben in Baugruppen. Die Nummern gelten für `MeshOptions::exclude`.
+pub fn inspect_step(step: &Path) -> Result<Vec<crate::fastener::Solid>> {
+    let gmsh = find_gmsh().ok_or_else(|| FemError::Gmsh("Gmsh nicht gefunden".into()))?;
+    let step = step.canonicalize().map_err(|e| FemError::Gmsh(format!("{}: {e}", step.display())))?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("projekt-fem-pruefen-{}-{stamp}", std::process::id()));
+    std::fs::create_dir_all(&dir).map_err(|e| FemError::Gmsh(e.to_string()))?;
+    let (geo, msh, xao) = (dir.join("pruefen.geo"), dir.join("flaechen.msh"), dir.join("geometrie.geo_unrolled"));
+    let script = format!(
+        r#"SetFactory("OpenCASCADE");
+Geometry.OCCTargetUnit = "MM";
+Merge "{step}";
+Save "{xao}";
+v() = Volume "*";
+bb() = BoundingBox Volume{{v()}};
+Mesh.MeshSizeMax = Sqrt((bb(3)-bb(0))^2 + (bb(4)-bb(1))^2 + (bb(5)-bb(2))^2) / 40;
+Mesh.MeshSizeFromCurvature = 12;
+Mesh.SaveAll = 1;
+Mesh.MshFileVersion = 4.1;
+Mesh.Binary = 0;
+Mesh 2;
+Save "{msh}";
+"#,
+        step = escape(&step),
+        xao = escape(&xao),
+        msh = escape(&msh),
+    );
+    std::fs::write(&geo, script).map_err(|e| FemError::Gmsh(e.to_string()))?;
+    let out = Command::new(&gmsh).arg(&geo).arg("-").arg("-nt").arg("1").output().map_err(|e| FemError::Gmsh(e.to_string()))?;
+    let text = std::fs::read_to_string(&msh);
+    let names = std::fs::read_to_string(dir.join("geometrie.geo_unrolled.xao")).map(|x| solid_names(&x)).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&dir);
+    let text = text.map_err(|_| FemError::Gmsh(String::from_utf8_lossy(&out.stderr).to_string()))?;
+    let mut solids = read_surfaces(&text)?;
+    if names.len() == solids.len() {
+        for (s, n) in solids.iter_mut().zip(names) {
+            s.name = n;
+        }
+    }
+    Ok(solids)
+}
+
+/// Volumen mit ihren Randflächen ($Entities) und die Dreiecke je Fläche aus einer Gmsh-Datei 4.1 (ASCII)
+fn read_surfaces(text: &str) -> Result<Vec<crate::fastener::Solid>> {
+    let err = |m: &str| FemError::Gmsh(format!("Flächennetz: {m}"));
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let mut volumes: Vec<(i32, Vec<i32>)> = Vec::new();
+    let mut nodes: HashMap<usize, [f64; 3]> = HashMap::new();
+    let mut tris: HashMap<i32, Vec<[usize; 3]>> = HashMap::new();
+    let num = |s: Option<&str>| -> Result<f64> { s.and_then(|v| v.parse().ok()).ok_or_else(|| err("Zahl erwartet")) };
+    while let Some(line) = lines.next() {
+        match line {
+            "$Entities" => {
+                let c: Vec<usize> = lines.next().ok_or_else(|| err("$Entities leer"))?.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+                if c.len() < 4 {
+                    return Err(err("$Entities"));
+                }
+                for _ in 0..(c[0] + c[1] + c[2]) {
+                    lines.next();
+                }
+                for _ in 0..c[3] {
+                    let v: Vec<&str> = lines.next().ok_or_else(|| err("Volumen fehlt"))?.split_whitespace().collect();
+                    let tag: i32 = v[0].parse().map_err(|_| err("Volumennummer"))?;
+                    let nphys: usize = v.get(7).and_then(|x| x.parse().ok()).unwrap_or(0);
+                    let nb: usize = v.get(8 + nphys).and_then(|x| x.parse().ok()).unwrap_or(0);
+                    let surfs = v.iter().skip(9 + nphys).take(nb).filter_map(|x| x.parse::<i32>().ok()).map(i32::abs).collect();
+                    volumes.push((tag, surfs));
+                }
+            }
+            "$Nodes" => {
+                let mut h = lines.next().ok_or_else(|| err("$Nodes leer"))?.split_whitespace();
+                let blocks = num(h.next())? as usize;
+                for _ in 0..blocks {
+                    let mut b = lines.next().ok_or_else(|| err("Knotenblock fehlt"))?.split_whitespace();
+                    let (_, _, _, n) = (b.next(), b.next(), b.next(), num(b.next())? as usize);
+                    let mut tags = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        tags.push(num(lines.next())? as usize);
+                    }
+                    for tag in tags {
+                        let mut c = lines.next().ok_or_else(|| err("Koordinaten fehlen"))?.split_whitespace();
+                        nodes.insert(tag, [num(c.next())?, num(c.next())?, num(c.next())?]);
+                    }
+                }
+            }
+            "$Elements" => {
+                let mut h = lines.next().ok_or_else(|| err("$Elements leer"))?.split_whitespace();
+                let blocks = num(h.next())? as usize;
+                for _ in 0..blocks {
+                    let mut b = lines.next().ok_or_else(|| err("Elementblock fehlt"))?.split_whitespace();
+                    let (_, entity, etype, n) = (num(b.next())?, num(b.next())? as i32, num(b.next())? as u32, num(b.next())? as usize);
+                    for _ in 0..n {
+                        let l = lines.next().ok_or_else(|| err("Element fehlt"))?;
+                        if etype == 2 {
+                            let ids: Vec<usize> = l.split_whitespace().skip(1).filter_map(|v| v.parse().ok()).collect();
+                            if ids.len() >= 3 {
+                                tris.entry(entity).or_default().push([ids[0], ids[1], ids[2]]);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    volumes.sort_by_key(|v| v.0);
+    Ok(volumes
+        .into_iter()
+        .map(|(tag, surfs)| crate::fastener::Solid {
+            tag,
+            name: String::new(),
+            surfaces: surfs
+                .iter()
+                .map(|s| {
+                    tris.get(s)
+                        .map(|ts| ts.iter().filter_map(|t| Some([*nodes.get(&t[0])?, *nodes.get(&t[1])?, *nodes.get(&t[2])?])).collect())
+                        .unwrap_or_default()
+                })
+                .collect(),
+        })
+        .collect())
 }
 
 /// Namen der Volumenkörper aus der XAO-Datei von Gmsh (`<solid index="0" name="Shapes/Baugruppe/1/Platte" …/>`).
@@ -366,6 +497,54 @@ mod tests {
         assert!((vol[&1] - 20000.0).abs() < 50.0, "{vol:?}");
         assert!((vol[&2] - 32000.0).abs() < 50.0, "{vol:?}");
         assert!((vol[&3] - std::f64::consts::PI * 16.0 * 15.0).abs() < 15.0, "{vol:?}");
+    }
+
+    #[test]
+    fn verschraubung_erkennen_und_rechnen() {
+        if find_gmsh().is_none() {
+            eprintln!("Gmsh fehlt – Test übersprungen");
+            return;
+        }
+        let path = step("verschraubung.step");
+        let solids = inspect_step(&path).unwrap();
+        let names: Vec<&str> = solids.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names.len(), 6, "{names:?}");
+        let det = crate::fastener::detect(&solids);
+        assert_eq!(det.len(), 2, "{det:?}");
+        let (b1, b2) = (&det[0], &det[1]);
+        assert_eq!(b1.class.as_deref(), Some("10.9"));
+        assert_eq!(b2.class.as_deref(), Some("8.8"));
+        assert_eq!(b1.bolt.d, 8.0);
+        assert!(b1.bolt.nut_t.is_none());
+        // Kopf liegt oben auf (z = 25), Achse zeigt nach unten
+        assert!((b1.bolt.axis[2] + 1.0).abs() < 1e-6, "{:?}", b1.bolt.axis);
+        let z_head = b1.bolt.origin[2] + b1.bolt.axis[2] * b1.bolt.head_t;
+        assert!((z_head - 25.0).abs() < 0.05, "Kopfauflage z = {z_head}");
+        // Schraube 2: Scheibe unter dem Kopf (Auflage z = 25) und Mutter unten (Auflage z = 0)
+        assert_eq!(b2.volumes.len(), 3, "{:?}", b2.parts);
+        let z2 = b2.bolt.origin[2] + b2.bolt.axis[2] * b2.bolt.head_t;
+        let zn = b2.bolt.origin[2] + b2.bolt.axis[2] * b2.bolt.nut_t.unwrap();
+        assert!((z2 - 25.0).abs() < 0.05 && zn.abs() < 0.05, "Kopf {z2}, Mutter {zn}");
+
+        let exclude: Vec<i32> = det.iter().flat_map(|d| d.volumes.clone()).collect();
+        let m = mesh_step(&path, &MeshOptions { size: Some(4.0), exclude, ..Default::default() }).unwrap();
+        assert_eq!(m.bodies().len(), 2);
+        assert_eq!(m.body_name(m.bodies()[0]), "Unterteil");
+        let f = 4000.0;
+        let mut model = crate::Model::new(m, crate::Material::steel())
+            .group("unten", crate::Selection::Plane { axis: crate::Axis::Z, value: 0.0 })
+            .group("oben", crate::Selection::Plane { axis: crate::Axis::Z, value: 25.0 })
+            .support("unten", crate::Fix::all())
+            .load(crate::Load::Force { group: "oben".into(), force: [0.0, 0.0, f] });
+        model.bolts = det.iter().map(|d| d.bolt.clone()).collect();
+        let pairs = crate::bolt::open_joints(&mut model).unwrap();
+        assert!(!pairs.is_empty());
+        let res = crate::solve(&model).unwrap();
+        let sum: f64 = res.bolts.iter().map(|b| b.axial).sum();
+        assert!((sum - f).abs() < 1e-6 * f, "Schraubenkräfte {:?}", res.bolts);
+        assert!(res.bolts.iter().all(|b| b.axial > 0.3 * f), "{:?}", res.bolts);
+        // Zug: Fuge öffnet sich, keine Durchdringung
+        assert!(crate::bolt::penetration(&model.mesh, &pairs, &res.displacement) < 1e-4);
     }
 
     #[test]

@@ -179,6 +179,10 @@ pub struct Model {
     pub welds: Vec<crate::weld::Weld>,
     /// Baugruppe: eigener Werkstoff je Körper (Körpernummer → Werkstoff); übrige Körper: `material`
     pub body_materials: Vec<(i32, Material)>,
+    /// Schrauben (Verbindungselemente zwischen Kopfauflage und Gewinde bzw. Mutter)
+    pub bolts: Vec<crate::bolt::Bolt>,
+    /// geöffnete Fugen zwischen verschraubten Körpern (Knotenpaare Original/Kopie, siehe `bolt::open_joints`)
+    pub joint_pairs: Vec<(usize, usize)>,
     pub solver: SolverKind,
     /// Fortschrittsmeldungen (Oberfläche)
     pub progress: crate::Progress,
@@ -203,6 +207,8 @@ impl Model {
             loads: vec![],
             welds: vec![],
             body_materials: vec![],
+            bolts: vec![],
+            joint_pairs: vec![],
             solver: SolverKind::Auto,
             progress: Default::default(),
         }

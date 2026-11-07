@@ -519,6 +519,54 @@ pub fn zugstab_zwei_werkstoffe(kind: crate::SolverKind) -> Result<Vec<Check>> {
     ])
 }
 
+/// Baugruppe: zwei Blöcke 40×40×10 aufeinander, nur über vier Schrauben M8 (Kopf oben, Mutter unten) verbunden.
+/// Unterer Block unten fest, oberer Block oben mit F nach oben gezogen → jede Schraube trägt F/4 Zug, keine Querkraft.
+pub fn verschraubt(kind: crate::SolverKind) -> Result<Vec<Check>> {
+    let (a, h, f) = (40.0, 10.0, 8000.0);
+    let lower = box_mesh([a, a, h], [8, 8, 2], Order::Quadratic)?;
+    let upper = box_mesh([a, a, h], [8, 8, 2], Order::Quadratic)?;
+    let off = lower.nodes.len();
+    let mut nodes = lower.nodes.clone();
+    nodes.extend(upper.nodes.iter().map(|p| [p[0], p[1], p[2] + h]));
+    let mut conn = lower.conn.clone();
+    conn.extend(upper.conn.iter().map(|&n| n + off));
+    let elem_body = std::iter::repeat_n(1, lower.n_elems()).chain(std::iter::repeat_n(2, upper.n_elems())).collect();
+    let mesh = crate::Mesh { nodes, npe: lower.npe, conn, surface_tags: Default::default(), elem_body, body_names: vec![] };
+    let mut model = Model::new(mesh, Material::steel())
+        .group("unten", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("oben", Selection::Plane { axis: Axis::Z, value: 2.0 * h })
+        .support("unten", Fix::all())
+        .load(Load::Force { group: "oben".into(), force: [0.0, 0.0, f] });
+    for (i, (x, y)) in [(10.0, 10.0), (30.0, 10.0), (10.0, 30.0), (30.0, 30.0)].into_iter().enumerate() {
+        model.bolts.push(crate::bolt::Bolt {
+            name: format!("Schraube {}", i + 1),
+            d: 8.0,
+            stress_area: None,
+            e: 210000.0,
+            origin: [x, y, 2.0 * h],
+            axis: [0.0, 0.0, -1.0],
+            head_t: 0.0,
+            head_d: 13.0,
+            nut_t: Some(2.0 * h),
+            nut_d: Some(13.0),
+            thread_t0: 0.0,
+            thread_t1: 0.0,
+        });
+    }
+    model.solver = kind;
+    let res = solve(&model)?;
+    let name = format!("Verschraubt, 4 × M8 ({})", if kind == crate::SolverKind::Iterative { "iterativ" } else { "direkt" });
+    let axial: Vec<f64> = res.bolts.iter().map(|b| b.axial).collect();
+    let shear = res.bolts.iter().map(|b| b.shear).fold(0.0, f64::max);
+    Ok(vec![
+        check(&name, "Summe Schraubenkräfte [N]", axial.iter().sum(), f, 1e-6),
+        check(&name, "Schraube 1 Zug [N] (Netz nicht ganz symmetrisch)", axial[0], f / 4.0, 1e-3),
+        check(&name, "Schraube 4 Zug [N]", axial[3], f / 4.0, 1e-3),
+        check(&name, "1 + größte Querkraft / F", shear / f + 1.0, 1.0, 5e-3),
+        check(&name, "Lagerkraft Fz [N]", -res.reactions[0].1[2], f, 1e-6),
+    ])
+}
+
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
     v.extend(zugstab(Order::Quadratic)?);
@@ -538,6 +586,8 @@ pub fn all() -> Result<Vec<Check>> {
     v.extend(zugstab_geschweisst(crate::SolverKind::Iterative)?);
     v.extend(zugstab_zwei_werkstoffe(crate::SolverKind::Direct)?);
     v.extend(zugstab_zwei_werkstoffe(crate::SolverKind::Iterative)?);
+    v.extend(verschraubt(crate::SolverKind::Direct)?);
+    v.extend(verschraubt(crate::SolverKind::Iterative)?);
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");
     if crate::gmsh::find_gmsh().is_some() && step.exists() {
         v.extend(balken_gelenk(&step)?);

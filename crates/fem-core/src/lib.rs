@@ -19,6 +19,8 @@ pub mod pcg;
 pub mod progress;
 pub mod region;
 pub mod results;
+pub mod bolt;
+pub mod fastener;
 pub mod section;
 pub mod solver;
 pub mod sparse;

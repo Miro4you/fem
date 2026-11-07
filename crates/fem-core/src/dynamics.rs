@@ -140,9 +140,19 @@ fn reduce(
         tb.extend(b);
     }
     // Schweißnähte: Kopplungen nur in der Steifigkeit (keine Masse, keine geometrische Steifigkeit)
+    // Schrauben ebenso (nur Steifigkeit)
+    let mut couplings = Vec::new();
     if !model.welds.is_empty() {
         let p = crate::weld::prepare(model, &mesh.boundary_faces())?;
-        for (nodes, ke) in crate::solver::tie_elements(Some(&p), &c.frames) {
+        couplings.extend(crate::solver::tie_elements(Some(&p), &c.frames));
+    }
+    if !model.bolts.is_empty() {
+        let faces = mesh.boundary_faces();
+        let ps: Vec<crate::bolt::Prepared> = model.bolts.iter().map(|b| crate::bolt::prepare(mesh, &faces, b)).collect::<Result<_>>()?;
+        couplings.extend(crate::solver::bolt_elements(&ps, &c.frames));
+    }
+    {
+        for (nodes, ke) in couplings {
             let dofs: Vec<usize> = nodes.iter().flat_map(|&n| [3 * n, 3 * n + 1, 3 * n + 2]).collect();
             for (a, &ga) in dofs.iter().enumerate() {
                 let r = eq[ga];

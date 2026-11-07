@@ -41,6 +41,66 @@ impl Mesh {
         if self.npe == 10 { Order::Quadratic } else { Order::Linear }
     }
 
+    /// Fuge zwischen zwei Körpern auftrennen: Knoten, die Körper `a` und `b` gemeinsam haben, bekommen für `b` eine
+    /// Kopie. Danach hängen die Körper dort nicht mehr zusammen (die Fuge kann sich öffnen). CAD-Flächennummern der
+    /// Randdreiecke von `b` bleiben erhalten. Rückgabe: Knotenpaare (Original, Kopie).
+    pub fn split_bodies(&mut self, a: i32, b: i32) -> Vec<(usize, usize)> {
+        if self.elem_body.is_empty() {
+            return vec![];
+        }
+        let n = self.nodes.len();
+        let mut in_a = vec![false; n];
+        let mut in_b = vec![false; n];
+        for e in 0..self.n_elems() {
+            let body = self.elem_body[e];
+            for &k in &self.conn[e * self.npe..(e + 1) * self.npe] {
+                if body == a {
+                    in_a[k] = true;
+                } else if body == b {
+                    in_b[k] = true;
+                }
+            }
+        }
+        let mut copy: HashMap<usize, usize> = HashMap::new();
+        for k in 0..n {
+            if in_a[k] && in_b[k] {
+                self.nodes.push(self.nodes[k]);
+                copy.insert(k, self.nodes.len() - 1);
+            }
+        }
+        if copy.is_empty() {
+            return vec![];
+        }
+        let back: HashMap<usize, usize> = copy.iter().map(|(&o, &c)| (c, o)).collect();
+        for e in 0..self.n_elems() {
+            if self.elem_body[e] != b {
+                continue;
+            }
+            let base = e * self.npe;
+            for i in 0..self.npe {
+                if let Some(&c) = copy.get(&self.conn[base + i]) {
+                    self.conn[base + i] = c;
+                }
+            }
+            // Flächennummern auf die neuen Knoten übertragen
+            for f in TET_FACES {
+                let new: [usize; 3] = std::array::from_fn(|j| self.conn[base + f[j]]);
+                if new.iter().any(|k| back.contains_key(k)) {
+                    let mut old: [usize; 3] = std::array::from_fn(|j| back.get(&new[j]).copied().unwrap_or(new[j]));
+                    old.sort_unstable();
+                    if let Some(&tag) = self.surface_tags.get(&old) {
+                        let mut key = new;
+                        key.sort_unstable();
+                        self.surface_tags.insert(key, tag);
+                    }
+                }
+            }
+        }
+        let mut pairs: Vec<(usize, usize)> = copy.into_iter().collect();
+        pairs.sort_unstable();
+        pairs
+    }
+
     /// Körper des Elements (1, wenn das Netz keine Körper kennt)
     pub fn body_of(&self, e: usize) -> i32 {
         self.elem_body.get(e).copied().unwrap_or(1)

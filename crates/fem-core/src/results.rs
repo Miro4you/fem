@@ -38,6 +38,8 @@ pub struct Results {
     pub welds: Vec<crate::weld::WeldResult>,
     /// Baugruppe: Kennwerte je Körper (leer bei einem Körper)
     pub bodies: Vec<BodyResult>,
+    /// Schraubenkräfte
+    pub bolts: Vec<crate::bolt::BoltResult>,
 }
 
 /// Kennwerte eines Körpers der Baugruppe (Spannungen nur aus seinen eigenen Elementen gemittelt)

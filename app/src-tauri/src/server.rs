@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::{
-    modify_geometry_impl, open_step_impl, orientation_scan_impl, progress_impl, section_impl, solve_impl, topo_stl_impl, topo_surface_impl,
+    modify_geometry_impl, orientation_scan_impl, progress_impl, section_impl, solve_impl, topo_stl_impl, topo_surface_impl,
     topopt_impl, write_vtu_impl, AppState, Setup, TopoArgs, modes_impl,
 };
 use fem_core::gmsh::Refine;
@@ -342,6 +342,8 @@ struct OpenStep {
     linear: Option<bool>,
     #[serde(default)]
     refine: Vec<Refine>,
+    #[serde(default)]
+    keep_fasteners: bool,
 }
 
 async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<OpenStep>) -> ApiResult<Response> {
@@ -352,7 +354,7 @@ async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Jso
         return Err(bad("Datei nicht gefunden – bitte neu hochladen"));
     }
     let state = s.session(&headers);
-    let view = tokio::task::spawn_blocking(move || open_step_impl(&state, &a.path, a.size, a.linear == Some(true), &a.refine))
+    let view = tokio::task::spawn_blocking(move || crate::open_step_with(&state, &a.path, a.size, a.linear == Some(true), &a.refine, a.keep_fasteners))
         .await
         .map_err(bad)?
         .map_err(bad)?;

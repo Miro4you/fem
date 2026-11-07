@@ -100,6 +100,19 @@ pub struct MeshView {
     surfaces: Vec<SurfaceInfo>,
     /// Körper (nur bei Baugruppen mit mehreren Körpern)
     bodies: Vec<BodyView>,
+    /// Schrauben: aus dem CAD erkannt (als Verbinder statt Körper) bzw. Vorschläge aus fluchtenden Bohrungen
+    bolts: Vec<BoltView>,
+}
+
+#[derive(Serialize, Clone)]
+struct BoltView {
+    bolt: fem_core::bolt::Bolt,
+    /// Festigkeitsklasse aus dem Namen
+    class: Option<String>,
+    /// „cad“ = Schraube aus dem CAD (Körper ersetzt), „bohrung“ = Vorschlag
+    source: String,
+    /// ersetzte Körper (Schraube, Scheiben, Mutter)
+    parts: Vec<String>,
 }
 
 fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usize>) {
@@ -216,6 +229,7 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
         feature_edges,
         mesh_edges,
         surfaces,
+        bolts: vec![],
         bodies: {
             let ids = mesh.bodies();
             if ids.len() < 2 {
@@ -413,30 +427,67 @@ async fn open_step(
     size: Option<f64>,
     linear: Option<bool>,
     refine: Option<Vec<Refine>>,
+    keep_fasteners: Option<bool>,
 ) -> Result<MeshView, String> {
     let refine = refine.unwrap_or_default();
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || open_step_impl(&state, &path, size, linear == Some(true), &refine))
+    tauri::async_runtime::spawn_blocking(move || open_step_with(&state, &path, size, linear == Some(true), &refine, keep_fasteners == Some(true)))
         .await
         .map_err(|e| e.to_string())?
 }
 
 /// STEP öffnen und vernetzen (auch für Tests ohne Oberfläche nutzbar).
 pub fn open_step_impl(state: &AppState, path: &str, size: Option<f64>, linear: bool, refine: &[Refine]) -> Result<MeshView, String> {
+    open_step_with(state, path, size, linear, refine, false)
+}
+
+/// Mehrere Volumenkörper in der STEP-Datei?
+fn several_solids(path: &str) -> bool {
+    std::fs::read_to_string(path).map(|t| t.matches("MANIFOLD_SOLID_BREP").count() + t.matches("BREP_WITH_VOIDS").count() >= 2).unwrap_or(false)
+}
+
+/// STEP öffnen; bei Baugruppen Schrauben/Muttern/Scheiben erkennen und (wenn `keep_fasteners` aus) als Verbinder
+/// statt als Körper rechnen
+pub fn open_step_with(state: &AppState, path: &str, size: Option<f64>, linear: bool, refine: &[Refine], keep_fasteners: bool) -> Result<MeshView, String> {
     {
+        let (progress, slot) = progress_for(state);
+        let mut found: Vec<fem_core::fastener::Detected> = Vec::new();
+        if several_solids(path) {
+            progress.report("Baugruppe prüfen: Schrauben suchen", None);
+            if let Ok(solids) = gmsh::inspect_step(&PathBuf::from(path)) {
+                found = fem_core::fastener::detect(&solids);
+            }
+        }
         let opts = MeshOptions {
             size,
             order: if linear { Order::Linear } else { Order::Quadratic },
             refine: refine.to_vec(),
+            exclude: if keep_fasteners { vec![] } else { found.iter().flat_map(|d| d.volumes.clone()).collect() },
             ..Default::default()
         };
-        let (progress, slot) = progress_for(state);
         progress.report(if refine.is_empty() { "Vernetzen (Gmsh)" } else { "Vernetzen mit örtlicher Verfeinerung (Gmsh)" }, None);
         let mesh = gmsh::mesh_step(&PathBuf::from(path), &opts).map_err(|e| e.to_string())?;
         let (lo, hi) = mesh.bbox();
         let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
         let faces = mesh.boundary_faces();
-        let (view, disp_nodes) = build_view(&mesh, &faces, size.unwrap_or(diag / 25.0));
+        let (mut view, disp_nodes) = build_view(&mesh, &faces, size.unwrap_or(diag / 25.0));
+        // Schrauben aus dem CAD und Vorschläge aus Bohrungen (nur Baugruppen)
+        if !keep_fasteners {
+            view.bolts = found
+                .iter()
+                .map(|d| BoltView { bolt: d.bolt.clone(), class: d.class.clone(), source: "cad".into(), parts: d.parts.clone() })
+                .collect();
+        }
+        if mesh.bodies().len() > 1 {
+            let holes: Vec<fem_core::bolt::Hole> =
+                view.surfaces.iter().filter_map(|x| x.cylinder.clone().map(|cyl| fem_core::bolt::Hole { body: x.body, cyl })).collect();
+            let existing: Vec<fem_core::bolt::Bolt> = view.bolts.iter().map(|b| b.bolt.clone()).collect();
+            for (i, b) in fem_core::bolt::suggest(&holes, &existing).into_iter().enumerate() {
+                let mut b = b;
+                b.name = format!("Bohrung {} (M{})", i + 1, b.d);
+                view.bolts.push(BoltView { bolt: b, class: None, source: "bohrung".into(), parts: vec![] });
+            }
+        }
         *slot.lock().unwrap() = None;
         let mut s = state.lock().unwrap();
         *s = Inner { progress: slot, topo: None, mesh: Some(mesh), faces, disp_nodes, model: None, results: None };
@@ -511,6 +562,10 @@ struct SupportDef {
     local: Option<LocalFix>,
 }
 
+fn yes() -> bool {
+    true
+}
+
 #[derive(Deserialize)]
 struct BodyMaterial {
     body: i32,
@@ -555,6 +610,12 @@ pub struct Setup {
     /// Baugruppe: eigener Werkstoff je Körper
     #[serde(default)]
     bodies: Vec<BodyMaterial>,
+    /// Schrauben als Verbindungselemente
+    #[serde(default)]
+    bolts: Vec<fem_core::bolt::Bolt>,
+    /// Fugen zwischen verschraubten Teilen öffnen (nur die Schrauben halten); sonst verklebt
+    #[serde(default = "yes")]
+    open_joints: bool,
     /// Gleichungslöser, Standard: automatisch nach Modellgröße
     #[serde(default)]
     solver: SolverKind,
@@ -605,6 +666,8 @@ pub struct ResultView {
     welds: Vec<fem_core::weld::WeldResult>,
     /// Baugruppe: Kennwerte je Körper und Kräfte zwischen den Körpern
     bodies: Vec<fem_core::results::BodyResult>,
+    /// Schraubenkräfte
+    bolts: Vec<fem_core::bolt::BoltResult>,
 }
 
 #[tauri::command]
@@ -629,6 +692,10 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
     let (progress, slot) = progress_for(state);
     let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver).progress(progress);
     model.body_materials = setup.bodies.iter().map(|b| (b.body, b.material.clone())).collect();
+    model.bolts = setup.bolts.clone();
+    if setup.open_joints && !model.bolts.is_empty() {
+        model.joint_pairs = fem_core::bolt::open_joints(&mut model).map_err(|e| e.to_string())?;
+    }
         for (i, s) in setup.supports.iter().enumerate() {
             let name = format!("Lager {}", i + 1);
             model = model.group_in(&name, Selection::Surfaces(s.surfaces.clone()), s.region.clone());
@@ -678,6 +745,21 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         let m = &model.mesh;
 
         let mut warnings = Vec::new();
+        // geöffnete Fugen an Schrauben: Durchdringung = Fuge wird zusammengedrückt (Kontakt fehlt noch)
+        if !model.joint_pairs.is_empty() {
+            let pen = fem_core::bolt::penetration(&model.mesh, &model.joint_pairs, &res.displacement);
+            let (lo, hi) = model.mesh.bbox();
+            let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
+            if pen > 1e-5 * diag {
+                warnings.push(format!(
+                    "An einer geöffneten Fuge schieben sich verschraubte Teile um bis zu {pen:.3} mm ineinander – dort drückt die Last die Teile \
+                     zusammen. Kontakt kommt noch; bis dahin gilt das Ergebnis für Zug und Querkraft. Sonst unter Verbindungen „Fugen verklebt“ wählen."
+                ));
+            }
+        }
+        if res.bolts.iter().any(|b| b.axial < 0.0) {
+            warnings.push("Mindestens eine Schraube wird auf Druck belastet – ohne Kontakt trägt sie Last, die eigentlich über die Fuge geht.".into());
+        }
         let (vm_node, vm) = res.max_von_mises();
         // Maximum auf einer gelagerten Fläche → wahrscheinlich Singularität
         let supported: Vec<i32> = setup.supports.iter().flat_map(|s| s.surfaces.clone()).collect();
@@ -779,6 +861,7 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             warnings,
             welds: res.welds.clone(),
             bodies: res.bodies.clone(),
+            bolts: res.bolts.clone(),
         };
         let mut s = state.lock().unwrap();
         s.model = Some(model);
