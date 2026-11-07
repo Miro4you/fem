@@ -67,6 +67,12 @@ struct Slip {
     d: Vector3<f64>,
 }
 
+/// Tangentialfeder bei Reibung relativ zur Normalfeder (elastischer Schlupf bis µ·p/k_t, wenige Promille der Elementgröße)
+const KT_FACTOR: f64 = 0.01;
+
+/// Stabilisierung: Federsteifigkeit in allen Richtungen relativ zur Kontaktfeder (Kräfte darin vernachlässigbar)
+const STAB: f64 = 1e-9;
+
 /// zulässige Durchdringung: Federanteil der Druckkraft höchstens dieser Bruchteil des größten Drucks
 const PEN_TOL: f64 = 0.05;
 /// Schwelle für Öffnen/Schließen, bezogen auf den größten Druck (verhindert Hin- und Herspringen am Rand)
@@ -174,6 +180,11 @@ impl Contact {
                 continue;
             }
             let kn = 10.0 * e * area[a] / h;
+            // Tangentialfeder: bei Reibung weicher (kleiner elastischer Schlupf, weniger Springen zwischen Haften und Rutschen)
+            let kt = match friction {
+                Friction::Coulomb { .. } => KT_FACTOR * kn,
+                Friction::Haftend => kn,
+            };
             pair_of[a] = out.len();
             out.push(Pair {
                 a,
@@ -181,7 +192,7 @@ impl Contact {
                 n: n.normalize(),
                 area: area[a],
                 kn,
-                kt: kn,
+                kt,
                 closed: true,
                 slip: None,
                 restick: 0,
@@ -257,7 +268,9 @@ impl Contact {
         // alle Paare, offene mit Nullen: gleiches Besetzungsmuster in jedem Durchgang (Zerlegung wiederverwendbar)
         for p in &self.pairs {
             let nn = p.n * p.n.transpose();
-            let k3: Matrix3<f64> = if p.closed { nn * p.kn + self.tangential(p).0 } else { Matrix3::zeros() };
+            // winzige Feder in alle Richtungen: ein Teil, das nur über Kontakt hängt, macht das System nicht singulär
+            let stab = Matrix3::identity() * (STAB * p.kn);
+            let k3: Matrix3<f64> = stab + if p.closed { nn * p.kn + self.tangential(p).0 } else { Matrix3::zeros() };
             let mut k = DMatrix::zeros(6, 6);
             for r in 0..3 {
                 for c in 0..3 {

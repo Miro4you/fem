@@ -114,6 +114,49 @@ impl Mesh {
         b
     }
 
+    /// Körperpaare, die sich im Netz berühren (gemeinsame Knoten), mit der Fläche der gemeinsamen Dreiecke [mm²]
+    pub fn touching_bodies(&self) -> Vec<(i32, i32, f64)> {
+        if self.elem_body.is_empty() {
+            return vec![];
+        }
+        let n = self.nodes.len();
+        // Körper je Knoten (höchstens die ersten vier)
+        let mut nb: Vec<Vec<i32>> = vec![Vec::new(); n];
+        for e in 0..self.n_elems() {
+            let b = self.elem_body[e];
+            for &k in self.elem(e) {
+                if !nb[k].contains(&b) && nb[k].len() < 4 {
+                    nb[k].push(b);
+                }
+            }
+        }
+        let mut out: Vec<(i32, i32, f64)> = Vec::new();
+        for e in 0..self.n_elems() {
+            let a = self.elem_body[e];
+            let c = self.elem(e);
+            for f in TET_FACES {
+                let k = [c[f[0]], c[f[1]], c[f[2]]];
+                // Dreieck liegt in der Trennfläche zu einem anderen Körper b > a
+                for &b in &nb[k[0]] {
+                    if b <= a || !nb[k[1]].contains(&b) || !nb[k[2]].contains(&b) {
+                        continue;
+                    }
+                    let p: Vec<[f64; 3]> = k.iter().map(|&i| self.nodes[i]).collect();
+                    let u = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+                    let v = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+                    let cr = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+                    let area = 0.5 * (cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]).sqrt();
+                    match out.iter_mut().find(|x| x.0 == a && x.1 == b) {
+                        Some(x) => x.2 += area,
+                        None => out.push((a, b, area)),
+                    }
+                }
+            }
+        }
+        out.sort_by(|x, y| (x.0, x.1).cmp(&(y.0, y.1)));
+        out
+    }
+
     /// Name eines Körpers (aus der STEP-Datei) oder „Körper n“
     pub fn body_name(&self, b: i32) -> String {
         self.body_names.iter().find(|(t, _)| *t == b).map(|(_, n)| n.clone()).unwrap_or_else(|| format!("Körper {b}"))

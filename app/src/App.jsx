@@ -207,6 +207,8 @@ export default function App() {
   const [openJoints, setOpenJoints] = useState(true)
   // Fuge mit Kontakt: Reibung; Vorspannung der Schrauben
   const [jointFric, setJointFric] = useState({ mode: 'mu', mu: '0.15' })
+  // Berührflächen mit Kontakt statt verklebt (je Körperpaar nach Namen)
+  const [contactPairs, setContactPairs] = useState({})
   const [tight, setTight] = useState({ mode: 'vdi', nu: '90', muG: '0.12', muK: '0.12', method: 'schluessel', alpha: '1.6', setting: true, fatigue: false })
   const [keepFasteners, setKeepFasteners] = useState(false)
   const keepFastenersRef = useRef(false)
@@ -336,7 +338,7 @@ export default function App() {
   useEffect(() => {
     if (result) setResultStale(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [material, supports, loads, welds, bodyMats, bolts, openJoints, jointFric, tight])
+  }, [material, supports, loads, welds, bodyMats, bolts, openJoints, jointFric, tight, contactPairs])
 
   const surfaceInfo = useMemo(() => new Map((mesh?.surfaces ?? []).map((s) => [s.tag, s])), [mesh])
   // Baugruppe: Masse aus Volumen und Dichte je Körper (null = nicht ermittelbar bzw. ein Körper)
@@ -569,7 +571,7 @@ export default function App() {
   async function onSaveProject() {
     if (!stepPath) return
     const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies,
-      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }])), openJoints, jointFriction: jointFric, tighten: tight, keepFasteners }
+      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }])), openJoints, jointFriction: jointFric, tighten: tight, contacts: contactPairs, keepFasteners }
     try {
       const p = await api.saveProject(stepPath, data)
       if (p) addRecent({ kind: 'project', path: p, name: baseName(p), info: result ? `${material.name} · σv ${fmt(result.max_von_mises.value)} MPa` : material.name })
@@ -598,6 +600,7 @@ export default function App() {
       setOpenJoints(d.openJoints ?? true)
       if (d.jointFriction) setJointFric(d.jointFriction)
       if (d.tighten) setTight((t) => ({ ...t, ...d.tighten }))
+      setContactPairs(d.contacts ?? {})
       setKeepFasteners(!!d.keepFasteners)
       keepFastenersRef.current = !!d.keepFasteners
       const m = await loadGeometry(d.step, d.meshSize, true, true, [])
@@ -1300,6 +1303,7 @@ export default function App() {
           })),
         open_joints: openJoints,
         joint_friction: frictionOf(jointFric),
+        contacts: (mesh?.touching ?? []).filter(([a, b]) => contactPairs[touchKey(mesh, a, b)]).map(([a, b]) => [a, b]),
         supports: sups.map((s) => {
           const f = supportFix(s)
           return { surfaces: s.surfaces, fix: f.fix, local: f.local ?? null, region: regionNumbers(s.region) }
@@ -2353,6 +2357,7 @@ export default function App() {
             }}
           />
         )}
+        <TouchSection mesh={mesh} contacts={contactPairs} setContacts={setContactPairs} jointFric={jointFric} setJointFric={setJointFric} />
         <WeldSection
           welds={welds}
           setWelds={setWelds}
@@ -2712,11 +2717,12 @@ export default function App() {
         <TreeRow
           icon={I.IcLink}
           title="Verbindungen"
-          muted={!welds.length && !bolts.some((b) => b.on)}
+          muted={!welds.length && !bolts.some((b) => b.on) && !Object.values(contactPairs).some(Boolean)}
           sum={
-            welds.length || bolts.length
+            welds.length || bolts.length || Object.values(contactPairs).some(Boolean)
               ? [
                   [bolts.filter((b) => b.on).length, 'Schraube', 'Schrauben'],
+                  [(mesh?.touching ?? []).filter(([a, b]) => contactPairs[touchKey(mesh, a, b)]).length, 'Kontakt', 'Kontakte'],
                   [welds.filter((w) => w.kind !== 'bond').length, 'Schweißnaht', 'Schweißnähte'],
                   [welds.filter((w) => w.kind === 'bond').length, 'Verbindung', 'Verbindungen'],
                   [bolts.filter((b) => !b.on).length, 'Vorschlag', 'Vorschläge'],
@@ -2724,9 +2730,9 @@ export default function App() {
                   .filter(([n]) => n)
                   .map(([n, a, b]) => `${n} ${n > 1 ? b : a}`)
                   .join(' · ')
-              : 'optional – Schweißnähte, lose Teile'
+              : 'optional – Schrauben, Kontakt, Schweißnähte'
           }
-          state={welds.length || bolts.some((b) => b.on) ? itemState('verb') : null}
+          state={welds.length || bolts.some((b) => b.on) || Object.values(contactPairs).some(Boolean) ? itemState('verb') : null}
           on={sel === 'verb'}
           onClick={() => selectItem('verb')}
         />
@@ -3449,6 +3455,8 @@ function JointCard({ result }) {
   if (!joints.length) return null
   const nameOf = (id) => (result.bodies ?? []).find((b) => b.body === id)?.name ?? `Körper ${id}`
   const pct = (x) => `${(100 * x).toFixed(0)} %`
+  const force = (v) => (Math.abs(v) < 0.05 ? '≈ 0 N' : Math.abs(v) < 1000 ? `${fmt(v)} N` : `${fmt(v / 1000)} kN`)
+  const bolted = (result.bolts ?? []).length > 0
   return (
     <div className="proof bodies-card">
       <div className="item-head">
@@ -3466,15 +3474,15 @@ function JointCard({ result }) {
               label="liegt auf"
               value={(gap > 0.005 ? pct(j.closed) : 'ganz') + (j.closed_preload != null && Math.abs(j.closed_preload - j.closed) > 0.005 ? ` (angezogen ${pct(j.closed_preload)})` : '')}
             />
-            <Stat label="Restklemmkraft" value={`${fmt(j.pressure_force / 1000)} kN`} />
+            <Stat label={bolted ? 'Restklemmkraft' : 'Druckkraft'} value={force(j.pressure_force)} />
             <Stat label="max. Flächenpressung" value={`${fmt(j.max_pressure)} MPa`} />
             <Stat
               label="Querkraft über Reibung"
               value={
                 j.friction_limit == null
-                  ? `${fmt(j.friction_force / 1000)} kN (haftet)`
+                  ? `${force(j.friction_force)} (haftet)`
                   : j.friction_limit > 0
-                    ? `${fmt(j.friction_force / 1000)} von ${fmt(j.friction_limit / 1000)} kN (${pct(j.friction_force / j.friction_limit)})`
+                    ? `${force(j.friction_force)} von ${force(j.friction_limit)} (${pct(j.friction_force / j.friction_limit)})`
                     : 'reibungsfrei'
               }
             />
@@ -3482,9 +3490,15 @@ function JointCard({ result }) {
         )
       })}
       <p className="hint">
-        {(result.bolts ?? []).some((b) => b.preload_min != null) && 'Fuge mit der kleinsten Vorspannung (nach Streuung und Setzen) bewertet. '}
-        Außerhalb der Druckkegel um die Schrauben liegen Platten oft nicht auf – das ist normal. Öffnet erst die Last die Fuge oder reicht der
-        Reibschluss µ·F_K nicht, steht ein Hinweis unter Details. Gerechnet: erst Schrauben anziehen, dann Last.
+        {bolted ? (
+          <>
+            {(result.bolts ?? []).some((b) => b.preload_min != null) && 'Fuge mit der kleinsten Vorspannung (nach Streuung und Setzen) bewertet. '}
+            Außerhalb der Druckkegel um die Schrauben liegen Platten oft nicht auf – das ist normal. Öffnet erst die Last die Fuge oder reicht der
+            Reibschluss µ·F_K nicht, steht ein Hinweis unter Details. Gerechnet: erst Schrauben anziehen, dann Last.
+          </>
+        ) : (
+          'Kontakt: Druck wird übertragen, Zug nicht (die Teile heben ab); quer hält die Reibung bis µ·Pressung, darüber rutschen sie.'
+        )}
       </p>
     </div>
   )
@@ -3744,6 +3758,87 @@ function clean(v, ref) {
   return v.map((x) => (Math.abs(x) < 1e-6 * ref ? 0 : x))
 }
 
+// Reibung in Fugen mit Kontakt (gilt für alle Fugen: verschraubte und gewählte Berührflächen)
+function FrictionControl({ jointFric, setJointFric }) {
+  return (
+    <div className="row friction-row">
+      <div className="segmented small">
+        {[
+          ['mu', 'Reibung'],
+          ['stick', 'haftet'],
+          ['free', 'reibungsfrei'],
+        ].map(([k, l]) => (
+          <button key={k} className={jointFric.mode === k ? 'on' : ''} onClick={() => setJointFric({ ...jointFric, mode: k })}>
+            {l}
+          </button>
+        ))}
+      </div>
+      {jointFric.mode === 'mu' && (
+        <label className="field inline-field">
+          <span>µ</span>
+          <input value={jointFric.mu} aria-label="Reibwert der Fuge" onChange={(e) => setJointFric({ ...jointFric, mu: e.target.value })} />
+        </label>
+      )}
+    </div>
+  )
+}
+
+// Berührflächen zwischen Körpern: verklebt (Standard) oder Kontakt (drückt, hebt ab, rutscht)
+const touchKey = (mesh, a, b) => {
+  const nameOf = (id) => mesh?.bodies?.find((x) => x.body === id)?.name ?? `Körper ${id}`
+  return `${nameOf(a)}|${nameOf(b)}`
+}
+function TouchSection({ mesh, contacts, setContacts, jointFric, setJointFric }) {
+  const pairs = mesh?.touching ?? []
+  if (!pairs.length) return null
+  const nameOf = (id) => mesh.bodies?.find((x) => x.body === id)?.name ?? `Körper ${id}`
+  const any = pairs.some(([a, b]) => contacts[touchKey(mesh, a, b)])
+  return (
+    <>
+      <div className="props-head">
+        <h3>Berührflächen</h3>
+      </div>
+      <p className="hint">
+        Wo sich Teile berühren, hängen sie normalerweise fest zusammen (verklebt). Mit „Kontakt“ drücken sie nur aufeinander: sie können abheben und
+        – je nach Reibung – rutschen. Fugen verschraubter Teile stellst du bei den Schrauben ein.
+      </p>
+      <div className="bolt-list">
+        {pairs.map(([a, b, area]) => {
+          const k = touchKey(mesh, a, b)
+          const on = !!contacts[k]
+          return (
+            <div key={k} className="bolt-row touch-row">
+              <span className="bolt-name">
+                <b>
+                  {nameOf(a)} ↔ {nameOf(b)}
+                </b>
+                <small>{fmt(area)} mm² Berührfläche</small>
+              </span>
+              <div className="segmented small">
+                <button className={!on ? 'on' : ''} onClick={() => setContacts({ ...contacts, [k]: false })}>
+                  verklebt
+                </button>
+                <button className={on ? 'on' : ''} onClick={() => setContacts({ ...contacts, [k]: true })}>
+                  Kontakt
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {any && (
+        <>
+          <FrictionControl jointFric={jointFric} setJointFric={setJointFric} />
+          <p className="hint">
+            Ein Teil, das nur über Kontakt gehalten wird, braucht Halt: Lager, Schraube, Reibung bei Andruck – sonst löst es sich (Hinweis im Ergebnis).
+          </p>
+        </>
+      )}
+      <hr className="sep-line" />
+    </>
+  )
+}
+
 // Schrauben: aus dem CAD erkannt bzw. aus fluchtenden Bohrungen vorgeschlagen; Festigkeitsklasse je Schraube,
 // Vorspannung (VDI 2230) und Fuge (Kontakt mit Reibung oder verklebt)
 function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpenJoints, jointFric, setJointFric, tight, setTight, keepFasteners, onKeepFasteners }) {
@@ -3883,27 +3978,7 @@ function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpen
               verklebt
             </button>
           </div>
-          {openJoints && (
-            <div className="row friction-row">
-              <div className="segmented small">
-                {[
-                  ['mu', 'Reibung'],
-                  ['stick', 'haftet'],
-                  ['free', 'reibungsfrei'],
-                ].map(([k, l]) => (
-                  <button key={k} className={jointFric.mode === k ? 'on' : ''} onClick={() => setJointFric({ ...jointFric, mode: k })}>
-                    {l}
-                  </button>
-                ))}
-              </div>
-              {jointFric.mode === 'mu' && (
-                <label className="field inline-field">
-                  <span>µ</span>
-                  <input value={jointFric.mu} aria-label="Reibwert der Fuge" onChange={(e) => setJointFric({ ...jointFric, mu: e.target.value })} />
-                </label>
-              )}
-            </div>
-          )}
+          {openJoints && <FrictionControl jointFric={jointFric} setJointFric={setJointFric} />}
           <p className="hint">
             {openJoints
               ? 'Kontakt: Druck geht über die Fuge, bei Zug hebt sie ab (klafft); quer hält die Reibung µ·Pressung, darüber rutschen die Teile und die Schrauben werden auf Abscherung belastet. Stahl/Stahl trocken etwa µ = 0,1 … 0,2.'

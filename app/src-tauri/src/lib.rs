@@ -102,6 +102,8 @@ pub struct MeshView {
     bodies: Vec<BodyView>,
     /// Schrauben: aus dem CAD erkannt (als Verbinder statt Körper) bzw. Vorschläge aus fluchtenden Bohrungen
     bolts: Vec<BoltView>,
+    /// Körperpaare, die sich berühren (Körper A, Körper B, Fläche mm²) – wahlweise verklebt oder mit Kontakt
+    touching: Vec<(i32, i32, f64)>,
 }
 
 #[derive(Serialize, Clone)]
@@ -230,6 +232,7 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
         mesh_edges,
         surfaces,
         bolts: vec![],
+        touching: mesh.touching_bodies(),
         bodies: {
             let ids = mesh.bodies();
             if ids.len() < 2 {
@@ -619,6 +622,9 @@ pub struct Setup {
     /// Reibung in den Fugen (Standard: haftend)
     #[serde(default)]
     joint_friction: fem_core::contact::Friction,
+    /// Körperpaare mit Kontakt statt verklebt (unabhängig von Schrauben)
+    #[serde(default)]
+    contacts: Vec<[i32; 2]>,
     /// Gleichungslöser, Standard: automatisch nach Modellgröße
     #[serde(default)]
     solver: SolverKind,
@@ -704,6 +710,13 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
     model.bolts = setup.bolts.clone();
     if setup.open_joints && !model.bolts.is_empty() {
         model.joint_pairs = fem_core::bolt::open_joints(&mut model).map_err(|e| e.to_string())?;
+    }
+    // gewählte Berührflächen mit Kontakt (schon durch Schrauben geöffnete Fugen bleiben, wie sie sind)
+    for &[a, b] in &setup.contacts {
+        let pairs = model.mesh.split_bodies(a.min(b), a.max(b));
+        model.joint_pairs.extend(pairs);
+    }
+    if !model.joint_pairs.is_empty() {
         model.joint_friction = setup.joint_friction;
     }
         for (i, s) in setup.supports.iter().enumerate() {
@@ -767,15 +780,17 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         for j in &res.joints {
             let has_preload = res.bolts.iter().any(|b| b.preload > 0.0);
             if j.closed < 0.05 {
+                let why = if has_preload {
+                    " Die Last ist größer, als die Vorspannung zusammenhalten kann."
+                } else if !res.bolts.is_empty() {
+                    " Ohne Vorspannung hebt die Fuge schon bei kleiner Last ab."
+                } else {
+                    ""
+                };
                 warnings.push(format!(
-                    "Die Fuge {} ↔ {} ist ganz offen – die Teile liegen nicht mehr aufeinander, nur die Schrauben halten.{}",
+                    "Die Teile {} und {} liegen nicht mehr aufeinander (Fuge ganz offen).{why}",
                     name(j.body_a),
-                    name(j.body_b),
-                    if has_preload {
-                        " Die Last ist größer, als die Vorspannung zusammenhalten kann."
-                    } else {
-                        " Ohne Vorspannung hebt die Fuge schon bei kleiner Last ab."
-                    }
+                    name(j.body_b)
                 ));
             } else if let Some(c0) = j.closed_preload.filter(|c0| j.closed < 0.5 * c0) {
                 warnings.push(format!(
@@ -794,6 +809,18 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
                     name(j.body_b),
                     lim / 1000.0
                 ));
+            }
+        }
+        // Teil hängt nur über Kontakt und hat sich gelöst: riesige Verschiebung (nur die Stabilisierungsfedern halten)
+        if !res.joints.is_empty() {
+            let (lo, hi) = m.bbox();
+            let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
+            if res.max_displacement().1 > 0.05 * diag {
+                warnings.push(
+                    "Ein Teil hält nur über Kontakt und hat sich gelöst (sehr große Verschiebung) – das Ergebnis gilt so nicht. \
+                     Lager, Schraube oder Reibung ergänzen bzw. die Berührfläche auf „verklebt“ stellen."
+                        .into(),
+                );
             }
         }
         if res.joints.is_empty() && res.bolts.iter().any(|b| b.axial < 0.0) {
