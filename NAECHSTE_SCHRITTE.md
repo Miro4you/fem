@@ -2,6 +2,23 @@
 
 **Aktuell: Felix testet nach `TESTPROTOKOLL.md`.**
 
+
+## 0. Neue To-dos von Felix (07.11.2026)
+
+1. **Onshape-API-Verbrauch senken:** Onshape zählt API-Aufrufe (Kontingent 2500, nach dem Test schon 600 verbraucht).
+   Größte Verbraucher: Bibliothek (Liste + je Dokument/Teilestudio ein Vorschaubild), STEP-Ausgabe mit wiederholtem
+   Nachfragen (alle 0,7 s), Variablen-Studie (je Wert Feature lesen + ändern + STEP). Ideen: Vorschaubilder auf der
+   Festplatte zwischenspeichern und nur auf Wunsch laden, Dokumentliste zwischenspeichern, beim Nachfragen der STEP-
+   Ausgabe länger warten (1,5–3 s, steigend), Variablen/Teilename nur einmal je Teil holen, Zähler der Aufrufe in den
+   Einstellungen anzeigen (und Warnung vor großen Studien).
+2. **Ergebnisgrößen wieder als Liste** statt Blasen mit „mehr …“: alle Größen untereinander (Name + Kurzhinweis),
+   gewählte hervorgehoben, nicht verfügbare ausblenden (die abgeschnittene „Materialausnu…“-Blase fällt damit weg).
+3. **Auf einem Server laufen lassen wie MathPad** (im Internet, nicht nur im Heimnetz): prüfen, was nötig ist –
+   Server-Modus gibt es schon (`--server`, axum, eingebettete Oberfläche); fehlt: Anmeldung/Benutzer statt Heimnetz-
+   Schlüssel, HTTPS (z. B. hinter Caddy/Nginx), Sitzungen/Speicher je Benutzer, Grenzen für Rechenzeit/Speicher,
+   Gmsh auf dem Server, Docker-Image. Vorher mit Felix klären: wo hostet MathPad, wer soll Zugriff haben, eigene
+   Onshape-Schlüssel je Benutzer.
+
 ## 1. Ansys-Vergleich Hebel (wartet auf Felix)
 Geometrie: `Daten/Hebel.step` (Onshape, in Metern gespeichert → wird korrekt in mm gelesen).
 100 × 70 × 5 mm, Nabe R20 mit Rechteckaufnahme 20 × 12, Arm 20 breit, Bohrung Ø8 bei (70, −40), Radien R3 Nabe→Arm.
