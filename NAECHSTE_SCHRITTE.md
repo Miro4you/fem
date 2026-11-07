@@ -18,6 +18,12 @@
    Schlüssel, HTTPS (z. B. hinter Caddy/Nginx), Sitzungen/Speicher je Benutzer, Grenzen für Rechenzeit/Speicher,
    Gmsh auf dem Server, Docker-Image. Vorher mit Felix klären: wo hostet MathPad, wer soll Zugriff haben, eigene
    Onshape-Schlüssel je Benutzer.
+4. **Neue Symbole entwerfen:** App-Icon (Programmsymbol für Dock/Taskleiste, `app/src-tauri/icons`) sowie neue Symbole
+   für die Lagerarten (fest, gleitend, Bolzen, Richtungen) und für Kraft und Bolzenlast (`app/src/ui/icons.jsx`).
+   Erst als Entwurf zum Anschauen, dann einbauen.
+5. **Wind-Last klären:** ist keine CFD, nur überschlägig Staudruck ½·ρ·v²·c_w auf die angeströmten Flächen (z. B.
+   Schild, Halter im Fahrtwind, Teil unter Wasser). Mit Felix entscheiden: behalten, umbenennen („Staudruck (überschlägig)“),
+   unter „Mehr“ verstecken oder entfernen. Echte Strömungssimulation (CFD) wäre ein eigenes, großes Projekt.
 
 ## 1. Ansys-Vergleich Hebel (wartet auf Felix)
 Geometrie: `Daten/Hebel.step` (Onshape, in Metern gespeichert → wird korrekt in mm gelesen).
