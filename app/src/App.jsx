@@ -131,6 +131,9 @@ function boltRows(result, bolts, sF = 1, fatigue = false) {
 // nötige Sicherheit: vorgespannt nach VDI 2230 σ_red ≤ Rp0,2 (S ≥ 1), sonst wie beim Bauteil
 const boltNeed = (r, sF) => (r.preload > 0 ? 1 : sF)
 
+// Regelgewinde für Schrauben von Hand
+const M_SIZES = [3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 27, 30]
+
 // Vorspannung: wie angezogen wird (VDI 2230)
 const TIGHTEN = {
   vdi: 'Ausnutzung der Streckgrenze (VDI 2230)',
@@ -214,6 +217,9 @@ export default function App() {
   const keepFastenersRef = useRef(false)
   keepFastenersRef.current = keepFasteners
   const [selBolt, setSelBolt] = useState(null)
+  // Schrauben von Hand an Bohrungen (bleiben bei neuer CAD-Version erhalten) und Auswahl-Modus „Bohrung anklicken“
+  const [handBolts, setHandBolts] = useState([])
+  const [boltPick, setBoltPick] = useState(false)
   // Herkunft des offenen Teils (Onshape-Adresse) – für die Parameterstudie über Onshape-Variablen
   const [partOrigin, setPartOrigin] = useState(null)
   const [gaps, setGaps] = useState({ max: '1', list: null })
@@ -370,9 +376,13 @@ export default function App() {
         fv: prev?.fv ?? '',
       }
     })
+    for (const [i, h] of handBolts.entries()) {
+      const prev = boltPrefs.current[h.name]
+      list.push({ id: 1000 + i, name: h.name, source: 'hand', parts: [], bolt: h.bolt, cls: prev?.cls ?? '8.8', on: prev?.on ?? true, ma: prev?.ma ?? '', fv: prev?.fv ?? '' })
+    }
     setBolts(list)
     setSelBolt(null)
-  }, [mesh])
+  }, [mesh, handBolts])
   useEffect(() => {
     for (const b of bolts) boltPrefs.current[b.name] = { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }
   }, [bolts])
@@ -464,7 +474,10 @@ export default function App() {
       const ref = refineOverride ?? (keepSetup ? currentRefine(size) : [])
       const m = await api.openStep(path, size ? Number(size) : null, false, ref, keepFastenersRef.current)
       setMeshRefineKey(JSON.stringify(ref))
-      if (!keepSetup) boltPrefs.current = {}
+      if (!keepSetup) {
+        boltPrefs.current = {}
+        setHandBolts([])
+      }
       setMesh(m)
       const nCad = (m.bolts ?? []).filter((b) => b.source === 'cad').length
       const nSug = (m.bolts ?? []).length - nCad
@@ -571,7 +584,7 @@ export default function App() {
   async function onSaveProject() {
     if (!stepPath) return
     const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies,
-      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }])), openJoints, jointFriction: jointFric, tighten: tight, contacts: contactPairs, keepFasteners }
+      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }])), openJoints, jointFriction: jointFric, tighten: tight, contacts: contactPairs, handBolts, keepFasteners }
     try {
       const p = await api.saveProject(stepPath, data)
       if (p) addRecent({ kind: 'project', path: p, name: baseName(p), info: result ? `${material.name} · σv ${fmt(result.max_von_mises.value)} MPa` : material.name })
@@ -601,6 +614,7 @@ export default function App() {
       if (d.jointFriction) setJointFric(d.jointFriction)
       if (d.tighten) setTight((t) => ({ ...t, ...d.tighten }))
       setContactPairs(d.contacts ?? {})
+      setHandBolts(d.handBolts ?? [])
       setKeepFasteners(!!d.keepFasteners)
       keepFastenersRef.current = !!d.keepFasteners
       const m = await loadGeometry(d.step, d.meshSize, true, true, [])
@@ -651,6 +665,28 @@ export default function App() {
         setMaterial((m) => ({ ...m, buildDir: n.map((v) => (Math.abs(v) < 1e-9 ? 0 : -v)) }))
         setOrientations(null)
         setBedPick(false)
+        return
+      }
+      if (boltPick) {
+        // Schraube von Hand: Bohrung anklicken, fluchtende Bohrungen der anderen Teile kommen dazu
+        const holes = (mesh?.surfaces ?? []).filter((x) => x.cylinder)
+        const pick = holes.findIndex((x) => x.tag === tag)
+        if (pick < 0) return setError('Bitte die Innenfläche einer Bohrung anklicken.')
+        api
+          .boltAtHole(
+            holes.map((x) => ({ body: x.body, cyl: x.cylinder })),
+            pick,
+          )
+          .then((bolt) => {
+            setHandBolts((hs) => {
+              const taken = new Set([...hs.map((h) => h.name), ...(mesh?.bolts ?? []).map((b) => b.bolt.name)])
+              let k = 1
+              while (taken.has(`Schraube ${k}`)) k++
+              return [...hs, { name: `Schraube ${k}`, bolt }]
+            })
+            setBoltPick(false)
+          })
+          .catch((e) => setError(String(e)))
         return
       }
       if (geoPick) {
@@ -712,7 +748,7 @@ export default function App() {
       if (active.type === 'support') setSupports(toggle)
       else setLoads(toggle)
     },
-    [active, dirPick, geoPick, bedPick, surfaceInfo, mesh, supports, loads, welds],
+    [active, dirPick, geoPick, bedPick, boltPick, surfaceInfo, mesh, supports, loads, welds],
   )
 
   const surfaceTint = useCallback(
@@ -2349,6 +2385,13 @@ export default function App() {
             setJointFric={setJointFric}
             tight={tight}
             setTight={setTight}
+            handBolts={handBolts}
+            setHandBolts={setHandBolts}
+            boltPick={boltPick}
+            setBoltPick={(v) => {
+              setActive(null)
+              setBoltPick(v)
+            }}
             keepFasteners={keepFasteners}
             onKeepFasteners={(v) => {
               setKeepFasteners(v)
@@ -3063,6 +3106,15 @@ export default function App() {
                     ? 'Auf der Welle/Bohrung drücken und entlang der Achse ziehen (quer ziehen = nur ein Winkelbereich)'
                     : `${SHAPES[drawing.shape]} auf die Fläche zeichnen: drücken und ziehen`}
                   <button className="btn small" onClick={() => setDrawing(null)}>
+                    <X size={14} /> Abbrechen
+                  </button>
+                </div>
+              )}
+              {boltPick && view === 'setup' && (
+                <div className="pick-hint">
+                  <MousePointerClick size={15} />
+                  Bohrung anklicken, in der eine Schraube sitzen soll – fluchtende Bohrungen der anderen Teile kommen dazu
+                  <button className="btn small" onClick={() => setBoltPick(false)}>
                     <X size={14} /> Abbrechen
                   </button>
                 </div>
@@ -3841,10 +3893,31 @@ function TouchSection({ mesh, contacts, setContacts, jointFric, setJointFric }) 
 
 // Schrauben: aus dem CAD erkannt bzw. aus fluchtenden Bohrungen vorgeschlagen; Festigkeitsklasse je Schraube,
 // Vorspannung (VDI 2230) und Fuge (Kontakt mit Reibung oder verklebt)
-function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpenJoints, jointFric, setJointFric, tight, setTight, keepFasteners, onKeepFasteners }) {
+function BoltSection({
+  bolts,
+  setBolts,
+  selBolt,
+  setSelBolt,
+  openJoints,
+  setOpenJoints,
+  jointFric,
+  setJointFric,
+  tight,
+  setTight,
+  handBolts,
+  setHandBolts,
+  boltPick,
+  setBoltPick,
+  keepFasteners,
+  onKeepFasteners,
+}) {
   const upd = (id, patch) => setBolts(bolts.map((b) => (b.id === id ? { ...b, ...patch } : b)))
   const cad = bolts.filter((b) => b.source === 'cad')
-  const holes = bolts.filter((b) => b.source !== 'cad')
+  const holes = bolts.filter((b) => b.source === 'bohrung')
+  const hand = bolts.filter((b) => b.source === 'hand')
+  // Schraube von Hand ändern: Größe (Kopf/Mutter 1,6·d), umdrehen (Kopf auf die andere Seite), löschen
+  const updHand = (name, f) => setHandBolts(handBolts.map((h) => (h.name === name ? { ...h, bolt: f(h.bolt) } : h)))
+  const flip = (b) => ({ ...b, axis: b.axis.map((v) => -v), head_t: -b.nut_t, nut_t: -b.head_t })
   const perBolt = tight.mode === 'moment' ? ['ma', 'N·m', 'Anziehmoment M_A (leer = nach VDI 2230)'] : tight.mode === 'kraft' ? ['fv', 'kN', 'Vorspannkraft F_V (leer = nach VDI 2230)'] : null
   const row = (b) => (
     <div key={b.id} className={'bolt-row' + (selBolt === b.id ? ' on' : '') + (b.on ? '' : ' off')} onClick={() => setSelBolt(selBolt === b.id ? null : b.id)}>
@@ -3860,6 +3933,25 @@ function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpen
         <span className="input-unit bolt-val" onClick={(e) => e.stopPropagation()} title={perBolt[2]}>
           <input value={b[perBolt[0]]} placeholder="VDI" aria-label={perBolt[2]} onChange={(e) => upd(b.id, { [perBolt[0]]: e.target.value })} />
           <em>{perBolt[1]}</em>
+        </span>
+      )}
+      {b.source === 'hand' && (
+        <span className="hand-tools" onClick={(e) => e.stopPropagation()}>
+          <select value={b.bolt.d} title="Gewindegröße" onChange={(e) => updHand(b.name, (x) => ({ ...x, d: Number(e.target.value), head_d: 1.6 * Number(e.target.value), nut_d: x.nut_t != null ? 1.6 * Number(e.target.value) : null }))}>
+            {M_SIZES.map((m) => (
+              <option key={m} value={m}>
+                M{m}
+              </option>
+            ))}
+          </select>
+          {b.bolt.nut_t != null && (
+            <button className="icon-btn" title="Kopf auf die andere Seite" onClick={() => updHand(b.name, flip)}>
+              ⇅
+            </button>
+          )}
+          <button className="icon-btn" title="Schraube löschen" onClick={() => setHandBolts(handBolts.filter((h) => h.name !== b.name))}>
+            <Trash2 size={13} />
+          </button>
         </span>
       )}
       <select value={b.cls} onClick={(e) => e.stopPropagation()} onChange={(e) => upd(b.id, { cls: e.target.value })} title="Festigkeitsklasse">
@@ -3905,7 +3997,16 @@ function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpen
           <div className="bolt-list">{holes.map(row)}</div>
         </>
       )}
+      {hand.length > 0 && (
+        <>
+          <span className="mat-head">Von Hand angelegt</span>
+          <div className="bolt-list">{hand.map(row)}</div>
+        </>
+      )}
       {bolts.length === 0 && <p className="hint">Keine Schrauben gefunden (weder Normteile im CAD noch fluchtende Bohrungen in mehreren Teilen).</p>}
+      <button className={'btn wide' + (boltPick ? ' on' : '')} onClick={() => setBoltPick(!boltPick)}>
+        <Plus size={14} /> {boltPick ? 'Bohrung anklicken …' : 'Schraube an Bohrung anlegen'}
+      </button>
       {bolts.length > 0 && (
         <>
           <span className="mat-head">Vorspannung</span>

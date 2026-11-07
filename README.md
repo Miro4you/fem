@@ -24,7 +24,7 @@ Bedienung auch im Browser über das Heimnetz.
 | **Nachweis & Bericht** | Werkstoffdatenbank (Stahl, Alu, Kunststoffe, Druckwerkstoffe, eigene), Masse, Festigkeitsnachweis mit erforderlichen Sicherheiten, PDF-Bericht, MathPad-Rechenblatt, ParaView-Export |
 | **3D-Druck** | Schichtaufbau mit Werten in und quer zu den Schichten, Aufbaurichtung frei optimieren (≈ 400 Richtungen) inkl. Überhänge, Wände + Infill (Gyroid, Gitter, Waben …), Kalibrierung mit eigenem Zugstab |
 | **Schweißnähte** | Spalte an Blechecken automatisch finden, Stumpf-/Kehlnaht, Nahtkraft und Nachweis nach EN 1993-1-8 (vereinfacht) |
-| **Baugruppen** | mehrere Körper aus einer STEP-Datei bzw. Onshape-Baugruppe mit Namen, Werkstoff je Körper, ein-/ausblenden, Berührflächen verbunden, Spalte als Naht oder flächige Verbindung, **Schrauben** automatisch erkennen (Normteile, Bohrungen) mit Festigkeitsklasse, **Vorspannung nach VDI 2230** und **Kontakt mit Reibung** in der Fuge (klaffen, rutschen), Nachweis, Ergebnis und Kräfte je Körper |
+| **Baugruppen** | mehrere Körper aus einer STEP-Datei bzw. Onshape-Baugruppe mit Namen, Werkstoff je Körper, ein-/ausblenden, Berührflächen verbunden, Spalte als Naht oder flächige Verbindung, **Schrauben** automatisch erkennen (Normteile, Bohrungen) oder von Hand an Bohrungen anlegen, Festigkeitsklasse, **Vorspannung nach VDI 2230** mit Anziehstreuung und Setzen, **Kontakt mit Reibung** (klaffen, rutschen) in Schraubenfugen und an beliebigen Berührflächen, Nachweis mit Flächenpressung, Einschraubtiefe und Dauerfestigkeit, Ergebnis und Kräfte je Körper |
 | **Studien** | Parameterstudie (Netz, Füllgrad, Maße, **Onshape-Variablen**, **SolidCraft-Parameter**), Vergleich mit voriger Version |
 | **Weitere Analysen** | Eigenfrequenzen, Knicken (Lanczos), Leichtbau-Vorschlag (Topologieoptimierung, STL-Export), Stabwerk (Balken, Rahmen, Fachwerke mit IPE-Profilen) |
 | **Geometrie anpassen** | Radien/Bohrungen ändern, Material per Skizze hinzufügen oder entfernen, Ergebnis mit vorher vergleichen |
@@ -41,7 +41,9 @@ Bedienung auch im Browser über das Heimnetz.
 | ![Onshape-Bibliothek](docs/bilder/onshape-bibliothek.png) | ![Iso-Clip](docs/bilder/iso-clip.png) |
 | **Onshape-Bibliothek:** eigene Dokumente durchsuchen, Teilestudio wählen, holen – ohne Adresse kopieren | **Iso-Clip:** nur die Bereiche über 84 MPa farbig, der Rest grau – wie in SolidWorks Simulation |
 | ![Schrauben aus dem CAD erkannt](docs/bilder/schrauben-erkannt.png) | ![Schraubenkräfte und Nachweis](docs/bilder/schrauben-ergebnis.png) |
-| **Schrauben erkannt:** zwei Normteile aus dem CAD (10.9 mit Gewindebohrung, 8.8 mit Scheibe und Mutter), Klasse je Schraube, Vorspannung nach VDI 2230 | **Vorgespannt und Kontakt:** F_V, Schraubenkraft im Betrieb, Anziehmoment, Nachweis mit Gewindetorsion; Fuge mit Restklemmkraft, Pressung und Reibschluss |
+| **Schrauben erkannt:** zwei Normteile aus dem CAD (10.9 mit Gewindebohrung, 8.8 mit Scheibe und Mutter), Klasse je Schraube, Vorspannung nach VDI 2230 | **Vorgespannt und Kontakt:** F_V von–bis (Anziehstreuung, Setzen), Schraubenkraft im Betrieb, Nachweis mit Gewindetorsion, Flächenpressung und Einschraubtiefe; Fuge mit Restklemmkraft und Reibschluss |
+| ![Schraube von Hand an einer Bohrung](docs/bilder/schraube-von-hand.png) | |
+| **Schraube von Hand:** Bohrung anklicken – fluchtende Bohrungen der anderen Teile kommen dazu, Größe wählbar, Kopf umdrehbar | |
 | ![Baugruppe: Körper mit eigenem Werkstoff](docs/bilder/baugruppe-modell.png) | ![Baugruppe: Ergebnis je Körper](docs/bilder/baugruppe-ergebnis.png) |
 | **Baugruppe:** Körper mit Namen aus dem CAD, Block aus Alu, loser Zapfen flächig verbunden (türkis) | **Ergebnis je Körper:** Spannung, Verformung, Sicherheit mit eigenem Werkstoff, Kräfte zwischen den Körpern |
 | ![3D-Druck: Wand/Infill im Schnitt](docs/bilder/3d-druck-infill-schnitt.png) | ![Schweißnähte am Blechkasten](docs/bilder/schweissnaehte-blechkasten.png) |
@@ -250,22 +252,29 @@ Onshape-Bibliothek) wird zu mehreren **Körpern** mit ihren Namen aus dem CAD:
   am Namen und an der Form erkannt und nicht als Körper vernetzt, sondern als **Schraubenelement** gerechnet (Balken
   zwischen Kopfauflage und Gewinde bzw. Mutter, Kraft flächenrichtig in Auflage und Gewindebohrung eingeleitet). Ohne
   modellierte Schrauben schlägt Projekt-FEM Schrauben an **fluchtenden Bohrungen** vor (Gewinde- oder Durchgangsbohrung
-  nach ISO 273). Je Schraube **Festigkeitsklasse** (4.6 … 12.9, A2/A4), aus dem Namen vorbelegt.
+  nach ISO 273) – oder du legst sie **von Hand** an: Bohrung anklicken, die fluchtenden Bohrungen der anderen Teile
+  kommen dazu; Größe wählbar, Kopf umdrehbar. Je Schraube **Festigkeitsklasse** (4.6 … 12.9, A2/A4).
 - **Vorspannung (VDI 2230):** Vorspannkraft aus der Ausnutzung der Streckgrenze beim Anziehen (Standard 90 %, Reibwerte
   µ_G/µ_K 0,12), aus dem **Anziehmoment** je Schraube oder direkt als Kraft. Gerechnet in zwei Schritten: erst die
   Schrauben anziehen, dann kommt die Last dazu – die Schraubenkraft steigt nur um den Anteil, den die Steifigkeiten
-  vorgeben (Kraftverhältnis Φ). Ergebnis: F_V, Schraubenkraft im Betrieb, **Anziehmoment**, Flächenpressung unter dem
-  Kopf, Nachweis σ_red ≤ Rp0,2 mit Gewindetorsion aus dem Anziehen (vorgespannt: S ≥ 1 wie VDI 2230).
-- **Kontakt in der Fuge:** Die Fuge zwischen verschraubten Teilen überträgt Druck, aber keinen Zug (sie **klafft**), und
-  quer nur so viel, wie die **Reibung** µ·Pressung hält – darüber **rutschen** die Teile und die Schrauben werden auf
-  Abscherung belastet. Einstellbar: Reibwert µ (Standard 0,15), haftend, reibungsfrei, oder „verklebt“. Ergebnis je
-  Fuge: aufliegende Fläche (nach dem Anziehen und unter Last), **Restklemmkraft**, größte Flächenpressung, Querkraft über
-  Reibung und **Reibschluss µ·F_K**; Hinweise, wenn die Last die Fuge öffnet oder sie durchrutscht.
+  vorgeben (Kraftverhältnis Φ_K aus der FEM). **Anziehverfahren** mit Anziehfaktor α_A (Drehmomentschlüssel 1,6,
+  Schlagschrauber 3, eigener Wert) und **Setzen** (Setzbetrag nach VDI 2230, F_Z aus den Nachgiebigkeiten): dann wird
+  zweimal gerechnet – größte Vorspannung für Schraube und Teile, kleinste nach dem Setzen für die Fuge.
+- **Schraubennachweis:** σ_red ≤ Rp0,2 mit Gewindetorsion aus dem Anziehen (vorgespannt S ≥ 1 wie VDI 2230),
+  **Flächenpressung** unter Kopf und Mutter gegen p_G des Teils darunter (eigene Angabe beim Werkstoff, Richtwert nach
+  VDI 2230 aus dem Namen, sonst Rm), **Einschraubtiefe** in Gewindebohrungen (Innengewinde trägt mindestens die
+  Bruchkraft der Schraube) und wahlweise **Dauerfestigkeit** bei schwellender Last (σ_a ≤ σ_ASV/1,2).
+- **Kontakt:** Fugen verschraubter Teile – und auf Wunsch jede andere **Berührfläche** zwischen zwei Teilen
+  (Verbindungen › Berührflächen: verklebt oder Kontakt) – übertragen Druck, aber keinen Zug (sie **klaffen**), und quer
+  nur so viel, wie die **Reibung** µ·Pressung hält; darüber **rutschen** die Teile (bei Schrauben: Abscherung).
+  Einstellbar: Reibwert µ (Standard 0,15), haftend, reibungsfrei. Ergebnis je Fuge: aufliegende Fläche (nach dem
+  Anziehen und unter Last), **Restklemmkraft** bzw. Druckkraft, größte Flächenpressung, Querkraft über Reibung und
+  **Reibschluss µ·F_K**; Hinweise, wenn die Last die Fuge öffnet, sie durchrutscht oder sich ein Teil löst.
 - Örtliche Spannungsspitzen direkt an der Krafteinleitung (unter dem Kopf, an der Gewindebohrung) gehören zum
   Ersatzmodell der Schraube und zählen nicht zum σv-Nachweis (im Farbbild sichtbar, Höchstwert unter Details);
   dort gelten Flächenpressung und Einschraubtiefe nach VDI 2230.
-- Noch nicht: Kontakt zwischen beliebigen sich berührenden Teilen (nur in Fugen verschraubter Teile), Bewegung
-  (Gelenke), Gewinde-Ausreißen, Dauerfestigkeit, Streuung beim Anziehen und Setzen – siehe Roadmap.
+- Noch nicht: Kontakt zwischen Teilen mit Spalt (nur wo sie sich berühren), Bewegung (Gelenke), Querbelastung der
+  Schraube im Detail (Biegung im Gewinde) – siehe Roadmap.
 
 ### Onshape: API-Aufrufe sparen
 
@@ -313,7 +322,7 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 
 ## Validierung
 
-`projekt-fem validieren` vergleicht mit der Theorie (läuft auch bei `cargo test`) – derzeit **115 von 115 Prüfungen** bestanden:
+`projekt-fem validieren` vergleicht mit der Theorie (läuft auch bei `cargo test`) – derzeit **124 von 124 Prüfungen** bestanden:
 
 | Fall | Größe | Abweichung |
 |---|---|---|
@@ -322,7 +331,9 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 | Zwei Blöcke, 4 × M8 (nur Schrauben verbinden), Zug | Summe Schraubenkräfte = Last; je Schraube F/4 | exakt / ±0,01 % |
 | Zwei Klötze lose aufeinander, Druck (Kontakt, ν = 0) | Verkürzung σ·2h/E, Druckkraft und Pressung in der Fuge, Durchdringung | +0,1 % / exakt / +0,1 % / 0,2 % |
 | Zwei Klötze, 4 × M8 vorgespannt (F_V = 10 kN), Kontakt | ohne Last: F_S = F_V, Klemmkraft 4·F_V; mit Last: Σ F_S = F_A + Restklemmkraft; weit über der Klaffgrenze: Fuge offen, F_S = F_A/4 | exakt / exakt / +0,01 % |
-| Dieselben mit Querkraft, µ = 0,15 / reibungsfrei | hält: Schrauben fast unbelastet; rutscht durch: Reibkraft = µ·F_K, Schrauben tragen F_Q − µ·F_K; µ = 0: Schrauben tragen F_Q | ±0,1 % |
+| Dieselben mit Querkraft, µ = 0,15 / reibungsfrei | hält: Schrauben fast unbelastet; rutscht durch: Reibkraft = µ·F_K (je Knoten ±2 %), Schrauben tragen F_Q − µ·F_K; µ = 0: Schrauben tragen F_Q | ±0,3 % / exakt |
+| Dieselben mit Anziehstreuung α_A = 1,6 und Setzen | F_V,max = 2α/(1+α)·F, F_V,min = 2/(1+α)·F − F_Z, F_Z = f_Z/(δ_S + δ_P), Fuge mit F_V,min im Gleichgewicht | exakt |
+| Klotz angedrückt und quer geschoben (Kontakt mit Reibung, ohne Schrauben) | Druckkraft = N, Reibkraft = Querkraft, Reibschluss µ·N | exakt |
 | Kragbalken TET10 (40×2×4) | Durchbiegung (Timoshenko) | −0,5 % |
 | Kragbalken TET10 (40×2×4) | Biegespannung bei l/2 | +0,2 % |
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
@@ -346,8 +357,9 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
   Fugen verschraubter Teile.
 - Baugruppen: sonst Körper an Berührflächen verklebt bzw. über Spalt-Verbindungen fest gekoppelt. Schalenelemente
   (Bleche) gibt es nicht – Bleche mit feinem Volumennetz rechnen (Elementgröße ≈ Blechdicke).
-- Schrauben: Vorspannung mit Nennwerten (keine Streuung α_A beim Anziehen, kein Setzen); Kontakt Knoten-zu-Knoten in
-  der vernetzten Fuge (kleine Verschiebungen, kein großes Gleiten).
+- Schrauben/Kontakt: Kontakt Knoten-zu-Knoten in der vernetzten Fuge (kleine Verschiebungen, kein großes Gleiten);
+  Reibgesetz je Knoten auf ±2 % erfüllt, kleiner elastischer Schlupf (Tangentialfeder 1 % der Normalfeder). p_G-Richtwerte
+  und Setzbeträge nach VDI 2230 gerundet – bei kritischen Verbindungen gegen die Norm prüfen.
 - **Spannungsspitzen an starren Einspannungen/Kanten sind Singularitäten:** Sie wachsen bei Netzverfeinerung
   immer weiter (Kragbalken-Einspannkante: 128 MPa grob, 169 MPa fein; Theorie 120 MPa). Werte mit Abstand zur
   Einspannung auswerten – die Oberfläche warnt, wenn das Maximum an einem Lager liegt.
@@ -378,7 +390,8 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
    (Schnitt, Iso-Clip, Animation), Ansichtswürfel, CAD-Maussteuerung, Onshape-Bibliothek
 8. ✅ **Baugruppen (Stufe 1):** Körper mit Namen, Werkstoff je Körper, ein-/ausblenden, Verbindungen, Ergebnis und Kräfte je Körper,
    Onshape-Baugruppen · **Server-Betrieb** (Docker)
-9. ✅ **Schrauben mit Vorspannung und Kontakt:** VDI 2230 (Ausnutzung, Anziehmoment), Fuge klafft/rutscht, Reibschluss
+9. ✅ **Schrauben mit Vorspannung und Kontakt:** VDI 2230 (Ausnutzung, Anziehmoment, Streuung, Setzen), Flächenpressung,
+   Einschraubtiefe, Dauerfestigkeit, Fuge klafft/rutscht, Kontakt an beliebigen Berührflächen, Schraube von Hand
 10. **Als Nächstes:** „Fläche teilen“ (Skizze auf der Fläche statt Rechteck ziehen) → Bewegungssimulation mit
    FEM entlang der Bewegung (z. B. Koppelstange und Bolzen) → Onshape-Konfigurationen, SolidWorks-Konfigurationen,
    DXF → Stabwerk, Slicer-Einstellungen (3MF) übernehmen

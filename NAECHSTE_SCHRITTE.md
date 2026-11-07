@@ -35,12 +35,17 @@
   Krafteinleitung flächenrichtig, Spitzen dort nicht im σv-Nachweis. Löser: Warmstart, Vorkonditionierer behalten
   (Beispiel-Baugruppe 15 Durchgänge à ≈ 1 s). Prüffälle: Kontakt unter Druck, vorgespannt mit/ohne Last, Klaffen,
   Querkraft haftend/durchrutschend/reibungsfrei (115/115).
-- **Schrauben Schritt 3:** Flächenpressung gegen p_G je Werkstoff (VDI 2230 Tab. A9), Einschraubtiefe/Gewinde-
-  Ausreißen, Streuung beim Anziehen (α_A, F_V,min/F_V,max) und Setzen, Dauerfestigkeit (σ_a gegen σ_ASV), Schraube
-  von Hand anlegen (Bohrung anklicken), Schrauben ohne Namen nur an der Form erkennen (als Vorschlag).
-- **Stufe 2:** Kontakt auch zwischen beliebigen sich berührenden Teilen (nicht nur in Fugen verschraubter Teile; die
-  Technik ist da – Auswahl der Fugen in der Oberfläche fehlt), Bolzenverbindung (Bolzen im Loch, drehbar),
-  3D-Druck-Füllung zusammen mit Werkstoff je Körper.
+- ✅ **Schrauben Schritt 3 (07.11.):** Flächenpressung unter Kopf/Mutter gegen p_G (eigene Angabe, Richtwert nach Name,
+  sonst Rm), Einschraubtiefe gegen die nötige, Anziehstreuung α_A und Setzen (zwei Rechnungen: F_V,max für Festigkeit,
+  F_V,min nach dem Setzen für die Fuge; F_Z aus den Nachgiebigkeiten der FEM, Φ_K), Dauerfestigkeit σ_a/σ_ASV (wahlweise),
+  Schraube von Hand an einer Bohrung (Größe, umdrehen, löschen, im Projekt gespeichert). Prüffall Streuung/Setzen,
+  App-Test `flansch.step`.
+- ✅ **Kontakt an beliebigen Berührflächen (07.11.):** je Körperpaar „verklebt“ oder „Kontakt“, Stabilisierung gegen lose
+  Teile mit Hinweis, weichere Tangentialfeder für stabile Reibung. Prüffall „Klotz angedrückt und geschoben“ (124/124).
+- **Schrauben/Kontakt danach:** Kontakt über einen Spalt, der sich erst schließt (Teile berühren sich im CAD nicht),
+  Passschrauben/Bolzen im Loch (Lochleibung), Schraubenbild mit Querkraft-Verteilung als eigene Auswertung, Anziehen
+  nacheinander (Reihenfolge), Temperatur (Wärmedehnung Alu/Stahl verändert die Vorspannung).
+- **Stufe 2 (Rest):** Bolzenverbindung (Bolzen im Loch, drehbar), 3D-Druck-Füllung zusammen mit Werkstoff je Körper.
 - **Stufe 3:** Bewegungssimulation mit FEM entlang der Bewegung (siehe unten).
 
 ## 1. Ansys-Vergleich Hebel (wartet auf Felix)

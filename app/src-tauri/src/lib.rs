@@ -340,6 +340,12 @@ async fn solidcraft_study(name: String, expression: String) -> Result<String, St
     blocking(move || solidcraft::study_value(&name, &expression)).await
 }
 
+/// Schraube von Hand an einer Bohrung (Liste der Bohrungen kommt aus der Oberfläche)
+#[tauri::command]
+fn bolt_at_hole(holes: Vec<fem_core::bolt::Hole>, pick: usize, d: Option<f64>, flip: bool) -> Result<fem_core::bolt::Bolt, String> {
+    fem_core::bolt::bolt_at(&holes, pick, d, flip)
+}
+
 /// Spalte zwischen einander zugewandten ebenen Flächen (Schweißnaht-Vorschläge)
 pub fn find_gaps_impl(state: &AppState, max_gap: f64) -> Result<Vec<fem_core::weld::GapCandidate>, String> {
     let s = state.lock().unwrap();
@@ -1294,6 +1300,7 @@ pub fn run() {
             cad_set_summary,
             cad_info,
             find_gaps,
+            bolt_at_hole,
             solidcraft_status,
             solidcraft_live,
             solidcraft_auto,
@@ -1335,4 +1342,88 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Start von Projekt-FEM");
+}
+
+#[cfg(test)]
+mod tests {
+    /// Schrauben von Hand: zwei Platten mit Bohrungen Ø9,6 (keine Normbohrung → kein Vorschlag), Schrauben an beiden
+    /// Bohrungen anlegen und vorgespannt mit Kontakt rechnen
+    #[test]
+    fn schraube_von_hand_an_bohrung() {
+        if fem_core::gmsh::find_gmsh().is_none() {
+            eprintln!("Gmsh fehlt – Test übersprungen");
+            return;
+        }
+        let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/flansch.step");
+        let state = super::AppState::default();
+        let view = super::open_step_with(&state, step.to_str().unwrap(), Some(4.0), false, &[], false).unwrap();
+        let v = serde_json::to_value(&view).unwrap();
+        assert_eq!(v["bolts"].as_array().unwrap().len(), 0, "Ø9,6 ist keine Normbohrung – kein Vorschlag");
+        assert_eq!(v["touching"].as_array().unwrap().len(), 1);
+        let surfaces = v["surfaces"].as_array().unwrap();
+        let holes: Vec<fem_core::bolt::Hole> = surfaces
+            .iter()
+            .filter(|s| !s["cylinder"].is_null())
+            .map(|s| serde_json::from_value(serde_json::json!({ "body": s["body"], "cyl": s["cylinder"] })).unwrap())
+            .collect();
+        assert_eq!(holes.len(), 4, "je Platte zwei Bohrungen");
+        // beide Bohrungen der unteren Platte anklicken
+        let mut bolts = Vec::new();
+        for (i, h) in holes.iter().enumerate() {
+            if h.body != holes[0].body {
+                continue;
+            }
+            let b = fem_core::bolt::bolt_at(&holes, i, None, false).unwrap();
+            // M8 (Ø9,6 ≈ 1,1·d … nächste Normgröße), Kopf oben (z = 18), Mutter unten (z = 0)
+            assert_eq!(b.d, 8.0);
+            let z = |t: f64| b.origin[2] + b.axis[2] * t;
+            assert!((z(b.head_t) - 18.0).abs() < 0.05 && (z(b.nut_t.unwrap())).abs() < 0.05, "{b:?}");
+            let flipped = fem_core::bolt::bolt_at(&holes, i, None, true).unwrap();
+            assert!((flipped.origin[2] + flipped.axis[2] * flipped.head_t).abs() < 0.05, "umgedreht: Kopf unten");
+            bolts.push(b);
+        }
+        assert_eq!(bolts.len(), 2);
+        let tag = |nz: f64, z: f64| {
+            surfaces
+                .iter()
+                .find(|s| s["normal"][2].as_f64().is_some_and(|n| (n - nz).abs() < 1e-6) && (s["center"][2].as_f64().unwrap() - z).abs() < 1e-6)
+                .map(|s| s["tag"].as_i64().unwrap())
+                .unwrap()
+        };
+        let bolts_json: Vec<serde_json::Value> = bolts
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let mut j = serde_json::to_value(b).unwrap();
+                j["name"] = format!("Schraube {}", i + 1).into();
+                j["rp"] = 640.0.into();
+                j["rm"] = 800.0.into();
+                j["tighten"] = serde_json::json!({ "art": "ausnutzung", "nu": 0.9, "mu_g": 0.12, "mu_k": 0.12 });
+                j
+            })
+            .collect();
+        let setup = serde_json::json!({
+            "material": { "name": "S235JR", "E": 210000.0, "nu": 0.3, "yield": 235.0, "tensile": 360.0 },
+            "supports": [{ "surfaces": [tag(-1.0, 0.0)], "fix": { "x": 0.0, "y": 0.0, "z": 0.0 } }],
+            "loads": [{ "type": "force", "surfaces": [tag(1.0, 18.0)], "force": [0.0, 0.0, 5000.0] }],
+            "bolts": bolts_json,
+            "open_joints": true,
+            "joint_friction": { "art": "coulomb", "mu": 0.15 },
+        });
+        let res = super::solve_impl(&state, serde_json::from_value(setup).unwrap()).unwrap();
+        let r = serde_json::to_value(&res).unwrap();
+        let rb = r["bolts"].as_array().unwrap();
+        assert_eq!(rb.len(), 2);
+        // M8 8.8 nach VDI 2230 (90 %, µ 0,12): F_V ≈ 18,6 kN. Die Last greift nahe der Trennfuge an (Mutter auf der
+        // festen Unterseite) – sie entlastet vor allem die Fuge, die Schraubenkraft ändert sich kaum
+        let mut sum = 0.0;
+        for b in rb {
+            let (fv, fs) = (b["preload"].as_f64().unwrap(), b["axial"].as_f64().unwrap());
+            assert!((fv - 18620.0).abs() < 100.0 && (fs - fv).abs() < 2500.0, "{b}");
+            sum += fs;
+        }
+        let j = &r["joints"].as_array().unwrap()[0];
+        assert!((sum - 5000.0 - j["pressure_force"].as_f64().unwrap()).abs() < 1e-3 * sum, "Σ F_S = F_A + Restklemmkraft: {j}");
+        assert!(!r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("eingependelt")), "{}", r["warnings"]);
+    }
 }

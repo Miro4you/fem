@@ -192,6 +192,7 @@ fn router(shared: Shared) -> Router {
         .route("/solve", post(api_solve))
         .route("/section", post(api_section))
         .route("/find_gaps", post(api_find_gaps))
+        .route("/bolt_at_hole", post(api_bolt_at_hole))
         .route("/solidcraft/status", get(sc_status))
         .route("/solidcraft/live", post(sc_live))
         .route("/solidcraft/auto", post(sc_auto))
@@ -529,6 +530,21 @@ async fn api_find_gaps(State(s): State<Shared>, headers: HeaderMap, Json(a): Jso
     let state = s.session(&headers);
     let v = tokio::task::spawn_blocking(move || crate::find_gaps_impl(&state, a.max_gap)).await.map_err(bad)?.map_err(bad)?;
     Ok(Json(v).into_response())
+}
+
+#[derive(Deserialize)]
+struct BoltAtArgs {
+    holes: Vec<fem_core::bolt::Hole>,
+    pick: usize,
+    #[serde(default)]
+    d: Option<f64>,
+    #[serde(default)]
+    flip: bool,
+}
+
+async fn api_bolt_at_hole(Json(a): Json<BoltAtArgs>) -> ApiResult<Response> {
+    let b = fem_core::bolt::bolt_at(&a.holes, a.pick, a.d, a.flip).map_err(bad)?;
+    Ok(Json(b).into_response())
 }
 
 async fn api_section(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<SectionArgs>) -> ApiResult<Response> {

@@ -82,7 +82,7 @@ impl Region {
 }
 
 /// Zylinderfläche (Welle oder Bohrung), aus einem Oberflächennetz bestimmt
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cylinder {
     /// Punkt auf der Achse am Anfang der Fläche (axial = 0)
     pub origin: [f64; 3],

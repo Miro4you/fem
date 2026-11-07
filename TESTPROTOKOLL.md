@@ -244,14 +244,28 @@ selbst starten.
 |---|---|---|---|
 | 18a.1 | `verschraubung.step` öffnen | Hinweis „2 Schrauben aus dem CAD erkannt“; im Baum nur Unterteil und Deckel; Schraubenköpfe im Bild | [ ] |
 | 18a.2 | Verbindungen → Schrauben | „ISO 4762 M8x25 - 10.9“ (Gewindebohrung, Klasse 10.9) und „ISO 4762 M8x35 - 8.8“ (mit Mutter, 2 Zubehör) | [ ] |
-| 18a.3 | Unterteil vorne fest, Deckel oben 4000 N nach oben (+Z), rechnen (Standard: Vorspannung 90 % nach VDI 2230, Kontakt µ = 0,15) | Karte „Schrauben“: F_V 27,35 kN (10.9) bzw. 18,62 kN (8.8), F_S nur wenig höher, Anziehmomente ≈ 37 / 27 N·m, Nachweis erfüllt (S ≥ 1). Karte „Fugen“: Restklemmkraft ≈ 42 kN, Reibschluss kaum genutzt. Deckel S235 meldet S < 1,5 (Pressung unter dem 10.9-Kopf ist hoch – echter Befund) | [ ] |
-| 18a.4 | Vorspannung „Anziehmoment je Schraube“, je 10 N·m eintragen, rechnen | F_V ≈ 7,4 / 6,9 kN, Restklemmkraft ≈ 10 kN, Deckel jetzt S > 1,5; kein Hinweis „nicht eingependelt“ | [ ] |
+| 18a.3 | Unterteil vorne fest, Deckel oben 4000 N nach oben (+Z), rechnen (Standard: Vorspannung 90 % nach VDI 2230, Drehmomentschlüssel α_A 1,6 mit Setzen, Kontakt µ = 0,15 – es wird zweimal gerechnet) | Karte „Schrauben“: F_V von–bis ≈ 14,7…27,4 kN (10.9) bzw. 9,7…18,6 kN (8.8), F_S kaum höher, Anziehmomente ≈ 37 / 27 N·m, S ≥ 1. Zweite Tabelle: Kopf p/p_G ≈ 78 % (S235JR, p_G 490), Mutter ≈ 57 %, Gewinde 15 / 9 mm. Karte „Fugen“: Restklemmkraft mit kleinster Vorspannung ≈ 20 kN. Deckel S235 meldet S < 1,5 (Pressung unter dem 10.9-Kopf hoch – echter Befund) | [ ] |
+| 18a.4 | Vorspannung „Anziehmoment je Schraube“, je 10 N·m eintragen, rechnen | F_V deutlich kleiner, Deckel jetzt S > 1,5; kein Hinweis „nicht eingependelt“ | [ ] |
 | 18a.5 | „Fuge verklebt“ bzw. Vorspannung „ohne“ | verklebt: Schrauben tragen kaum; ohne Vorspannung + Kontakt: Fuge hebt ab, Schrauben tragen die ganze Last (je ≈ 2000 N) | [ ] |
 | 18a.5b | Last quer (z. B. 10 kN in X auf die Deckelseite), µ = 0,15 | hält über Reibung (Reibschluss < 100 %); Last so hoch, dass µ·F_K nicht reicht → Hinweis „rutscht durch“, Querkraft in den Schrauben | [ ] |
-| 18a.5c | Bericht als PDF | Schraubentabelle mit F_V / M_A, F_S, Querkraft, Sicherheit; Fugentabelle; Hinweise | [ ] |
+| 18a.5c | Werkstoff des Deckels auf EN AW-6082 T6, Unterteil auch Alu | Kopf p/p_G steigt (p_G 360), Gewinde nötig länger (Alu) – ggf. rot | [ ] |
+| 18a.5d | „Dauerfestigkeit prüfen“ anhaken | Spalte S_D in der Schraubentabelle (σ_ASV / σ_a, nötig 1,2) | [ ] |
+| 18a.5e | Bericht als PDF | Schraubentabelle mit F_V von–bis / M_A, F_S, Querkraft, Sicherheit; Tabelle Pressung/Gewinde/σ_a; Fugentabelle; Hinweise | [ ] |
 | 18a.6 | „Schrauben aus dem CAD als Körper rechnen“ | neu vernetzt, Schrauben als Körper im Baum | [ ] |
 | 18a.7 | **Deine Baugruppe mit Normteil-Schrauben** (Onshape Standard Content, SolidWorks Toolbox) | Schrauben erkannt? Namen/Klasse richtig? | [ ] |
 | 18a.8 | Baugruppe **ohne** modellierte Schrauben, aber mit Bohrungen | Vorschläge „Bohrung 1 (M8)“ … anhaken → wird gerechnet | [ ] |
+
+## 18b. Kontakt an Berührflächen und Schrauben von Hand (neu)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 18b.1 | `examples/geometrie/baugruppe.step` öffnen → Verbindungen | Abschnitt „Berührflächen“: „Grundplatte ↔ Block · 1.600 mm²“ mit „verklebt / Kontakt“ | [ ] |
+| 18b.2 | Zapfen-Spalt als „flächig verbunden“, Grundplatte ↔ Block auf „Kontakt“, Lager Seite, Last oben auf den Block, rechnen | Karte „Fugen“: Block liegt teilweise auf, Druckkraft = Last, Querkraft über Reibung klein; kein Hinweis „nicht eingependelt“ | [ ] |
+| 18b.3 | Last nach oben (zieht den Block weg) | Hinweis „… liegen nicht mehr aufeinander“ bzw. „Ein Teil … hat sich gelöst“ | [ ] |
+| 18b.4 | `examples/geometrie/flansch.step` öffnen (zwei Platten, Bohrungen Ø9,6 – keine Normbohrung) | keine Schrauben-Vorschläge | [ ] |
+| 18b.5 | „Schraube an Bohrung anlegen“ → Bohrung anklicken, für die zweite wiederholen | „Schraube 1“, „Schraube 2“: M8 mit Mutter, Kopf oben; Größe änderbar, ⇅ dreht um, Papierkorb löscht | [ ] |
+| 18b.6 | Unterseite fest, oben 5 kN nach oben, rechnen | F_V ≈ 18,6 kN je Schraube (8.8), Fuge mit Restklemmkraft; Projekt speichern und wieder laden → Schrauben von Hand sind wieder da | [ ] |
+| 18b.7 | **Deine Baugruppe**: Teile, die nur aufliegen (z. B. Platte auf Rahmen), auf „Kontakt“ | Ergebnis plausibel? Rechenzeit? | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
@@ -296,6 +310,11 @@ selbst starten.
 - **Schrauben-Vorspannung**: Standard 90 % Ausnutzung der Streckgrenze beim Anziehen (VDI 2230), µ_G = µ_K = 0,12;
   Kopfauflage d_w aus dem CAD, Bohrung d_h = 1,1·d. Nachweis im Betrieb σ_red ≤ Rp0,2 mit k_τ = 0,5 (S ≥ 1).
 - **Reibwert der Fuge** µ = 0,15 (Stahl/Stahl trocken etwa 0,1 … 0,2). Prüfe, ob das zu deinen Teilen passt.
+- **Anziehverfahren** Standard Drehmomentschlüssel α_A = 1,6 mit Setzen (Setzbetrag Rz < 10 µm: Gewinde 3, Kopf/Mutter
+  je 2,5, jede innere Fuge 1,5 µm). **p_G-Richtwerte** (VDI 2230, gerundet): S235 490, S355 760, C45 700, 42CrMo4 850,
+  1.4301 630, GJS-400 600, 6082 360, 7075 540 MPa, sonst Rm. **Einschraubtiefe** nötig: Rm_S·A_s / (0,6·Rm·0,75·π·d).
+  **Dauerfestigkeit** σ_ASV = 0,85·(150/d + 45) (schlussvergütet), nötig S_D ≥ 1,2.
+- **Kontakt mit Reibung**: Tangentialfeder 1 % der Normalfeder (kleiner elastischer Schlupf), Reibgesetz je Knoten auf ±2 %.
 - **Örtliche Spitzen an Schraubenauflagen und Gewinde** zählen nicht zum σv-Nachweis (Zone ≈ 0,6·d um die
   Auflagen bzw. das tragende Gewinde); sie stehen unter Details.
 
@@ -306,8 +325,8 @@ selbst starten.
 - Stabwerk: kein Stabilitätsnachweis der Stäbe (Biegeknicken/Kippen), keine Schnittgrößen-Diagramme.
 - Schalenelemente (Bleche) nicht umgesetzt – dünne Teile mit feinem Volumennetz rechnen.
 - Baugruppen: Körper verklebt (gemeinsame Flächen), über Schweißnähte gekoppelt oder verschraubt (Fuge mit Kontakt).
-- Schrauben: Vorspannung mit Nennwerten (keine Streuung beim Anziehen, kein Setzen); Gewinde-Ausreißen, Dauerfestigkeit
-  und Flächenpressung gegen p_G nicht geprüft (Pressung wird angezeigt).
+- Schrauben: Biegung im Gewinde bei Querlast nur über den Ersatzbalken; Kontakt nur, wo sich Teile im Netz berühren
+  (kein Spalt, der sich schließt).
 - Video-Aufnahme in der Linux-Desktop-App je nach WebKit-Version nicht verfügbar (dann im Browser aufnehmen).
 - Topologieoptimierung: Form ist ein Vorschlag (STL), keine fertige CAD-Geometrie.
 

@@ -725,3 +725,5 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .bolt-table td.bolt-cell { white-space: normal; }
 .touch-row { cursor: default; }
 .touch-row .segmented { flex: none; }
+.hand-tools { display: flex; align-items: center; gap: 2px; }
+.hand-tools select { width: auto; height: 26px; font-size: 12px; }

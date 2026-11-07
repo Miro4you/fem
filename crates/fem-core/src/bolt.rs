@@ -757,7 +757,7 @@ pub fn evaluate(b: &Bolt, p: &Prepared, u: &[f64], mats: SideMaterials) -> BoltR
 }
 
 /// Bohrung eines Körpers (für Vorschläge, wo Schrauben sitzen könnten)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hole {
     pub body: i32,
     pub cyl: crate::region::Cylinder,
@@ -775,6 +775,96 @@ fn d_from_tapped(dia: f64) -> Option<f64> {
     T.iter().find(|(_, h)| (dia - h).abs() <= 0.04 * h).map(|(m, _)| *m).or_else(|| {
         let m = crate::fastener::nominal(dia);
         ((m - dia).abs() < 0.03 * m && T.iter().any(|(x, _)| *x == m)).then_some(m)
+    })
+}
+
+/// Schraube von Hand an einer angeklickten Bohrung: alle Bohrungen auf derselben Achse, die (mit Lücken bis 1 mm)
+/// an die gewählte anschließen. Engere Bohrung am Ende = Gewinde (Kopf auf der anderen Seite), sonst Durchsteckschraube
+/// mit Mutter. Nenngröße aus der Bohrung (ISO 273 bzw. Kernloch) oder vorgegeben; `flip`: Kopf auf der anderen Seite.
+pub fn bolt_at(holes: &[Hole], pick: usize, d: Option<f64>, flip: bool) -> std::result::Result<Bolt, String> {
+    let h0 = holes.get(pick).ok_or("Fläche ist keine Bohrung")?;
+    if !h0.cyl.hole {
+        return Err("Das ist eine Welle bzw. ein Zapfen, keine Bohrung – bitte die Innenfläche einer Bohrung anklicken.".into());
+    }
+    let n = Vector3::from(h0.cyl.axis).normalize();
+    let o = Vector3::from(h0.cyl.origin);
+    let span = |h: &Hole| {
+        let t0 = (Vector3::from(h.cyl.origin) - o).dot(&n);
+        let t1 = t0 + h.cyl.length * Vector3::from(h.cyl.axis).normalize().dot(&n);
+        (t0.min(t1), t0.max(t1))
+    };
+    let mut all: Vec<(usize, f64, f64)> = holes
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| {
+            let a = Vector3::from(h.cyl.axis).normalize();
+            let v = Vector3::from(h.cyl.origin) - o;
+            h.cyl.hole && a.dot(&n).abs() > 0.999 && (v - n * v.dot(&n)).norm() < 0.1 * h0.cyl.radius.max(0.5)
+        })
+        .map(|(j, h)| {
+            let (a, b) = span(h);
+            (j, a, b)
+        })
+        .collect();
+    all.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    // zusammenhängende Gruppe um die gewählte Bohrung
+    let k = all.iter().position(|c| c.0 == pick).ok_or("Bohrung nicht gefunden")?;
+    let (mut lo, mut hi) = (k, k);
+    while lo > 0 && all[lo].1 - all[lo - 1].2 <= 1.0 {
+        lo -= 1;
+    }
+    while hi + 1 < all.len() && all[hi + 1].1 - all[hi].2 <= 1.0 {
+        hi += 1;
+    }
+    let chain = &all[lo..=hi];
+    let mut bodies: Vec<i32> = chain.iter().map(|c| holes[c.0].body).collect();
+    bodies.sort_unstable();
+    bodies.dedup();
+    if bodies.len() < 2 {
+        return Err("Die Bohrung geht nur durch ein Teil – eine Schraube braucht mindestens zwei Teile, die sie zusammenhält.".into());
+    }
+    let radii: Vec<f64> = chain.iter().map(|c| holes[c.0].cyl.radius).collect();
+    let rmax = radii.iter().copied().fold(0.0, f64::max);
+    let (first_small, last_small) = (radii[0] < 0.95 * rmax, radii[radii.len() - 1] < 0.95 * rmax);
+    let tapped = first_small || last_small;
+    let (t_lo, t_hi) = (chain[0].1, chain[chain.len() - 1].2);
+    let d = match d.filter(|d| *d > 0.0) {
+        Some(d) => d,
+        None if tapped => {
+            let r = if last_small { radii[radii.len() - 1] } else { radii[0] };
+            d_from_tapped(2.0 * r).or_else(|| d_from_clearance(2.0 * rmax)).unwrap_or_else(|| crate::fastener::nominal(2.0 * rmax / 1.1))
+        }
+        None => d_from_clearance(2.0 * rmax).unwrap_or_else(|| crate::fastener::nominal(2.0 * rmax / 1.1)),
+    };
+    let mk = |axis: Vector3<f64>, head_t: f64, nut: Option<f64>, thread: (f64, f64)| Bolt {
+        name: String::new(),
+        d,
+        stress_area: None,
+        e: 210000.0,
+        origin: o.into(),
+        axis: axis.into(),
+        head_t,
+        head_d: 1.6 * d,
+        nut_t: nut,
+        nut_d: nut.map(|_| 1.6 * d),
+        thread_t0: thread.0,
+        thread_t1: thread.1,
+        preload: None,
+        tighten: None,
+        rp: None,
+        rm: None,
+        scatter: None,
+        preload_factor: None,
+        preload_loss: None,
+    };
+    Ok(if tapped {
+        // Gewinde in der engeren Bohrung am Ende, Kopf auf der anderen Seite
+        let c = if last_small { chain[chain.len() - 1] } else { chain[0] };
+        if last_small { mk(n, t_lo, None, (c.1, c.2)) } else { mk(-n, -t_hi, None, (-c.2, -c.1)) }
+    } else {
+        // Durchsteckschraube: Kopf oben (Achse zeigt nach unten), sonst am Anfang; `flip` dreht um
+        let down = (n.z > 0.1) != flip;
+        if down { mk(-n, -t_hi, Some(-t_lo), (0.0, 0.0)) } else { mk(n, t_lo, Some(t_hi), (0.0, 0.0)) }
     })
 }
 

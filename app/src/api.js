@@ -149,6 +149,8 @@ export const modes = (setup, kind, count, density) =>
   isDesktop ? invoke('modes', { setup, kind, count, density }) : http('/modes', { method: 'POST', json: { setup, kind, count, density } })
 
 /// Schweißnaht-Vorschläge: einander zugewandte ebene Flächen mit Spalt ≤ maxGap [mm]
+export const boltAtHole = (holes, pick, d = null, flip = false) =>
+  isDesktop ? invoke('bolt_at_hole', { holes, pick, d, flip }) : http('/bolt_at_hole', { method: 'POST', json: { holes, pick, d, flip } })
 export const findGaps = (maxGap) => (isDesktop ? invoke('find_gaps', { maxGap }) : http('/find_gaps', { method: 'POST', json: { max_gap: maxGap } }))
 
 /// Stabwerk rechnen
