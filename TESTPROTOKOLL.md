@@ -238,15 +238,17 @@ selbst starten.
 | 18.7 | **Onshape:** Bibliothek → „Assembly 1“ in „Projekt-FEM Test 1“ holen | Körper je Teil (kostet ≈ 5 API-Aufrufe) | [ ] |
 | 18.8 | Projekt speichern und öffnen | Werkstoffe je Körper und ausgeblendete Körper wieder da | [ ] |
 
-## 18a. Schrauben (neu) – Testteil `examples/geometrie/verschraubung.step`
+## 18a. Schrauben mit Vorspannung und Kontakt (neu) – Testteil `examples/geometrie/verschraubung.step`
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
 | 18a.1 | `verschraubung.step` öffnen | Hinweis „2 Schrauben aus dem CAD erkannt“; im Baum nur Unterteil und Deckel; Schraubenköpfe im Bild | [ ] |
 | 18a.2 | Verbindungen → Schrauben | „ISO 4762 M8x25 - 10.9“ (Gewindebohrung, Klasse 10.9) und „ISO 4762 M8x35 - 8.8“ (mit Mutter, 2 Zubehör) | [ ] |
-| 18a.3 | Unterteil vorne fest, Deckel oben 4000 N nach oben (+Z), rechnen | Karte „Schrauben“: je ≈ 2000 N Zug, Sicherheit je Klasse; Klasse ändern → neu rechnen → S ändert sich | [ ] |
-| 18a.4 | Last nach unten (Fuge wird zusammengedrückt) | Hinweis „… schieben sich ineinander – Kontakt kommt noch“ | [ ] |
-| 18a.5 | „Fuge verklebt“ | Schraubenkräfte deutlich kleiner (Fuge trägt mit) | [ ] |
+| 18a.3 | Unterteil vorne fest, Deckel oben 4000 N nach oben (+Z), rechnen (Standard: Vorspannung 90 % nach VDI 2230, Kontakt µ = 0,15) | Karte „Schrauben“: F_V 27,35 kN (10.9) bzw. 18,62 kN (8.8), F_S nur wenig höher, Anziehmomente ≈ 37 / 27 N·m, Nachweis erfüllt (S ≥ 1). Karte „Fugen“: Restklemmkraft ≈ 42 kN, Reibschluss kaum genutzt. Deckel S235 meldet S < 1,5 (Pressung unter dem 10.9-Kopf ist hoch – echter Befund) | [ ] |
+| 18a.4 | Vorspannung „Anziehmoment je Schraube“, je 10 N·m eintragen, rechnen | F_V ≈ 7,4 / 6,9 kN, Restklemmkraft ≈ 10 kN, Deckel jetzt S > 1,5; kein Hinweis „nicht eingependelt“ | [ ] |
+| 18a.5 | „Fuge verklebt“ bzw. Vorspannung „ohne“ | verklebt: Schrauben tragen kaum; ohne Vorspannung + Kontakt: Fuge hebt ab, Schrauben tragen die ganze Last (je ≈ 2000 N) | [ ] |
+| 18a.5b | Last quer (z. B. 10 kN in X auf die Deckelseite), µ = 0,15 | hält über Reibung (Reibschluss < 100 %); Last so hoch, dass µ·F_K nicht reicht → Hinweis „rutscht durch“, Querkraft in den Schrauben | [ ] |
+| 18a.5c | Bericht als PDF | Schraubentabelle mit F_V / M_A, F_S, Querkraft, Sicherheit; Fugentabelle; Hinweise | [ ] |
 | 18a.6 | „Schrauben aus dem CAD als Körper rechnen“ | neu vernetzt, Schrauben als Körper im Baum | [ ] |
 | 18a.7 | **Deine Baugruppe mit Normteil-Schrauben** (Onshape Standard Content, SolidWorks Toolbox) | Schrauben erkannt? Namen/Klasse richtig? | [ ] |
 | 18a.8 | Baugruppe **ohne** modellierte Schrauben, aber mit Bohrungen | Vorschläge „Bohrung 1 (M8)“ … anhaken → wird gerechnet | [ ] |
@@ -291,15 +293,21 @@ selbst starten.
 - **Schweißnähte**: Nachweis vereinfacht nach EN 1993-1-8 (Linienkraft / a ≤ Rm/(√3·β_w·1,25)), β_w aus dem
   Werkstoffnamen (S235 0,8, S275 0,85, S355 0,9, S420/S460 und Edelstahl 1,0, sonst 0,8). Nahtenden/Kerben und
   Ermüdung nicht bewertet. Die Naht ist ideal steif (keine Nahtnachgiebigkeit).
+- **Schrauben-Vorspannung**: Standard 90 % Ausnutzung der Streckgrenze beim Anziehen (VDI 2230), µ_G = µ_K = 0,12;
+  Kopfauflage d_w aus dem CAD, Bohrung d_h = 1,1·d. Nachweis im Betrieb σ_red ≤ Rp0,2 mit k_τ = 0,5 (S ≥ 1).
+- **Reibwert der Fuge** µ = 0,15 (Stahl/Stahl trocken etwa 0,1 … 0,2). Prüfe, ob das zu deinen Teilen passt.
+- **Örtliche Spitzen an Schraubenauflagen und Gewinde** zählen nicht zum σv-Nachweis (Zone ≈ 0,6·d um die
+  Auflagen bzw. das tragende Gewinde); sie stehen unter Details.
 
 ## Bekannte Grenzen
 
-- Alles linear-elastisch, kleine Verformungen; kein Kontakt, keine Plastizität, kein Kriechen.
+- Alles linear-elastisch, kleine Verformungen; keine Plastizität, kein Kriechen. Kontakt nur in Fugen verschraubter Teile.
 - Eigenfrequenzen/Knicken: massiver Werkstoff (Infill wird dort nicht berücksichtigt), bis ca. 600 000 Unbekannte.
 - Stabwerk: kein Stabilitätsnachweis der Stäbe (Biegeknicken/Kippen), keine Schnittgrößen-Diagramme.
 - Schalenelemente (Bleche) nicht umgesetzt – dünne Teile mit feinem Volumennetz rechnen.
-- Baugruppen: Körper nur verklebt (gemeinsame Flächen) oder über Schweißnähte gekoppelt; kein Kontakt, keine Schrauben,
-  ein Werkstoff für alle Körper.
+- Baugruppen: Körper verklebt (gemeinsame Flächen), über Schweißnähte gekoppelt oder verschraubt (Fuge mit Kontakt).
+- Schrauben: Vorspannung mit Nennwerten (keine Streuung beim Anziehen, kein Setzen); Gewinde-Ausreißen, Dauerfestigkeit
+  und Flächenpressung gegen p_G nicht geprüft (Pressung wird angezeigt).
 - Video-Aufnahme in der Linux-Desktop-App je nach WebKit-Version nicht verfügbar (dann im Browser aufnehmen).
 - Topologieoptimierung: Form ist ein Vorschlag (STL), keine fertige CAD-Geometrie.
 

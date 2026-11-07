@@ -125,7 +125,7 @@ const boltNeed = (r, sF) => (r.preload > 0 ? 1 : sF)
 
 // Vorspannung: wie angezogen wird (VDI 2230)
 const TIGHTEN = {
-  vdi: 'Anziehen auf Ausnutzung der Streckgrenze (VDI 2230)',
+  vdi: 'Ausnutzung der Streckgrenze (VDI 2230)',
   moment: 'Anziehmoment je Schraube',
   kraft: 'Vorspannkraft je Schraube',
   none: 'ohne Vorspannung',
@@ -3300,7 +3300,7 @@ function NumInput({ value, unit, onChange }) {
   )
 }
 
-// Schrauben: Kräfte und Nachweis (ohne Vorspannung)
+// Schrauben: Vorspannung, Kräfte im Betrieb und Nachweis (VDI 2230)
 function BoltCard({ rows, sF }) {
   if (!rows.length) return null
   const ok = rows.every((r) => r.safety >= r.need)

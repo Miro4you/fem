@@ -22,16 +22,25 @@
   Körper, Knicken), ein-/ausblenden, Fläche anklicken wählt Körper, flächige Verbindung über Spalt, Ergebnis je Körper
   und Kräfte zwischen den Körpern, Onshape-Baugruppen holen, SolidWorks-Makro und Fusion lassen Baugruppen zu.
   Prüffall „Zugstab Stahl + Alu“ (exakt).
-- **Stufe 2:** Kontakt ohne feste Verbindung (kann sich öffnen; reibungsfrei bzw. mit Reibung – nichtlinear,
-  iterativ), Bolzenverbindung (Bolzen im Loch, drehbar), 3D-Druck-Füllung zusammen mit Werkstoff je Körper.
 - ✅ **Schrauben Schritt 1 (07.11.):** Erkennung modellierter Normteile (Name + Form, mit Scheiben/Muttern) und
   Vorschläge aus fluchtenden Bohrungen, Festigkeitsklasse je Schraube (aus dem Namen vorbelegt), Schraubenelement
   (Balken mit Ankopplung an Kopfauflage und Gewinde/Mutter), Fuge offen/verklebt, Kräfte (Zug, Quer, Biegung) und
   Nachweis gegen Rp0,2, PDF-Bericht. Prüffall 4 × M8 und Test mit `examples/geometrie/verschraubung.step`.
-- **Schrauben Schritt 2:** Kontakt an der Fuge (Knotenpaare der geöffneten Fuge sind schon da → Kontakt Knoten-zu-
-  Knoten mit aktiver Menge), dann Vorspannung (aus Anziehmoment/µ oder % Rp0,2) als Anfangsdehnung des Schrauben-
-  balkens, Reibschluss µ·F_V gegen Querkraft, Klaffen der Fuge, Flächenpressung unter dem Kopf, Gewinde-Ausreißen.
-  Schraube von Hand anlegen (Bohrung anklicken), Schrauben ohne Namen nur an der Form erkennen (als Vorschlag).
+- ✅ **Schrauben Schritt 2 (07.11.): Kontakt + Vorspannung.** Kontakt Knoten-zu-Knoten in der aufgetrennten Fuge
+  (aktive Menge, erweitertes Lagrange gegen Durchdringung, Coulomb-Reibung mit Rückprojektion auf den Reibkegel,
+  Schwellen/Dämpfung gegen Pendeln, Konvergenz über die Kraftänderung). Vorspannung in zwei Schritten (anziehen mit
+  vorgegebener Kraft → Schraubenlänge fest → Betriebslast). F_V nach VDI 2230 aus Ausnutzung, Anziehmoment oder
+  direkt; Anziehmoment, Gewindetorsion im Nachweis, Flächenpressung unter dem Kopf. Ergebnis je Fuge: aufliegend
+  (angezogen/unter Last), Restklemmkraft, Pressung, Reibkraft und Reibschluss µ·F_K; Hinweise bei Klaffen/Durchrutschen.
+  Krafteinleitung flächenrichtig, Spitzen dort nicht im σv-Nachweis. Löser: Warmstart, Vorkonditionierer behalten
+  (Beispiel-Baugruppe 15 Durchgänge à ≈ 1 s). Prüffälle: Kontakt unter Druck, vorgespannt mit/ohne Last, Klaffen,
+  Querkraft haftend/durchrutschend/reibungsfrei (115/115).
+- **Schrauben Schritt 3:** Flächenpressung gegen p_G je Werkstoff (VDI 2230 Tab. A9), Einschraubtiefe/Gewinde-
+  Ausreißen, Streuung beim Anziehen (α_A, F_V,min/F_V,max) und Setzen, Dauerfestigkeit (σ_a gegen σ_ASV), Schraube
+  von Hand anlegen (Bohrung anklicken), Schrauben ohne Namen nur an der Form erkennen (als Vorschlag).
+- **Stufe 2:** Kontakt auch zwischen beliebigen sich berührenden Teilen (nicht nur in Fugen verschraubter Teile; die
+  Technik ist da – Auswahl der Fugen in der Oberfläche fehlt), Bolzenverbindung (Bolzen im Loch, drehbar),
+  3D-Druck-Füllung zusammen mit Werkstoff je Körper.
 - **Stufe 3:** Bewegungssimulation mit FEM entlang der Bewegung (siehe unten).
 
 ## 1. Ansys-Vergleich Hebel (wartet auf Felix)

@@ -24,7 +24,7 @@ Bedienung auch im Browser über das Heimnetz.
 | **Nachweis & Bericht** | Werkstoffdatenbank (Stahl, Alu, Kunststoffe, Druckwerkstoffe, eigene), Masse, Festigkeitsnachweis mit erforderlichen Sicherheiten, PDF-Bericht, MathPad-Rechenblatt, ParaView-Export |
 | **3D-Druck** | Schichtaufbau mit Werten in und quer zu den Schichten, Aufbaurichtung frei optimieren (≈ 400 Richtungen) inkl. Überhänge, Wände + Infill (Gyroid, Gitter, Waben …), Kalibrierung mit eigenem Zugstab |
 | **Schweißnähte** | Spalte an Blechecken automatisch finden, Stumpf-/Kehlnaht, Nahtkraft und Nachweis nach EN 1993-1-8 (vereinfacht) |
-| **Baugruppen** | mehrere Körper aus einer STEP-Datei bzw. Onshape-Baugruppe mit Namen, Werkstoff je Körper, ein-/ausblenden, Berührflächen verbunden, Spalte als Naht oder flächige Verbindung, **Schrauben** automatisch erkennen (Normteile, Bohrungen) mit Festigkeitsklasse und Nachweis, Ergebnis und Kräfte je Körper |
+| **Baugruppen** | mehrere Körper aus einer STEP-Datei bzw. Onshape-Baugruppe mit Namen, Werkstoff je Körper, ein-/ausblenden, Berührflächen verbunden, Spalte als Naht oder flächige Verbindung, **Schrauben** automatisch erkennen (Normteile, Bohrungen) mit Festigkeitsklasse, **Vorspannung nach VDI 2230** und **Kontakt mit Reibung** in der Fuge (klaffen, rutschen), Nachweis, Ergebnis und Kräfte je Körper |
 | **Studien** | Parameterstudie (Netz, Füllgrad, Maße, **Onshape-Variablen**, **SolidCraft-Parameter**), Vergleich mit voriger Version |
 | **Weitere Analysen** | Eigenfrequenzen, Knicken (Lanczos), Leichtbau-Vorschlag (Topologieoptimierung, STL-Export), Stabwerk (Balken, Rahmen, Fachwerke mit IPE-Profilen) |
 | **Geometrie anpassen** | Radien/Bohrungen ändern, Material per Skizze hinzufügen oder entfernen, Ergebnis mit vorher vergleichen |
@@ -41,7 +41,7 @@ Bedienung auch im Browser über das Heimnetz.
 | ![Onshape-Bibliothek](docs/bilder/onshape-bibliothek.png) | ![Iso-Clip](docs/bilder/iso-clip.png) |
 | **Onshape-Bibliothek:** eigene Dokumente durchsuchen, Teilestudio wählen, holen – ohne Adresse kopieren | **Iso-Clip:** nur die Bereiche über 84 MPa farbig, der Rest grau – wie in SolidWorks Simulation |
 | ![Schrauben aus dem CAD erkannt](docs/bilder/schrauben-erkannt.png) | ![Schraubenkräfte und Nachweis](docs/bilder/schrauben-ergebnis.png) |
-| **Schrauben erkannt:** zwei Normteile aus dem CAD (10.9 mit Gewindebohrung, 8.8 mit Scheibe und Mutter), Klasse je Schraube | **Schraubenkräfte:** Zug, Querkraft und Nachweis gegen Rp0,2 je Festigkeitsklasse |
+| **Schrauben erkannt:** zwei Normteile aus dem CAD (10.9 mit Gewindebohrung, 8.8 mit Scheibe und Mutter), Klasse je Schraube, Vorspannung nach VDI 2230 | **Vorgespannt und Kontakt:** F_V, Schraubenkraft im Betrieb, Anziehmoment, Nachweis mit Gewindetorsion; Fuge mit Restklemmkraft, Pressung und Reibschluss |
 | ![Baugruppe: Körper mit eigenem Werkstoff](docs/bilder/baugruppe-modell.png) | ![Baugruppe: Ergebnis je Körper](docs/bilder/baugruppe-ergebnis.png) |
 | **Baugruppe:** Körper mit Namen aus dem CAD, Block aus Alu, loser Zapfen flächig verbunden (türkis) | **Ergebnis je Körper:** Spannung, Verformung, Sicherheit mit eigenem Werkstoff, Kräfte zwischen den Körpern |
 | ![3D-Druck: Wand/Infill im Schnitt](docs/bilder/3d-druck-infill-schnitt.png) | ![Schweißnähte am Blechkasten](docs/bilder/schweissnaehte-blechkasten.png) |
@@ -248,12 +248,24 @@ Onshape-Bibliothek) wird zu mehreren **Körpern** mit ihren Namen aus dem CAD:
   Masse aus den Dichten der Körper.
 - **Schrauben:** Normteile aus dem CAD (ISO 4762, ISO 4017, DIN 912/933 …, „M8x25“, mit Scheiben und Muttern) werden
   am Namen und an der Form erkannt und nicht als Körper vernetzt, sondern als **Schraubenelement** gerechnet (Balken
-  zwischen Kopfauflage und Gewinde bzw. Mutter). Ohne modellierte Schrauben schlägt Projekt-FEM Schrauben an
-  **fluchtenden Bohrungen** vor (Gewinde- oder Durchgangsbohrung nach ISO 273). Je Schraube **Festigkeitsklasse**
-  (4.6 … 12.9, A2/A4-50/70/80; aus dem Namen übernommen, z. B. „… 10.9“). Ergebnis: Zug, Querkraft, Biegemoment und
-  Nachweis σv ≤ Rp0,2 (vereinfacht nach VDI 2230). Die Fuge zwischen verschraubten Teilen ist standardmäßig **offen**
-  (nur die Schrauben halten – auf der sicheren Seite); drückt die Last die Teile zusammen, warnt das Ergebnis.
-- Noch nicht: Kontakt, der sich öffnen/rutschen kann, Vorspannung und Reibschluss, Bewegung (Gelenke) – siehe Roadmap.
+  zwischen Kopfauflage und Gewinde bzw. Mutter, Kraft flächenrichtig in Auflage und Gewindebohrung eingeleitet). Ohne
+  modellierte Schrauben schlägt Projekt-FEM Schrauben an **fluchtenden Bohrungen** vor (Gewinde- oder Durchgangsbohrung
+  nach ISO 273). Je Schraube **Festigkeitsklasse** (4.6 … 12.9, A2/A4), aus dem Namen vorbelegt.
+- **Vorspannung (VDI 2230):** Vorspannkraft aus der Ausnutzung der Streckgrenze beim Anziehen (Standard 90 %, Reibwerte
+  µ_G/µ_K 0,12), aus dem **Anziehmoment** je Schraube oder direkt als Kraft. Gerechnet in zwei Schritten: erst die
+  Schrauben anziehen, dann kommt die Last dazu – die Schraubenkraft steigt nur um den Anteil, den die Steifigkeiten
+  vorgeben (Kraftverhältnis Φ). Ergebnis: F_V, Schraubenkraft im Betrieb, **Anziehmoment**, Flächenpressung unter dem
+  Kopf, Nachweis σ_red ≤ Rp0,2 mit Gewindetorsion aus dem Anziehen (vorgespannt: S ≥ 1 wie VDI 2230).
+- **Kontakt in der Fuge:** Die Fuge zwischen verschraubten Teilen überträgt Druck, aber keinen Zug (sie **klafft**), und
+  quer nur so viel, wie die **Reibung** µ·Pressung hält – darüber **rutschen** die Teile und die Schrauben werden auf
+  Abscherung belastet. Einstellbar: Reibwert µ (Standard 0,15), haftend, reibungsfrei, oder „verklebt“. Ergebnis je
+  Fuge: aufliegende Fläche (nach dem Anziehen und unter Last), **Restklemmkraft**, größte Flächenpressung, Querkraft über
+  Reibung und **Reibschluss µ·F_K**; Hinweise, wenn die Last die Fuge öffnet oder sie durchrutscht.
+- Örtliche Spannungsspitzen direkt an der Krafteinleitung (unter dem Kopf, an der Gewindebohrung) gehören zum
+  Ersatzmodell der Schraube und zählen nicht zum σv-Nachweis (im Farbbild sichtbar, Höchstwert unter Details);
+  dort gelten Flächenpressung und Einschraubtiefe nach VDI 2230.
+- Noch nicht: Kontakt zwischen beliebigen sich berührenden Teilen (nur in Fugen verschraubter Teile), Bewegung
+  (Gelenke), Gewinde-Ausreißen, Dauerfestigkeit, Streuung beim Anziehen und Setzen – siehe Roadmap.
 
 ### Onshape: API-Aufrufe sparen
 
@@ -301,13 +313,16 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 
 ## Validierung
 
-`projekt-fem validieren` vergleicht mit der Theorie (läuft auch bei `cargo test`) – derzeit **76 von 76 Prüfungen** bestanden:
+`projekt-fem validieren` vergleicht mit der Theorie (läuft auch bei `cargo test`) – derzeit **115 von 115 Prüfungen** bestanden:
 
 | Fall | Größe | Abweichung |
 |---|---|---|
 | Zugstab TET4/TET10 | σ, Δl, Querkontraktion, Lagerkraft | exakt |
 | Zugstab Stahl + Alu (Baugruppe, ν = 0, direkt und iterativ) | Δl, σ, Sicherheit je Körper, Kraft an der Trennfläche | exakt |
 | Zwei Blöcke, 4 × M8 (nur Schrauben verbinden), Zug | Summe Schraubenkräfte = Last; je Schraube F/4 | exakt / ±0,01 % |
+| Zwei Klötze lose aufeinander, Druck (Kontakt, ν = 0) | Verkürzung σ·2h/E, Druckkraft und Pressung in der Fuge, Durchdringung | +0,1 % / exakt / +0,1 % / 0,2 % |
+| Zwei Klötze, 4 × M8 vorgespannt (F_V = 10 kN), Kontakt | ohne Last: F_S = F_V, Klemmkraft 4·F_V; mit Last: Σ F_S = F_A + Restklemmkraft; weit über der Klaffgrenze: Fuge offen, F_S = F_A/4 | exakt / exakt / +0,01 % |
+| Dieselben mit Querkraft, µ = 0,15 / reibungsfrei | hält: Schrauben fast unbelastet; rutscht durch: Reibkraft = µ·F_K, Schrauben tragen F_Q − µ·F_K; µ = 0: Schrauben tragen F_Q | ±0,1 % |
 | Kragbalken TET10 (40×2×4) | Durchbiegung (Timoshenko) | −0,5 % |
 | Kragbalken TET10 (40×2×4) | Biegespannung bei l/2 | +0,2 % |
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
@@ -327,10 +342,12 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
 
 ## Bekannte Grenzen
 
-- Linear-elastisch, kleine Verformungen; kein Kontakt, keine Plastizität, kein Kriechen.
-- Baugruppen: Körper an Berührflächen verklebt bzw. über Spalt-Verbindungen fest gekoppelt; Kontakt (öffnen,
-  rutschen) und Schrauben fehlen noch. Schalenelemente (Bleche) gibt es nicht – Bleche mit feinem Volumennetz
-  rechnen (Elementgröße ≈ Blechdicke).
+- Linear-elastisch, kleine Verformungen; keine Plastizität, kein Kriechen. Kontakt (nichtlinear, iterativ) nur in
+  Fugen verschraubter Teile.
+- Baugruppen: sonst Körper an Berührflächen verklebt bzw. über Spalt-Verbindungen fest gekoppelt. Schalenelemente
+  (Bleche) gibt es nicht – Bleche mit feinem Volumennetz rechnen (Elementgröße ≈ Blechdicke).
+- Schrauben: Vorspannung mit Nennwerten (keine Streuung α_A beim Anziehen, kein Setzen); Kontakt Knoten-zu-Knoten in
+  der vernetzten Fuge (kleine Verschiebungen, kein großes Gleiten).
 - **Spannungsspitzen an starren Einspannungen/Kanten sind Singularitäten:** Sie wachsen bei Netzverfeinerung
   immer weiter (Kragbalken-Einspannkante: 128 MPa grob, 169 MPa fein; Theorie 120 MPa). Werte mit Abstand zur
   Einspannung auswerten – die Oberfläche warnt, wenn das Maximum an einem Lager liegt.
@@ -361,7 +378,8 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
    (Schnitt, Iso-Clip, Animation), Ansichtswürfel, CAD-Maussteuerung, Onshape-Bibliothek
 8. ✅ **Baugruppen (Stufe 1):** Körper mit Namen, Werkstoff je Körper, ein-/ausblenden, Verbindungen, Ergebnis und Kräfte je Körper,
    Onshape-Baugruppen · **Server-Betrieb** (Docker)
-9. **Als Nächstes:** Kontakt + Schrauben-Vorspannung → „Fläche teilen“ (Skizze auf der Fläche statt Rechteck ziehen) → Bewegungssimulation mit
+9. ✅ **Schrauben mit Vorspannung und Kontakt:** VDI 2230 (Ausnutzung, Anziehmoment), Fuge klafft/rutscht, Reibschluss
+10. **Als Nächstes:** „Fläche teilen“ (Skizze auf der Fläche statt Rechteck ziehen) → Bewegungssimulation mit
    FEM entlang der Bewegung (z. B. Koppelstange und Bolzen) → Onshape-Konfigurationen, SolidWorks-Konfigurationen,
    DXF → Stabwerk, Slicer-Einstellungen (3MF) übernehmen
 
