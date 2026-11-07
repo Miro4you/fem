@@ -239,6 +239,10 @@ pub fn detect(solids: &[Solid]) -> Vec<Detected> {
             preload: None,
             tighten: None,
             rp: None,
+            rm: None,
+            scatter: None,
+            preload_factor: None,
+            preload_loss: None,
         };
         let mut volumes = vec![s.tag];
         let mut parts = vec![s.name.clone()];

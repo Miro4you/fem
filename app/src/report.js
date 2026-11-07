@@ -119,6 +119,12 @@ export function buildReport(data) {
         '. Gerechnet in zwei Schritten: Schrauben anziehen, dann Betriebslast. Streuung beim Anziehen und Setzen nicht berücksichtigt.',
       8.5,
     )
+    if (data.boltDetailRows?.length) {
+      table(
+        [['Schraube', 'Pressung Kopf / p_G', 'Pressung Mutter / p_G', 'Einschraubtiefe / nötig', 'σ_a / σ_ASV'], ...data.boltDetailRows],
+        [CW * 0.24, CW * 0.19, CW * 0.19, CW * 0.19, CW * 0.19],
+      )
+    }
     if (data.jointRows?.length) {
       table(
         [['Fuge', 'liegt auf', 'Restklemmkraft', 'max. Pressung', 'Reibkraft / µ·F_K'], ...data.jointRows],

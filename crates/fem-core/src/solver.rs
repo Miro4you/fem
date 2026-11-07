@@ -37,6 +37,38 @@ pub fn solve(model: &Model) -> Result<Results> {
 
 /// Wie `solve`, mit zusätzlichen Einstellungen
 pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
+    let scatter = model.bolts.iter().any(|b| b.scatter.is_some_and(|s| s.alpha_a > 1.0 || s.setting) && b.assembly().is_some());
+    if !scatter {
+        return solve_once(model, opts);
+    }
+    // Streuung der Vorspannung (VDI 2230): Fall 1 größte Vorspannung F_M,max – Festigkeit von Schraube und Teilen,
+    // Flächenpressung; Fall 2 kleinste F_M,min − F_Z nach dem Setzen – Fuge (Klaffen, Rutschen, Restklemmkraft)
+    let mut m = model.clone();
+    for b in &mut m.bolts {
+        b.preload_factor = Some(b.scatter_factors().0);
+        b.preload_loss = None;
+    }
+    model.progress.report("Fall 1 von 2: größte Vorspannung", None);
+    let mut r = solve_once(&m, opts)?;
+    for (b, rb) in m.bolts.iter_mut().zip(&r.bolts) {
+        b.preload_factor = Some(b.scatter_factors().1);
+        b.preload_loss = b.scatter.filter(|s| s.setting).and(rb.setting_loss);
+    }
+    model.progress.report("Fall 2 von 2: kleinste Vorspannung nach dem Setzen", None);
+    let r2 = solve_once(&m, opts)?;
+    for (b, b2) in r.bolts.iter_mut().zip(&r2.bolts) {
+        b.preload_min = Some(b2.preload);
+        b.axial_min = Some(b2.axial);
+        b.stress_amplitude = b.stress_amplitude.max(b2.stress_amplitude);
+    }
+    r.joints = r2.joints;
+    r.contact_converged &= r2.contact_converged;
+    r.contact_passes += r2.contact_passes;
+    Ok(r)
+}
+
+/// eine Rechnung (ohne Streuung der Vorspannung)
+fn solve_once(model: &Model, opts: &SolveOptions) -> Result<Results> {
     model.material.check()?;
     for (_, m) in &model.body_materials {
         m.check()?;
@@ -274,6 +306,8 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
             progress.report(&format!("{label}: Kontakt, Durchgang {} ({changes} Änderungen)", pass + 1), None);
         }
     };
+    // je Schraube nach dem Anziehen: Kraftverhältnis Φ_K, Setzverlust F_Z, Kraft und Moment (für den Ausschlag)
+    let mut bolt_state: Vec<Option<(f64, f64, f64, f64)>> = vec![None; model.bolts.len()];
     // Schritt 1: Schrauben anziehen (Vorspannkraft vorgegeben), Vorspannweg merken
     if preloads.iter().any(|&f| f > 0.0) {
         progress.report("Schrauben vorspannen", None);
@@ -283,9 +317,17 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         if let Some(c) = contact.as_mut() {
             c.commit_step();
         }
-        for (p, &fv) in bolts.iter_mut().zip(&preloads) {
+        for (i, (p, &fv)) in bolts.iter_mut().zip(&preloads).enumerate() {
             if fv > 0.0 {
-                p.offset = fv / p.k_ax - p.axial_delta(&u1);
+                let delta = p.axial_delta(&u1);
+                p.offset = fv / p.k_ax - delta;
+                // Nachgiebigkeiten: Schraube δ_S = 1/k, verspannte Teile δ_P = Verkürzung zwischen den Auflagen / F_V
+                let (ds, dp) = (1.0 / p.k_ax, (-delta / fv).max(0.0));
+                let b = &model.bolts[i];
+                let inner = crate::bolt::clamped_bodies(mesh, p, b).len().saturating_sub(1);
+                let f_z = crate::bolt::setting_amount(b.nut_t.is_some(), inner) * 1e-3 / (ds + dp);
+                let pre = crate::bolt::evaluate(b, p, &u1, Default::default());
+                bolt_state[i] = Some((dp / (ds + dp), f_z, pre.axial, pre.moment));
             }
         }
     }
@@ -625,7 +667,49 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         }
     }
 
-    let bolt_results = model.bolts.iter().zip(&bolts).map(|(b, p)| crate::bolt::evaluate(b, p, &u)).collect();
+    // Werkstoff unter Kopf und an der Gewinde- bzw. Mutterseite: Körper, zu dem die meisten Auflageknoten gehören
+    let node_body: Vec<i32> = if model.bolts.is_empty() {
+        vec![]
+    } else {
+        let mut nb = vec![i32::MIN; n_nodes];
+        for e in 0..mesh.n_elems() {
+            for &k in mesh.elem(e) {
+                nb[k] = mesh.body_of(e);
+            }
+        }
+        nb
+    };
+    let side_mat = |nodes: &[usize]| -> Option<&crate::Material> {
+        let mut count: Vec<(i32, usize)> = Vec::new();
+        for &k in nodes {
+            match count.iter_mut().find(|c| c.0 == node_body[k]) {
+                Some(c) => c.1 += 1,
+                None => count.push((node_body[k], 1)),
+            }
+        }
+        let body = count.into_iter().max_by_key(|c| c.1)?.0;
+        Some(model.body_materials.iter().find(|(b, _)| *b == body).map(|(_, m)| m).unwrap_or(&model.material))
+    };
+    let bolt_results = model
+        .bolts
+        .iter()
+        .zip(&bolts)
+        .map(|(b, p)| {
+            let mats = crate::bolt::SideMaterials { head: side_mat(&p.nodes[..p.n_head]), thread: side_mat(&p.nodes[p.n_head..]) };
+            crate::bolt::evaluate(b, p, &u, mats)
+        })
+        .collect::<Vec<_>>();
+    let mut bolt_results = bolt_results;
+    for (r, st) in bolt_results.iter_mut().zip(&bolt_state) {
+        let w = std::f64::consts::PI * (4.0 * r.stress_area / std::f64::consts::PI).sqrt().powi(3) / 32.0;
+        let (axial0, moment0) = st.map(|s| (s.2, s.3)).unwrap_or((0.0, 0.0));
+        // Last schwellt zwischen 0 und dem Wert: halbe Änderung gegenüber dem angezogenen Zustand
+        r.stress_amplitude = ((r.axial - axial0).abs() / r.stress_area + (r.moment - moment0).abs() / w) / 2.0;
+        if let Some((phi, f_z, _, _)) = st {
+            r.phi_k = Some(*phi);
+            r.setting_loss = Some(*f_z);
+        }
+    }
     let joints = contact.as_ref().map(|c| c.results()).unwrap_or_default();
     Ok(Results {
         bolts: bolt_results,

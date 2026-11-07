@@ -288,6 +288,7 @@ pub fn zugstab_gedruckt() -> Result<Vec<Check>> {
             layers: Some(Layers { build_dir: dir, e_z: 2600.0, nu_z: Some(0.3), g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
             infill: None,
             density: None,
+            limiting_pressure: None,
         };
         let model = Model::new(box_mesh([l, b, h], [10, 2, 2], Order::Quadratic)?, mat.clone())
             .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
@@ -328,6 +329,7 @@ pub fn zugstab_infill(kind: crate::SolverKind) -> Result<Vec<Check>> {
         layers: Some(Layers { build_dir: [0.0, 0.0, 1.0], e_z: 2600.0, nu_z: None, g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
         infill: Some(inf.clone()),
         density: None,
+        limiting_pressure: None,
     };
     let core = mat.core_material().expect("Kern");
     let model = Model::new(box_mesh([l, b, h], [20, 10, 10], Order::Quadratic)?, mat.clone())
@@ -554,6 +556,10 @@ pub fn verschraubt(kind: crate::SolverKind) -> Result<Vec<Check>> {
             preload: None,
             tighten: None,
             rp: None,
+            rm: None,
+            scatter: None,
+            preload_factor: None,
+            preload_loss: None,
         });
     }
     model.solver = kind;
@@ -640,6 +646,10 @@ fn m8_vorgespannt(x: f64, y: f64, h: f64, fv: f64, i: usize) -> crate::bolt::Bol
         preload: Some(fv),
         tighten: None,
         rp: None,
+        rm: None,
+        scatter: None,
+        preload_factor: None,
+        preload_loss: None,
     }
 }
 
@@ -676,6 +686,41 @@ pub fn vorgespannt(kind: crate::SolverKind, fa: f64) -> Result<(Vec<Check>, crat
         v.push(check(&name, "Schraube 1 Kraft = F_A/4 (Fuge offen) [N]", res.bolts[0].axial, fa / 4.0, 1e-3));
     }
     Ok((v, res))
+}
+
+/// Vorspannung mit Streuung (Kraft 10 kN als Mittelwert, α_A = 1,6) und Setzen: zwei Rechnungen; F_V,max = 2α/(1+α)·F,
+/// F_V,min = 2/(1+α)·F − F_Z mit F_Z = f_Z/(δ_S + δ_P); die Fuge wird mit F_V,min bewertet
+pub fn vorgespannt_streuung(kind: crate::SolverKind) -> Result<Vec<Check>> {
+    let (a, h, fv, fa) = (40.0, 10.0, 10000.0, 10000.0);
+    let mut model = Model::new(zwei_kloetze(a, h, [8, 8, 4])?, Material::steel())
+        .group("unten", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("oben", Selection::Plane { axis: Axis::Z, value: 2.0 * h })
+        .support("unten", Fix::all())
+        .load(Load::Force { group: "oben".into(), force: [0.0, 0.0, fa] });
+    for (i, (x, y)) in [(10.0, 10.0), (30.0, 10.0), (10.0, 30.0), (30.0, 30.0)].into_iter().enumerate() {
+        let mut b = m8_vorgespannt(x, y, h, fv, i + 1);
+        b.scatter = Some(crate::bolt::Scatter { alpha_a: 1.6, setting: true });
+        model.bolts.push(b);
+    }
+    model.joint_pairs = crate::bolt::open_joints(&mut model)?;
+    model.solver = kind;
+    let res = solve(&model)?;
+    let name = format!("Vorgespannt mit Streuung α_A = 1,6 und Setzen ({})", kind_name(kind));
+    let b = &res.bolts[0];
+    let f_z = b.setting_loss.unwrap_or(f64::NAN);
+    // Setzbetrag: Gewinde 3 + Kopf 2,5 + Mutter 2,5 + eine Trennfuge 1,5 = 9,5 µm
+    let delta_s = 1.0 / (210000.0 * crate::bolt::stress_area(8.0) / (2.0 * h + 0.9 * 8.0));
+    let phi = b.phi_k.unwrap_or(f64::NAN);
+    let delta_p = delta_s * phi / (1.0 - phi);
+    let sum_min: f64 = res.bolts.iter().map(|b| b.axial_min.unwrap_or(f64::NAN)).sum();
+    let j = res.joints.first().ok_or(crate::FemError::Input("keine Fuge".into()))?;
+    Ok(vec![
+        check(&name, "F_V,max = 2α/(1+α)·F [N]", b.preload, 2.0 * 1.6 / 2.6 * fv, 1e-9),
+        check(&name, "F_V,min = 2/(1+α)·F − F_Z [N]", b.preload_min.unwrap_or(f64::NAN), 2.0 / 2.6 * fv - f_z, 1e-9),
+        check(&name, "F_Z = f_Z / (δ_S + δ_P) [N]", f_z, 9.5e-3 / (delta_s + delta_p), 1e-9),
+        check(&name, "Fuge mit F_V,min: Σ F_S = F_A + Restklemmkraft [N]", sum_min, fa + j.pressure_force, 1e-6),
+        check(&name, "Kontakt konvergiert (1 = ja)", res.contact_converged as u8 as f64, 1.0, 0.0),
+    ])
 }
 
 /// Vorgespannte Verschraubung mit Querkraft: bis µ·F_K hält die Reibung, darüber rutscht die Fuge und die
@@ -740,6 +785,7 @@ pub fn all() -> Result<Vec<Check>> {
     v.extend(vorgespannt(crate::SolverKind::Iterative, 0.0)?.0);
     v.extend(vorgespannt(crate::SolverKind::Direct, 10000.0)?.0);
     v.extend(vorgespannt(crate::SolverKind::Direct, 80000.0)?.0);
+    v.extend(vorgespannt_streuung(crate::SolverKind::Direct)?);
     v.extend(vorgespannt_quer(crate::SolverKind::Direct, 2000.0, 0.15)?.0);
     v.extend(vorgespannt_quer(crate::SolverKind::Direct, 10000.0, 0.15)?.0);
     v.extend(vorgespannt_quer(crate::SolverKind::Iterative, 10000.0, 0.15)?.0);

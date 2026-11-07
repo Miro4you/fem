@@ -58,7 +58,7 @@ const n = (v) => (v === '' || v == null ? null : Number(v))
 
 /// Werkstoff für den Rechenkern
 export function materialPayload(m) {
-  const base = { name: m.name, E: Number(m.E), nu: Number(m.nu), yield: n(m.yield), tensile: n(m.tensile), rho: n(m.rho) }
+  const base = { name: m.name, E: Number(m.E), nu: Number(m.nu), yield: n(m.yield), tensile: n(m.tensile), rho: n(m.rho), pG: n(m.pG) }
   if (!m.layered) return base
   const inf = m.infill
   return {

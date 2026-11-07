@@ -111,13 +111,21 @@ const BOLT_CLASSES = {
 }
 
 // Schraubennachweis (Rechenkern): σ_red = √((F_S/A_s + M_b/W)² + 3·(0,5·M_G/W_p + Q/A_s)²) ≤ Rp0,2
-function boltRows(result, bolts, sF = 1) {
+function boltRows(result, bolts, sF = 1, fatigue = false) {
   return (result.bolts ?? []).map((r) => {
     const b = bolts.find((x) => x.name === r.name)
     const cls = b?.cls ?? '8.8'
     const [rp, rm] = BOLT_CLASSES[cls] ?? BOLT_CLASSES['8.8']
     const sv = r.sigma_red
-    return { ...r, cls, rp, rm, sv, safety: sv > 0 ? rp / sv : Infinity, util: sv / rp, need: boltNeed(r, sF) }
+    // Flächenpressung unter Kopf/Mutter gegen p_G, Einschraubtiefe gegen die nötige (Gewinde soll nicht vor der Schraube ausreißen)
+    const pHead = r.bearing_limit ? r.bearing_pressure / r.bearing_limit : null
+    const pNut = r.nut_pressure != null && r.nut_limit ? r.nut_pressure / r.nut_limit : null
+    const engOk = r.engagement == null || r.engagement_min == null || r.engagement >= r.engagement_min
+    const pressOk = (pHead ?? 0) <= 1 && (pNut ?? 0) <= 1
+    // Dauerfestigkeit (Last schwellt 0 ↔ Betriebslast): S_D = σ_ASV / σ_a ≥ 1,2 (VDI 2230)
+    const sD = r.stress_amplitude > 1e-9 ? r.fatigue_limit / r.stress_amplitude : Infinity
+    const fatOk = !fatigue || sD >= 1.2
+    return { ...r, cls, rp, rm, sv, safety: sv > 0 ? rp / sv : Infinity, util: sv / rp, need: boltNeed(r, sF), pHead, pNut, engOk, pressOk, sD, fatOk }
   })
 }
 // nötige Sicherheit: vorgespannt nach VDI 2230 σ_red ≤ Rp0,2 (S ≥ 1), sonst wie beim Bauteil
@@ -129,6 +137,21 @@ const TIGHTEN = {
   moment: 'Anziehmoment je Schraube',
   kraft: 'Vorspannkraft je Schraube',
   none: 'ohne Vorspannung',
+}
+// Anziehverfahren: Anziehfaktor α_A = F_M,max/F_M,min (VDI 2230 Tab. A8, gerundet)
+const TIGHTEN_METHODS = {
+  nenn: ['Nennwert, ohne Streuung', 1],
+  schluessel: ['Drehmomentschlüssel / Drehschrauber (α_A 1,6)', 1.6],
+  winkel: ['streckgrenz- oder drehwinkelgesteuert (α_A 1,0)', 1],
+  schlag: ['Schlagschrauber (α_A 3)', 3],
+  eigen: ['eigener Anziehfaktor α_A', null],
+}
+function scatterOf(t) {
+  if (t.mode === 'none') return null
+  const m = TIGHTEN_METHODS[t.method ?? 'schluessel'] ?? TIGHTEN_METHODS.schluessel
+  const alpha = m[1] ?? posNum(t.alpha, 1.6)
+  const setting = t.setting ?? true
+  return alpha > 1 || setting ? { alpha_a: Math.max(alpha, 1), setting } : null
 }
 const posNum = (v, d) => {
   const x = Number(String(v ?? '').replace(',', '.'))
@@ -184,7 +207,7 @@ export default function App() {
   const [openJoints, setOpenJoints] = useState(true)
   // Fuge mit Kontakt: Reibung; Vorspannung der Schrauben
   const [jointFric, setJointFric] = useState({ mode: 'mu', mu: '0.15' })
-  const [tight, setTight] = useState({ mode: 'vdi', nu: '90', muG: '0.12', muK: '0.12' })
+  const [tight, setTight] = useState({ mode: 'vdi', nu: '90', muG: '0.12', muK: '0.12', method: 'schluessel', alpha: '1.6', setting: true, fatigue: false })
   const [keepFasteners, setKeepFasteners] = useState(false)
   const keepFastenersRef = useRef(false)
   keepFastenersRef.current = keepFasteners
@@ -574,7 +597,7 @@ export default function App() {
       boltPrefs.current = d.bolts ?? {}
       setOpenJoints(d.openJoints ?? true)
       if (d.jointFriction) setJointFric(d.jointFriction)
-      if (d.tighten) setTight(d.tighten)
+      if (d.tighten) setTight((t) => ({ ...t, ...d.tighten }))
       setKeepFasteners(!!d.keepFasteners)
       keepFastenersRef.current = !!d.keepFasteners
       const m = await loadGeometry(d.step, d.meshSize, true, true, [])
@@ -1266,7 +1289,15 @@ export default function App() {
         bodies: (mesh?.bodies ?? []).filter((b) => bodyMats[b.name]).map((b) => ({ body: b.body, material: materialPayload(bodyMats[b.name]) })),
         bolts: bolts
           .filter((b) => b.on)
-          .map((b) => ({ ...b.bolt, name: b.name, e: BOLT_CLASSES[b.cls]?.[2] ?? 210000, rp: BOLT_CLASSES[b.cls]?.[0] ?? 640, tighten: tightenOf(tight, b) })),
+          .map((b) => ({
+            ...b.bolt,
+            name: b.name,
+            e: BOLT_CLASSES[b.cls]?.[2] ?? 210000,
+            rp: BOLT_CLASSES[b.cls]?.[0] ?? 640,
+            rm: BOLT_CLASSES[b.cls]?.[1] ?? 800,
+            tighten: tightenOf(tight, b),
+            scatter: scatterOf(tight),
+          })),
         open_joints: openJoints,
         joint_friction: frictionOf(jointFric),
         supports: sups.map((s) => {
@@ -1897,13 +1928,24 @@ export default function App() {
         `${fmt(w.stress_max)} MPa`,
         w.util == null ? '–' : `${(100 * w.util).toFixed(0)} %${w.util <= 1 ? ' ok' : ' NICHT ERFÜLLT'}`,
       ]),
-      boltRows: boltRows(result, bolts, Number(proof.sF) > 0 ? Number(proof.sF) : 1).map((r) => [
+      boltRows: boltRows(result, bolts, Number(proof.sF) > 0 ? Number(proof.sF) : 1, tight.mode !== 'none' && tight.fatigue).map((r) => [
         r.name,
         r.cls,
-        r.preload > 0 ? `${fmt(r.preload / 1000)} kN / ${fmt(r.torque)} N·m` : '–',
+        r.preload > 0
+          ? `${r.preload_min != null ? `${fmt(r.preload_min / 1000)} … ` : ''}${fmt(r.preload / 1000)} kN / ${fmt(r.torque)} N·m`
+          : '–',
         `${fmt(r.axial / 1000)} kN`,
         `${fmt(r.shear)} N`,
         `S = ${Number.isFinite(r.safety) ? fmt(Math.min(r.safety, 99)) : '–'} (nötig ${fmt(r.need)})${r.safety >= r.need ? ' ok' : ' NICHT ERFÜLLT'}`,
+      ]),
+      boltDetailRows: boltRows(result, bolts, Number(proof.sF) > 0 ? Number(proof.sF) : 1).map((r) => [
+        r.name,
+        `${fmt(r.bearing_pressure)}${r.bearing_limit ? ` / ${fmt(r.bearing_limit)}` : ''} MPa${r.pHead == null ? '' : r.pHead <= 1 ? ' ok' : ' ZU HOCH'}`,
+        r.nut_pressure != null ? `${fmt(r.nut_pressure)}${r.nut_limit ? ` / ${fmt(r.nut_limit)}` : ''} MPa${r.pNut == null ? '' : r.pNut <= 1 ? ' ok' : ' ZU HOCH'}` : '–',
+        r.engagement != null ? `${fmt(r.engagement)} / ${r.engagement_min != null ? fmt(r.engagement_min) : '?'} mm${r.engOk ? ' ok' : ' ZU KURZ'}` : '– (Mutter)',
+        tight.mode !== 'none' && tight.fatigue
+          ? `${fmt(r.stress_amplitude)} / ${fmt(r.fatigue_limit)} MPa${r.fatOk ? ' ok' : ' NICHT ERFÜLLT'}`
+          : `${fmt(r.stress_amplitude)} MPa (nicht geprüft)`,
       ]),
       jointRows: (result.joints ?? []).map((j) => {
         const nameOf = (id) => (result.bodies ?? []).find((b) => b.body === id)?.name ?? `Körper ${id}`
@@ -1922,7 +1964,10 @@ export default function App() {
       tightText:
         tight.mode === 'none'
           ? 'ohne Vorspannung'
-          : `Vorspannung: ${TIGHTEN[tight.mode]}${tight.mode === 'vdi' ? ` ν = ${fmt(posNum(tight.nu, 90))} %` : ''}, µ_G = ${fmt(posNum(tight.muG, 0.12))}, µ_K = ${fmt(posNum(tight.muK, 0.12))}`,
+          : `Vorspannung: ${TIGHTEN[tight.mode]}${tight.mode === 'vdi' ? ` ν = ${fmt(posNum(tight.nu, 90))} %` : ''}, µ_G = ${fmt(posNum(tight.muG, 0.12))}, µ_K = ${fmt(posNum(tight.muK, 0.12))}` +
+            (scatterOf(tight)
+              ? `; Streuung α_A = ${fmt(scatterOf(tight).alpha_a)}${scatterOf(tight).setting ? ', Setzen (VDI 2230 Tab. 5.4/1)' : ''} – Festigkeit mit F_V,max, Fuge mit F_V,min`
+              : ''),
       weldNote: (result.welds ?? []).length
         ? 'τw = größte Linienkraft entlang der Naht / a-Maß; zulässig f_vw,d = Rm / (√3·β_w·γ_M2), vereinfachtes Verfahren EN 1993-1-8 (4.5.3.3). Stumpfnaht durchgeschweißt: a = Blechdicke.'
         : null,
@@ -2846,6 +2891,7 @@ export default function App() {
                       detailsOpen={detailsOpen}
                       mass={assemblyMass}
                       bolts={bolts}
+                      boltFatigue={tight.mode !== 'none' && tight.fatigue}
                       setDetailsOpen={setDetailsOpen}
                     />
                   )
@@ -3301,39 +3347,80 @@ function NumInput({ value, unit, onChange }) {
 }
 
 // Schrauben: Vorspannung, Kräfte im Betrieb und Nachweis (VDI 2230)
-function BoltCard({ rows, sF }) {
+function BoltCard({ rows, sF, fatigue }) {
   if (!rows.length) return null
-  const ok = rows.every((r) => r.safety >= r.need)
+  const ok = rows.every((r) => r.safety >= r.need && r.pressOk && r.engOk && r.fatOk)
   const pre = rows.some((r) => r.preload > 0)
+  const spread = rows.some((r) => r.preload_min != null)
+  const mm1 = (v) => (Math.round(v * 10) / 10).toLocaleString('de-DE')
+  // kN auf drei Stellen, ohne Einheit (steht im Kopf)
+  const kN = (v) => Number((v / 1000).toPrecision(3)).toLocaleString('de-DE')
+  const pct = (x) => `${(100 * x).toFixed(0)} %`
   return (
     <div className={'proof ' + (ok ? 'good' : 'bad')}>
       <div className="item-head">
         <I.IcPin size={15} />
         <strong>Schrauben{ok ? ' – Nachweis erfüllt' : ' – Nachweis NICHT erfüllt'}</strong>
       </div>
-      <table className="weld-table">
+      <table className="weld-table bolt-table">
         <thead>
           <tr>
             <th />
-            {pre && <th title="Vorspannkraft nach dem Anziehen">F_V</th>}
-            <th title="Schraubenkraft im Betrieb (mit Vorspannung)">F_S</th>
-            <th title="Querkraft auf dem Schaft">Quer</th>
+            {pre && <th title={spread ? 'Vorspannkraft kleinste (nach Setzen) … größte (Streuung beim Anziehen)' : 'Vorspannkraft nach dem Anziehen'}>F_V kN</th>}
+            <th title="Schraubenkraft im Betrieb (mit Vorspannung)">F_S kN</th>
+            <th title="Querkraft auf dem Schaft">Quer N</th>
             <th>S</th>
+            {fatigue && <th title="Dauerfestigkeit: σ_ASV / σ_a, Last schwellt zwischen 0 und Betriebslast, nötig 1,2">S_D</th>}
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr
               key={r.name}
-              title={`M${fmt(r.d)} ${r.cls}: Rp0,2 = ${r.rp} MPa, A_s = ${fmt(r.stress_area)} mm²${r.preload > 0 ? ` · Anziehmoment M_A = ${fmt(r.torque)} N·m · Zusatzkraft aus Last ${fmt((r.axial - r.preload) / 1000)} kN` : ''} · Flächenpressung unter Kopf ${fmt(r.bearing_pressure)} MPa · σ_red = ${fmt(r.sv)} MPa · Biegemoment ${fmt(r.moment / 1000)} N·m · Klemmlänge ${fmt(r.clamp)} mm`}
+              title={`${r.name} – M${fmt(r.d)} ${r.cls}: Rp0,2 = ${r.rp} MPa, A_s = ${fmt(r.stress_area)} mm²${r.preload > 0 ? ` · Anziehmoment M_A = ${fmt(r.torque)} N·m · Zusatzkraft aus Last ${fmt((r.axial - r.preload) / 1000)} kN${r.phi_k != null ? ` · Kraftverhältnis Φ_K = ${fmt(r.phi_k)}` : ''}${r.setting_loss != null && r.preload_min != null ? ` · Setzverlust F_Z = ${fmt(r.setting_loss / 1000)} kN` : ''}` : ''} · σ_a = ${fmt(r.stress_amplitude)} MPa (σ_ASV = ${fmt(r.fatigue_limit)}) · Flächenpressung unter Kopf ${fmt(r.bearing_pressure)} MPa · σ_red = ${fmt(r.sv)} MPa · Biegemoment ${fmt(r.moment / 1000)} N·m · Klemmlänge ${fmt(r.clamp)} mm`}
             >
-              <td>
-                {r.name} <em className="muted">{r.cls}</em>
+              <td className="bolt-cell">
+                <span>{r.name}</span> <em className="muted">{r.cls}</em>
               </td>
-              {pre && <td>{r.preload > 0 ? `${fmt(r.preload / 1000)} kN` : '–'}</td>}
-              <td>{Math.abs(r.axial) >= 1000 ? `${fmt(r.axial / 1000)} kN` : `${fmt(r.axial)} N`}</td>
-              <td>{fmt(r.shear)} N</td>
+              {pre && <td>{r.preload > 0 ? (r.preload_min != null ? `${kN(r.preload_min)}…${kN(r.preload)}` : kN(r.preload)) : '–'}</td>}
+              <td>{kN(r.axial)}</td>
+              <td>{Number(r.shear.toPrecision(3)).toLocaleString('de-DE')}</td>
               <td className={r.safety >= r.need ? 'good' : 'bad'}>{Number.isFinite(r.safety) ? fmt(Math.min(r.safety, 99)) : '–'}</td>
+              {fatigue && <td className={r.fatOk ? 'good' : 'bad'}>{Number.isFinite(r.sD) ? fmt(Math.min(r.sD, 99)) : '–'}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <table className="weld-table bolt-table">
+        <thead>
+          <tr>
+            <th />
+            <th title="Flächenpressung unter dem Kopf bzw. der Scheibe / Grenzflächenpressung p_G des Teils darunter">Kopf p/p_G</th>
+            <th title="Flächenpressung unter der Mutter / p_G">Mutter</th>
+            <th title="eingeschraubte Länge in der Gewindebohrung / nötige, damit das Innengewinde nicht vor der Schraube ausreißt">Gewinde mm</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.name}>
+              <td className="bolt-cell" title={r.name}>
+                <span>{r.name}</span>
+              </td>
+              <td
+                className={r.pHead == null ? '' : r.pHead <= 1 ? 'good' : 'bad'}
+                title={`p = ${fmt(r.bearing_pressure)} MPa${r.bearing_limit ? `, p_G = ${fmt(r.bearing_limit)} MPa (${r.bearing_limit_source})` : ', p_G unbekannt (Rm beim Werkstoff angeben)'}`}
+              >
+                {r.pHead == null ? `${fmt(r.bearing_pressure)} MPa` : pct(r.pHead)}
+              </td>
+              <td className={r.pNut == null ? '' : r.pNut <= 1 ? 'good' : 'bad'} title={r.nut_pressure != null ? `p = ${fmt(r.nut_pressure)} MPa${r.nut_limit ? `, p_G = ${fmt(r.nut_limit)} MPa` : ''}` : 'Gewindebohrung'}>
+                {r.pNut != null ? pct(r.pNut) : r.nut_pressure != null ? `${fmt(r.nut_pressure)} MPa` : '–'}
+              </td>
+              <td
+                className={r.engagement == null || r.engagement_min == null ? '' : r.engOk ? 'good' : 'bad'}
+                title={r.engagement != null ? `eingeschraubt ${fmt(r.engagement)} mm, nötig ${r.engagement_min != null ? fmt(r.engagement_min) + ' mm' : '– (Rm des Teils fehlt)'}` : 'mit Mutter'}
+              >
+                {r.engagement != null ? `${mm1(r.engagement)}${r.engagement_min != null ? ` / ${mm1(r.engagement_min)}` : ''}` : '–'}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -3348,7 +3435,9 @@ function BoltCard({ rows, sF }) {
         {pre
           ? ', mit Gewindetorsion aus dem Anziehen; vorgespannt nötig S ≥ 1 (VDI 2230: Schraube wird absichtlich hoch ausgenutzt)'
           : `, nötig S ≥ ${fmt(sF)}`}
-        . Flächenpressung unter dem Kopf im Tooltip; Gewinde-Ausreißen und Dauerfestigkeit nicht geprüft.
+        . Flächenpressung gegen p_G (VDI 2230), Einschraubtiefe: Innengewinde soll mindestens die Bruchkraft der Schraube tragen
+        (l_e ≥ Rm_S·A_s / (0,6·Rm·0,75·π·d)). Bei Vorschlägen aus Bohrungen ist angenommen, dass die Schraube durch die ganze
+        Gewindebohrung reicht.
       </p>
     </div>
   )
@@ -3393,6 +3482,7 @@ function JointCard({ result }) {
         )
       })}
       <p className="hint">
+        {(result.bolts ?? []).some((b) => b.preload_min != null) && 'Fuge mit der kleinsten Vorspannung (nach Streuung und Setzen) bewertet. '}
         Außerhalb der Druckkegel um die Schrauben liegen Platten oft nicht auf – das ist normal. Öffnet erst die Last die Fuge oder reicht der
         Reibschluss µ·F_K nicht, steht ein Hinweis unter Details. Gerechnet: erst Schrauben anziehen, dann Last.
       </p>
@@ -3457,15 +3547,15 @@ function BodiesCard({ result }) {
 }
 
 // Ergebnis: Urteil oben (grün/rot), Größe wählen, Kennwerte, Details zum Aufklappen
-function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, canRerun, onRerun, reference, current, onPin, onUnpin, detailsOpen, setDetailsOpen, mass, bolts = [] }) {
+function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, canRerun, onRerun, reference, current, onPin, onUnpin, detailsOpen, setDetailsOpen, mass, bolts = [], boltFatigue = false }) {
   const rho = Number(material.rho)
   const massG = mass ?? (rho > 0 ? (result.solid_volume / 1000) * rho : null)
   const rows = proofRows(result, proof)
   const wrows = weldRows(result, material)
   const weldBad = wrows.some((w) => w.util != null && w.util > 1)
-  const brows = boltRows(result, bolts, Number(proof.sF) > 0 ? Number(proof.sF) : 1)
+  const brows = boltRows(result, bolts, Number(proof.sF) > 0 ? Number(proof.sF) : 1, boltFatigue)
   const sF = Number(proof.sF) > 0 ? Number(proof.sF) : 1
-  const boltBad = brows.some((b) => b.safety < b.need)
+  const boltBad = brows.some((b) => b.safety < b.need || !b.pressOk || !b.engOk || !b.fatOk)
   const sf = result.safety
   const hasYield = material.yield !== '' && material.yield != null
   let tone
@@ -3541,7 +3631,7 @@ function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, 
         </div>
       </div>
       <WeldCard result={result} material={material} />
-      <BoltCard rows={brows} sF={sF} />
+      <BoltCard rows={brows} sF={sF} fatigue={boltFatigue} />
       <JointCard result={result} />
       <BodiesCard result={result} />
       <div className="quantities" role="radiogroup" aria-label="Ergebnisgröße">
@@ -3748,6 +3838,42 @@ function BoltSection({ bolts, setBolts, selBolt, setSelBolt, openJoints, setOpen
                   : 'Schrauben ohne Vorspannung – die Fuge hebt schon bei kleiner Zuglast ab. '}
             Gerechnet wird in zwei Schritten: erst anziehen, dann kommt die Last dazu.
           </p>
+          {tight.mode !== 'none' && (
+            <>
+              <div className="row">
+                <label className="field grow">
+                  <span>Anziehverfahren (Streuung)</span>
+                  <select value={tight.method ?? 'schluessel'} onChange={(e) => setT({ method: e.target.value })}>
+                    {Object.entries(TIGHTEN_METHODS).map(([k, [l]]) => (
+                      <option key={k} value={k}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {tight.method === 'eigen' && (
+                  <label className="field mini">
+                    <span>α_A</span>
+                    <input value={tight.alpha ?? ''} onChange={(e) => setT({ alpha: e.target.value })} />
+                  </label>
+                )}
+              </div>
+              <label className="check">
+                <input type="checkbox" checked={tight.setting ?? true} onChange={(e) => setT({ setting: e.target.checked })} /> Setzen berücksichtigen
+                (Vorspannkraftverlust F_Z)
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={!!tight.fatigue} onChange={(e) => setT({ fatigue: e.target.checked })} /> Dauerfestigkeit prüfen (Last schwellt
+                zwischen 0 und Betriebslast)
+              </label>
+              {scatterOf(tight) && (
+                <p className="hint">
+                  Mit Streuung wird zweimal gerechnet: größte Vorspannung für Schraube und Teile, kleinste (nach dem Setzen) für die Fuge – klafft
+                  oder rutscht sie dann?
+                </p>
+              )}
+            </>
+          )}
           <span className="mat-head">Fuge zwischen den verschraubten Teilen</span>
           <div className="segmented small">
             <button className={openJoints ? 'on' : ''} onClick={() => setOpenJoints(true)} title="Die Teile drücken aufeinander, können abheben und rutschen">
@@ -4123,7 +4249,9 @@ function MaterialFields({ material: m, setMaterial }) {
         <div className="grid3">
           <NumField label="Re / Rp0,2" unit="MPa" value={m.yield ?? ''} onChange={set('yield')} />
           <NumField label="Rm" unit="MPa" value={m.tensile ?? ''} onChange={set('tensile')} />
+          <NumField label="p_G Schrauben" unit="MPa" value={m.pG ?? ''} onChange={set('pG')} />
         </div>
+        <p className="hint">p_G: Grenzflächenpressung unter Schraubenköpfen und Muttern – leer = Richtwert nach VDI 2230 aus dem Namen, sonst Rm.</p>
       </>
     )
   }

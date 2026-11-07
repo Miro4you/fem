@@ -717,3 +717,9 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .joint { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 6px; border-bottom: 1px solid var(--line); }
 .joint:last-of-type { border-bottom: 0; }
 .joint > b { font-size: 12.5px; font-weight: 600; }
+.bolt-table { font-size: 12px; }
+.bolt-table td.bolt-cell { max-width: 96px; }
+.bolt-table td.bolt-cell span { display: inline-block; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.bolt-table td.bolt-cell em { display: block; font-size: 11px; }
+.bolt-table th, .bolt-table td { white-space: nowrap; }
+.bolt-table td.bolt-cell { white-space: normal; }

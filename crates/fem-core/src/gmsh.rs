@@ -566,14 +566,22 @@ mod tests {
             .support("unten", crate::Fix::all())
             .load(crate::Load::Force { group: "oben".into(), force: [0.0, 0.0, f] });
         model.bolts = det.iter().map(|d| d.bolt.clone()).collect();
-        for (b, rp) in model.bolts.iter_mut().zip([940.0, 640.0]) {
+        for (b, (rp, rm)) in model.bolts.iter_mut().zip([(940.0, 1000.0), (640.0, 800.0)]) {
             b.rp = Some(rp);
+            b.rm = Some(rm);
             b.tighten = Some(crate::bolt::Tighten::Ausnutzung { nu: 0.9, mu_g: 0.12, mu_k: 0.12 });
         }
         model.joint_pairs = crate::bolt::open_joints(&mut model).unwrap();
         model.joint_friction = crate::contact::Friction::Coulomb { mu: 0.15 };
         let res = crate::solve(&model).unwrap();
         assert!(res.contact_converged, "{} Durchgänge", res.contact_passes);
+        // Flächenpressung: 10.9 unter dem Kopf ≈ F_V/A_p = 27,35 kN / 72 mm² ≈ 380 MPa, p_G hier ≈ Rm = 360 (Werkstoff „Stahl“);
+        // Einschraubtiefe 15 mm, nötig für 10.9 in Stahl Rm 360: 1000·36,6 / (0,6·360·0,75·π·8) ≈ 9 mm
+        let b0 = &res.bolts[0];
+        assert!((b0.bearing_pressure - 380.0).abs() < 10.0 && b0.bearing_limit == Some(360.0), "{b0:?}");
+        assert!((b0.engagement.unwrap() - 15.0).abs() < 0.5 && (b0.engagement_min.unwrap() - 8.99).abs() < 0.05, "{b0:?}");
+        let b1 = &res.bolts[1];
+        assert!(b1.engagement.is_none() && b1.nut_pressure.is_some() && b1.nut_limit == Some(360.0), "{b1:?}");
         // F_V nach VDI 2230 (Tab. A1: M8 10.9 27,3 kN, 8.8 18,6 kN); Last erhöht die Schraubenkraft nur wenig
         let fv: Vec<f64> = res.bolts.iter().map(|b| b.preload).collect();
         assert!((fv[0] - 27350.0).abs() < 300.0 && (fv[1] - 18620.0).abs() < 200.0, "{fv:?}");

@@ -58,6 +58,38 @@ pub struct Bolt {
     /// Streckgrenze Rp0,2 der Schraube [MPa] (Festigkeitsklasse) – für Vorspannkraft und Nachweis
     #[serde(default)]
     pub rp: Option<f64>,
+    /// Zugfestigkeit Rm der Schraube [MPa] – für die nötige Einschraubtiefe
+    #[serde(default)]
+    pub rm: Option<f64>,
+    /// Streuung beim Anziehen und Setzen (VDI 2230): dann zwei Rechnungen, größte und kleinste Vorspannung
+    #[serde(default)]
+    pub scatter: Option<Scatter>,
+    /// intern: Faktor auf die Montagevorspannkraft und Verlust durch Setzen [N] (für die beiden Rechnungen)
+    #[serde(default)]
+    pub preload_factor: Option<f64>,
+    #[serde(default)]
+    pub preload_loss: Option<f64>,
+}
+
+/// Streuung der Vorspannkraft (VDI 2230)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct Scatter {
+    /// Anziehfaktor α_A = F_M,max / F_M,min (Drehmomentschlüssel ≈ 1,6, Schlagschrauber 2,5 … 4)
+    pub alpha_a: f64,
+    /// Vorspannkraftverlust durch Setzen F_Z abziehen (Setzbetrag nach VDI 2230 Tab. 5.4/1)
+    #[serde(default)]
+    pub setting: bool,
+}
+
+/// Dauerfestigkeit des Gewindes σ_ASV [MPa] (VDI 2230, schlussvergütet, Ausschlag): 0,85·(150/d + 45)
+pub fn fatigue_limit(d: f64) -> f64 {
+    0.85 * (150.0 / d.max(1.0) + 45.0)
+}
+
+/// Setzbetrag f_Z [µm] (VDI 2230 Tab. 5.4/1, Rz < 10 µm, Längskraft): Gewinde 3, Kopf- und Mutterauflage je 2,5,
+/// jede innere Trennfuge 1,5
+pub fn setting_amount(nut: bool, inner_joints: usize) -> f64 {
+    3.0 + 2.5 + if nut { 2.5 } else { 0.0 } + 1.5 * inner_joints as f64
 }
 
 /// Wie die Schraube angezogen wird (VDI 2230)
@@ -164,7 +196,7 @@ impl Bolt {
     /// Vorspannkraft, Anziehmoment und Gewindemoment (leer = ohne Vorspannung)
     pub fn assembly(&self) -> Option<Assembly> {
         let a_s = self.stress_area.unwrap_or_else(|| stress_area(self.d));
-        let (f_v, mu) = match (&self.tighten, self.preload) {
+        let (f_nom, mu) = match (&self.tighten, self.preload) {
             (_, Some(f)) if f > 0.0 => (f, None),
             (Some(Tighten::Kraft { f_v }), _) if *f_v > 0.0 => (*f_v, None),
             (Some(Tighten::Ausnutzung { nu, mu_g, mu_k }), _) if *nu > 0.0 => {
@@ -178,7 +210,26 @@ impl Bolt {
         };
         // ohne Reibwerte (Kraft vorgegeben): Gewindemoment und Anziehmoment mit µ = 0,12 abgeschätzt
         let (mu_g, mu_k) = mu.unwrap_or((mu_default(), mu_default()));
-        Some(Assembly { f_v, m_a: tightening_torque(self.d, f_v, mu_g, mu_k, self.d_km()) / 1000.0, m_g: thread_torque(self.d, f_v, mu_g) })
+        // Streuung: Montagevorspannkraft F_M = Faktor · Nennwert; nach dem Setzen F_V = F_M − F_Z. Das Anziehmoment bleibt
+        // das des Nennwerts (so wird angezogen)
+        let f_m = f_nom * self.preload_factor.unwrap_or(1.0);
+        let f_v = (f_m - self.preload_loss.unwrap_or(0.0)).max(0.0);
+        Some(Assembly {
+            f_v,
+            m_a: tightening_torque(self.d, f_nom, mu_g, mu_k, self.d_km()) / 1000.0,
+            m_g: thread_torque(self.d, f_m, mu_g),
+        })
+    }
+
+    /// Faktoren auf den Nennwert der Montagevorspannkraft für größte und kleinste Vorspannung. Ausnutzung der
+    /// Streckgrenze: der Nennwert ist schon F_M,max (F_M,min = F_M,max/α_A); Anziehmoment oder Kraft vorgegeben: Nennwert
+    /// ist der Mittelwert (F_M,max = 2α_A/(1+α_A)·F_M, F_M,min = 2/(1+α_A)·F_M)
+    pub fn scatter_factors(&self) -> (f64, f64) {
+        let a = self.scatter.map(|s| s.alpha_a).unwrap_or(1.0).max(1.0);
+        match (&self.tighten, self.preload) {
+            (Some(Tighten::Ausnutzung { .. }), None) => (1.0, 1.0 / a),
+            _ => (2.0 * a / (1.0 + a), 2.0 / (1.0 + a)),
+        }
     }
 }
 
@@ -207,6 +258,8 @@ pub struct Prepared {
     pub clamp: f64,
     pub n_head: usize,
     pub n_thread: usize,
+    /// eingeschraubte Länge in der Gewindebohrung [mm] (leer = mit Mutter)
+    pub engagement: Option<f64>,
 }
 
 impl Prepared {
@@ -259,8 +312,29 @@ pub struct BoltResult {
     pub sigma_red: f64,
     /// Ausnutzung σ_red / Rp0,2 (leer = Festigkeitsklasse unbekannt)
     pub utilization: Option<f64>,
-    /// Flächenpressung unter Kopf bzw. Mutter p = F_S / A_p, A_p = π/4·(d_w² − d_h²) [MPa]
+    /// Flächenpressung unter dem Kopf p = F_S / A_p, A_p = π/4·(d_w² − d_h²) [MPa]
     pub bearing_pressure: f64,
+    /// Grenzflächenpressung p_G des Teils unter dem Kopf [MPa] und Herkunft des Werts
+    pub bearing_limit: Option<f64>,
+    pub bearing_limit_source: Option<String>,
+    /// Flächenpressung unter der Mutter [MPa] und p_G des Teils darunter
+    pub nut_pressure: Option<f64>,
+    pub nut_limit: Option<f64>,
+    /// eingeschraubte Länge in der Gewindebohrung [mm] und die nötige, damit das Innengewinde nicht vor der Schraube
+    /// ausreißt: l_e,min = Rm_S·A_s / (0,6·Rm_M · 0,75·π·d)
+    pub engagement: Option<f64>,
+    pub engagement_min: Option<f64>,
+    /// mit Streuung: kleinste Vorspannkraft nach dem Setzen F_V,min [N] und Schraubenkraft in diesem Fall
+    pub preload_min: Option<f64>,
+    pub axial_min: Option<f64>,
+    /// Vorspannkraftverlust durch Setzen F_Z [N]
+    pub setting_loss: Option<f64>,
+    /// Kraftverhältnis Φ_K = δ_P / (δ_S + δ_P) aus den Nachgiebigkeiten von Schraube und verspannten Teilen (FEM)
+    pub phi_k: Option<f64>,
+    /// Spannungsausschlag σ_a [MPa], wenn die Last zwischen 0 und dem Wert schwellt: (ΔF/A_s + ΔM/W)/2
+    pub stress_amplitude: f64,
+    /// Dauerfestigkeit σ_ASV [MPa] (VDI 2230, schlussvergütet)
+    pub fatigue_limit: f64,
     /// Querkraft [N]
     pub shear: f64,
     /// größtes Biegemoment im Schaft [N·mm]
@@ -367,6 +441,7 @@ pub fn prepare(mesh: &Mesh, faces: &[Face], b: &Bolt) -> Result<Prepared> {
         weighted_side(mesh, faces, &cand)
     };
     let head = ring(b.head_t, 0.45 * b.d, 0.5 * b.head_d.max(1.2 * b.d) * 1.05);
+    let mut engagement = None;
     let (thread, t_thread) = match b.nut_t {
         Some(tn) => (ring(tn, 0.45 * b.d, 0.5 * b.nut_d.unwrap_or(1.6 * b.d).max(1.2 * b.d) * 1.05), tn),
         None => {
@@ -384,6 +459,9 @@ pub fn prepare(mesh: &Mesh, faces: &[Face], b: &Bolt) -> Result<Prepared> {
                 .collect();
             // tragende Gewindegänge: die ersten 1,2·d ab Beginn der Gewindebohrung
             let first = cand.iter().map(|c| c.2).fold(f64::MAX, f64::min);
+            // eingeschraubte Länge: von der ersten bis zur letzten Stelle der Gewindebohrung bis zum Schraubenende
+            let last = cand.iter().map(|c| c.2).fold(f64::MIN, f64::max).min(t1);
+            engagement = (last > first).then_some(last - first);
             let ring: Vec<(usize, f64)> = cand.iter().filter(|c| c.2 <= first + 1.2 * b.d + tol_t).map(|c| (c.0, c.1)).collect();
             (weighted_side(mesh, faces, &ring), first)
         }
@@ -479,7 +557,7 @@ pub fn prepare(mesh: &Mesh, faces: &[Face], b: &Bolt) -> Result<Prepared> {
     let kb_axial = tm.transpose() * kla * &tm;
     let gn = |r0: usize| -> nalgebra::DVector<f64> { (g.rows(r0, 3).transpose() * n).into_owned() };
     let b_ax = gn(6) - gn(0);
-    Ok(Prepared { nodes, g, kb, kb_axial, b_ax, offset: 0.0, q, k_ax, clamp, n_head: nh, n_thread: nt })
+    Ok(Prepared { nodes, g, kb, kb_axial, b_ax, offset: 0.0, q, k_ax, clamp, n_head: nh, n_thread: nt, engagement })
 }
 
 /// Körper, die eine Schraube zusammenhält: Körper an Kopf- und Gewindeseite sowie alle Körper, deren Elemente
@@ -609,7 +687,20 @@ pub fn load_zone(mesh: &Mesh, bolts: &[Bolt], prepared: &[Prepared]) -> Vec<bool
 }
 
 /// Schraubenkräfte aus der Lösung
-pub fn evaluate(b: &Bolt, p: &Prepared, u: &[f64]) -> BoltResult {
+/// Werkstoffe der Teile an Kopf- und Gewinde- bzw. Mutterseite (für Flächenpressung und Einschraubtiefe)
+#[derive(Default, Clone, Copy)]
+pub struct SideMaterials<'a> {
+    pub head: Option<&'a crate::Material>,
+    pub thread: Option<&'a crate::Material>,
+}
+
+/// nötige Einschraubtiefe [mm]: Innengewinde (Scherfläche ≈ 0,75·π·d·l_e, τ_B ≈ 0,6·Rm) soll mindestens die
+/// Bruchkraft der Schraube Rm·A_s tragen
+pub fn engagement_min(d: f64, a_s: f64, rm_bolt: f64, rm_part: f64) -> f64 {
+    rm_bolt * a_s / (0.6 * rm_part * 0.75 * std::f64::consts::PI * d)
+}
+
+pub fn evaluate(b: &Bolt, p: &Prepared, u: &[f64], mats: SideMaterials) -> BoltResult {
     let l = p.local(u);
     // lokale Endkräfte des Balkens
     let mut tm = DMatrix::<f64>::zeros(12, 12);
@@ -638,7 +729,25 @@ pub fn evaluate(b: &Bolt, p: &Prepared, u: &[f64]) -> BoltResult {
         torque: asm.m_a,
         sigma_red,
         utilization: b.rp.filter(|r| *r > 0.0).map(|r| sigma_red / r),
-        bearing_pressure: axial.max(0.0) / b.bearing_area(),
+        bearing_pressure: axial.max(0.0).max(asm.f_v) / b.bearing_area(),
+        bearing_limit: mats.head.and_then(|m| m.limiting_pressure()).map(|x| x.0),
+        bearing_limit_source: mats.head.and_then(|m| m.limiting_pressure()).map(|x| x.1.to_string()),
+        nut_pressure: b.nut_t.map(|_| {
+            let dw = b.nut_d.unwrap_or(1.6 * b.d).max(1.3 * b.d);
+            axial.max(0.0).max(asm.f_v) / (std::f64::consts::FRAC_PI_4 * (dw * dw - (1.1 * b.d).powi(2)))
+        }),
+        nut_limit: b.nut_t.and(mats.thread).and_then(|m| m.limiting_pressure()).map(|x| x.0),
+        engagement: p.engagement,
+        preload_min: None,
+        axial_min: None,
+        setting_loss: None,
+        phi_k: None,
+        stress_amplitude: 0.0,
+        fatigue_limit: fatigue_limit(b.d),
+        engagement_min: p.engagement.and(mats.thread.and_then(|m| m.tensile_strength)).filter(|r| *r > 0.0).map(|rm_part| {
+            let rm_bolt = b.rm.or(b.rp.map(|r| r / 0.8)).unwrap_or(800.0);
+            engagement_min(b.d, a_s, rm_bolt, rm_part)
+        }),
         shear,
         moment,
         clamp: p.clamp,
@@ -732,6 +841,10 @@ pub fn suggest(holes: &[Hole], existing: &[Bolt]) -> Vec<Bolt> {
             preload: None,
             tighten: None,
             rp: None,
+            rm: None,
+            scatter: None,
+            preload_factor: None,
+            preload_loss: None,
         };
         let bolt = if rmin < 0.95 * rmax && (first_small || last_small) {
             // Gewindebohrung am Ende, Kopf an der anderen Seite
@@ -796,6 +909,10 @@ mod tests {
             preload: None,
             tighten: Some(super::Tighten::Ausnutzung { nu: 0.9, mu_g: 0.12, mu_k: 0.12 }),
             rp: Some(640.0),
+            rm: None,
+            scatter: None,
+            preload_factor: None,
+            preload_loss: None,
         };
         let a = b.assembly().unwrap();
         b.tighten = Some(super::Tighten::Moment { m_a: a.m_a, mu_g: 0.12, mu_k: 0.12 });

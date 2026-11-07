@@ -26,6 +26,9 @@ pub struct Material {
     /// Dichte [g/cm³] (nur für Eigenfrequenzen in Baugruppen mit verschiedenen Werkstoffen nötig)
     #[serde(default, rename = "rho")]
     pub density: Option<f64>,
+    /// Grenzflächenpressung p_G [MPa] unter Schraubenköpfen und Muttern (leer = Richtwert nach Name bzw. Rm)
+    #[serde(default, rename = "pG")]
+    pub limiting_pressure: Option<f64>,
 }
 
 /// Füllmuster des Slicers
@@ -173,7 +176,38 @@ impl Material {
             layers: None,
             infill: None,
             density: None,
+            limiting_pressure: None,
         }
+    }
+
+    /// Grenzflächenpressung p_G [MPa] und woher der Wert kommt: eigene Angabe, Richtwert nach VDI 2230 (Tab. A9,
+    /// gerundet) aus dem Werkstoffnamen, sonst Rm (für Stähle eher vorsichtig, für Kunststoffe wegen Kriechen eher hoch)
+    pub fn limiting_pressure(&self) -> Option<(f64, &'static str)> {
+        if let Some(p) = self.limiting_pressure.filter(|p| *p > 0.0) {
+            return Some((p, "eigene Angabe"));
+        }
+        let n: String = self.name.to_lowercase().chars().filter(|c| !c.is_whitespace() && *c != '-' && *c != '.').collect();
+        const T: [(&[&str], f64); 15] = [
+            (&["s235"], 490.0),
+            (&["s275"], 600.0),
+            (&["s355"], 760.0),
+            (&["e295"], 710.0),
+            (&["c45"], 700.0),
+            (&["42crmo4"], 850.0),
+            (&["34crnimo6"], 1080.0),
+            (&["14301", "x5crni1810", "14404", "316l", "x2crnimo17122"], 630.0),
+            (&["gjl250", "gg25"], 850.0),
+            (&["gjs400"], 600.0),
+            (&["gjs500"], 750.0),
+            (&["6082", "almgsi1"], 360.0),
+            (&["7075", "alznmgcu"], 540.0),
+            (&["alsi9cu3"], 290.0),
+            (&["ti6al4v", "tial6v4"], 1000.0),
+        ];
+        if let Some((_, p)) = T.iter().find(|(keys, _)| keys.iter().any(|k| n.contains(k))) {
+            return Some((*p, "Richtwert VDI 2230"));
+        }
+        self.tensile_strength.filter(|r| *r > 0.0).map(|r| (r, "≈ Rm"))
     }
 
     /// Ersatzwerkstoff für den gefüllten Kern (Infill), aus Muster und Füllgrad
@@ -210,6 +244,7 @@ impl Material {
             layers: Some(layers),
             infill: None,
             density: None,
+            limiting_pressure: None,
         })
     }
 
@@ -332,6 +367,23 @@ pub fn stress_to_layers(s: &[f64; 6], r: &Matrix3<f64>) -> [f64; 6] {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn grenzflaechenpressung() {
+        let m = |name: &str, rm: Option<f64>| super::Material { name: name.into(), tensile_strength: rm, ..super::Material::steel() };
+        assert_eq!(m("S235JR", Some(360.0)).limiting_pressure().unwrap().0, 490.0);
+        assert_eq!(m("EN AW-6082 T6", Some(290.0)).limiting_pressure().unwrap().0, 360.0);
+        assert_eq!(m("1.4301 (X5CrNi18-10)", Some(520.0)).limiting_pressure().unwrap().0, 630.0);
+        assert_eq!(m("EN-GJS-400 (Sphäroguss)", Some(400.0)).limiting_pressure().unwrap().0, 600.0);
+        // unbekannt: Rm; ohne Rm: nichts
+        assert_eq!(m("PLA (FDM)", Some(50.0)).limiting_pressure().unwrap(), (50.0, "≈ Rm"));
+        assert!(m("Holz", None).limiting_pressure().is_none());
+        let mut own = m("S235JR", Some(360.0));
+        own.limiting_pressure = Some(420.0);
+        assert_eq!(own.limiting_pressure().unwrap(), (420.0, "eigene Angabe"));
+        // Einschraubtiefe M8 8.8 in S235: 800·36,6 / (0,6·360·0,75·π·8) ≈ 7,2 mm
+        assert!((crate::bolt::engagement_min(8.0, 36.6, 800.0, 360.0) - 7.19).abs() < 0.02);
+    }
+
     use super::*;
 
     fn printed(dir: [f64; 3]) -> Material {
@@ -344,6 +396,7 @@ mod tests {
             layers: Some(Layers { build_dir: dir, e_z: 2500.0, nu_z: None, g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
             infill: None,
             density: None,
+            limiting_pressure: None,
         }
     }
 
