@@ -23,8 +23,23 @@
   und Kräfte zwischen den Körpern, Onshape-Baugruppen holen, SolidWorks-Makro und Fusion lassen Baugruppen zu.
   Prüffall „Zugstab Stahl + Alu“ (exakt).
 - **Stufe 2:** Kontakt ohne feste Verbindung (kann sich öffnen; reibungsfrei bzw. mit Reibung – nichtlinear,
-  iterativ), Schrauben (Balken mit Vorspannung zwischen Bohrungen, Nachweis nach VDI 2230 vereinfacht), Bolzen-
-  verbindung (Bolzen im Loch, drehbar), 3D-Druck-Füllung zusammen mit Werkstoff je Körper.
+  iterativ), Bolzenverbindung (Bolzen im Loch, drehbar), 3D-Druck-Füllung zusammen mit Werkstoff je Körper.
+- **Schrauben (Wunsch Felix 07.11.):** automatisch erkennen, auswählen, Festigkeitsklasse angeben.
+  - **Erkennen:** (a) Schraube ist als Körper modelliert (Onshape-Normteile, SolidWorks-Toolbox): Name enthält
+    „M8“, „ISO 4762“, „DIN 912/933“, „Screw/Schraube/Bolt“ und/oder Körper = Zylinderschaft + Kopf, Achse geht durch
+    Bohrungen anderer Körper → Gewinde M aus dem Schaft-Ø, Länge, Klemmlänge. (b) Keine Schraube modelliert:
+    fluchtende Bohrungen durch mehrere Körper (Durchgangsloch nach ISO 273, z. B. Ø9 → M8) → Vorschlag „Schraube hier?“.
+  - **Auswählen:** Liste „Schrauben gefunden“ unter Verbindungen, je Schraube M-Größe, Festigkeitsklasse (5.6, 8.8,
+    10.9, 12.9, A2-70, A2-80, A4-70, A4-80), Vorspannung (aus Anziehmoment und Reibung µ oder % der Streckgrenze, Standard
+    70 % Rp0,2 · A_s), im Bild anklicken = auswählen.
+  - **Rechnen:** Schraube als Verbindungselement (Balken mit Schraubensteifigkeit zwischen Kopfauflage und Gewinde-
+    bereich, Kopplung über die Auflageflächen) statt Volumennetz; modellierte Schraubenkörper werden dafür ausgeblendet.
+    Vorspannung braucht Kontakt zwischen den verschraubten Teilen (sonst kleben sie) → nach dem Kontakt aus Stufe 2;
+    vorher schon möglich: Schraube ohne Vorspannung als fester Verbinder mit Schraubenkräften.
+  - **Auswerten:** Schraubenkraft axial/quer je Schraube, Nachweis vereinfacht nach VDI 2230: Zug F ≤ F_0,2 = Rp0,2 · A_s
+    (mit Vorspannung), Querkraft über Reibschluss µ · F_V bzw. Abscheren, Flächenpressung unter dem Kopf; Tabelle
+    A_s (M3–M30) und Festigkeitswerte je Klasse.
+
 - **Stufe 3:** Bewegungssimulation mit FEM entlang der Bewegung (siehe unten).
 
 ## 1. Ansys-Vergleich Hebel (wartet auf Felix)
