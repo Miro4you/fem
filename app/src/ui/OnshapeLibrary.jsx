@@ -57,21 +57,31 @@ export default function OnshapeLibrary({ onClose, onError }) {
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState(null)
   const [url, setUrl] = useState('')
+  const [usage, setUsage] = useState(null)
+  const [fresh, setFresh] = useState(0)
   const input = useRef(null)
 
   useEffect(() => {
-    api.cadInfo().then((i) => setKeys(!!i.onshape)).catch(() => setKeys(false))
+    api
+      .cadInfo()
+      .then((i) => {
+        setKeys(!!i.onshape)
+        setUsage(i.onshapeUsage ?? null)
+      })
+      .catch(() => setKeys(false))
   }, [])
 
   // Dokumente laden (Suche verzögert)
   useEffect(() => {
     if (!keys) return
+    // Suche erst ab 2 Zeichen – jede Abfrage zählt bei Onshape
+    if (q.trim().length === 1) return
     let stop = false
     const t = setTimeout(
       async () => {
         setMsg(null)
         try {
-          const d = await api.onshapeDocuments(q)
+          const d = await api.onshapeDocuments(q, fresh > 0)
           if (stop) return
           setDocs(d)
           if (!doc && d.length) pickDoc(d[0])
@@ -80,13 +90,13 @@ export default function OnshapeLibrary({ onClose, onError }) {
           if (!stop) setDocs([])
         }
       },
-      q ? 350 : 0,
+      q ? 700 : 0,
     )
     return () => {
       stop = true
       clearTimeout(t)
     }
-  }, [keys, q]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [keys, q, fresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (keys) input.current?.focus()
@@ -99,7 +109,7 @@ export default function OnshapeLibrary({ onClose, onError }) {
     try {
       const list = await api.onshapeElements(d.id, d.workspace)
       setEls(list)
-      setEl(list.find((x) => x.kind === 'PARTSTUDIO') ?? null)
+      setEl(list.find((x) => x.kind === 'PARTSTUDIO') ?? list[0] ?? null)
     } catch (e) {
       setMsg(String(e))
       setEls([])
@@ -150,7 +160,12 @@ export default function OnshapeLibrary({ onClose, onError }) {
             </div>
             <div className="lib-cols">
               <div className="lib-docs">
-                <div className="lib-head">{q ? 'Suchergebnis' : 'Zuletzt geändert'}</div>
+                <div className="lib-head row">
+                  <span className="grow">{q ? 'Suchergebnis' : 'Zuletzt geändert'}</span>
+                  <button className="link" title="Liste neu von Onshape holen (sonst bis zu 10 min zwischengespeichert)" onClick={() => setFresh(fresh + 1)}>
+                    aktualisieren
+                  </button>
+                </div>
                 {docs == null && (
                   <div className="lib-wait">
                     <Loader2 size={16} className="spin" /> Lade Dokumente …
@@ -179,20 +194,21 @@ export default function OnshapeLibrary({ onClose, onError }) {
                         <Loader2 size={16} className="spin" /> Lade Teilestudios …
                       </div>
                     )}
-                    {els?.length === 0 && <p className="hint">Keine Teilestudios in diesem Dokument.</p>}
+                    {els?.length === 0 && <p className="hint">Keine Teilestudios oder Baugruppen in diesem Dokument.</p>}
                     {els?.map((x) => (
                       <button
                         key={x.id}
                         className={'doc' + (el?.id === x.id ? ' on' : '')}
-                        disabled={x.kind !== 'PARTSTUDIO'}
-                        title={x.kind === 'ASSEMBLY' ? 'Baugruppen kommen mit dem Baugruppen-Schritt' : ''}
+                        title={x.kind === 'ASSEMBLY' ? 'Baugruppe: jedes Teil wird ein Körper (Werkstoff je Körper, Teile an Berührflächen verbunden)' : ''}
                         onClick={() => setEl(x)}
-                        onDoubleClick={() => x.kind === 'PARTSTUDIO' && fetchPart(x.url, `${doc.name} - ${x.name}`)}
+                        onDoubleClick={() => fetchPart(x.url, `${doc.name} - ${x.name}`)}
                       >
-                        <Thumb k={'e' + x.id} args={{ did: doc.id, wid: doc.workspace, eid: x.id }} />
+                        <span className="thumb">
+                          <IcPart size={16} />
+                        </span>
                         <span className="doc-text">
                           <b>{x.name}</b>
-                          <small>{x.kind === 'PARTSTUDIO' ? 'Teilestudio' : 'Baugruppe – kommt später'}</small>
+                          <small>{x.kind === 'PARTSTUDIO' ? 'Teilestudio' : 'Baugruppe'}</small>
                         </span>
                       </button>
                     ))}
@@ -209,7 +225,7 @@ export default function OnshapeLibrary({ onClose, onError }) {
                   <button
                     className="btn primary"
                     disabled={!el || !!busy}
-                    onClick={async () => fetchPart(el.url, `${doc.name} - ${el.name}`, await thumbCache.get('e' + el.id))}
+                    onClick={async () => fetchPart(el.url, `${doc.name} - ${el.name}`, await thumbCache.get('d' + doc.id))}
                   >
                     {busy ? <Loader2 size={14} className="spin" /> : <Download size={14} />} {busy ? 'Hole …' : 'Holen'}
                   </button>
@@ -217,6 +233,11 @@ export default function OnshapeLibrary({ onClose, onError }) {
               </div>
             </div>
             <div className="dialog-foot">
+              {usage && (
+                <span className="hint" title={`Seit ${usage.since}: ${usage.total} Aufrufe insgesamt. Kostenlose Onshape-Konten haben 2500 im Jahr.`}>
+                  {usage.year_count} Onshape-Aufrufe {usage.year} ·
+                </span>
+              )}
               <span className="hint">oder Adresse einfügen:</span>
               <input value={url} placeholder="https://cad.onshape.com/documents/…" onChange={(e) => setUrl(e.target.value)} />
               <button className="btn" disabled={!url.trim() || !!busy} onClick={() => fetchPart(url.trim(), 'Onshape')}>

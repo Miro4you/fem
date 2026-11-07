@@ -41,7 +41,7 @@ pub fn box_mesh(size: [f64; 3], cells: [usize; 3], order: Order) -> Result<Mesh>
             }
         }
     }
-    let mut mesh = Mesh { nodes, npe: 4, conn, surface_tags: Default::default() };
+    let mut mesh = Mesh { nodes, npe: 4, conn, surface_tags: Default::default(), elem_body: vec![], body_names: vec![] };
     mesh.fix_orientation()?;
     if order == Order::Quadratic {
         mesh = mesh.to_quadratic();

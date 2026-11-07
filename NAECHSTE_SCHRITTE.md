@@ -3,27 +3,29 @@
 **Aktuell: Felix testet nach `TESTPROTOKOLL.md`.**
 
 
-## 0. Neue To-dos von Felix (07.11.2026)
+## 0. To-dos von Felix (07.11.2026) – erledigt
 
-1. **Onshape-API-Verbrauch senken:** Onshape zählt API-Aufrufe (Kontingent 2500, nach dem Test schon 600 verbraucht).
-   Größte Verbraucher: Bibliothek (Liste + je Dokument/Teilestudio ein Vorschaubild), STEP-Ausgabe mit wiederholtem
-   Nachfragen (alle 0,7 s), Variablen-Studie (je Wert Feature lesen + ändern + STEP). Ideen: Vorschaubilder auf der
-   Festplatte zwischenspeichern und nur auf Wunsch laden, Dokumentliste zwischenspeichern, beim Nachfragen der STEP-
-   Ausgabe länger warten (1,5–3 s, steigend), Variablen/Teilename nur einmal je Teil holen, Zähler der Aufrufe in den
-   Einstellungen anzeigen (und Warnung vor großen Studien).
-2. **Ergebnisgrößen wieder als Liste** statt Blasen mit „mehr …“: alle Größen untereinander (Name + Kurzhinweis),
-   gewählte hervorgehoben, nicht verfügbare ausblenden (die abgeschnittene „Materialausnu…“-Blase fällt damit weg).
-3. **Auf einem Server laufen lassen wie MathPad** (im Internet, nicht nur im Heimnetz): prüfen, was nötig ist –
-   Server-Modus gibt es schon (`--server`, axum, eingebettete Oberfläche); fehlt: Anmeldung/Benutzer statt Heimnetz-
-   Schlüssel, HTTPS (z. B. hinter Caddy/Nginx), Sitzungen/Speicher je Benutzer, Grenzen für Rechenzeit/Speicher,
-   Gmsh auf dem Server, Docker-Image. Vorher mit Felix klären: wo hostet MathPad, wer soll Zugriff haben, eigene
-   Onshape-Schlüssel je Benutzer.
-4. **Neue Symbole entwerfen:** App-Icon (Programmsymbol für Dock/Taskleiste, `app/src-tauri/icons`) sowie neue Symbole
-   für die Lagerarten (fest, gleitend, Bolzen, Richtungen) und für Kraft und Bolzenlast (`app/src/ui/icons.jsx`).
-   Erst als Entwurf zum Anschauen, dann einbauen.
-5. **Wind-Last klären:** ist keine CFD, nur überschlägig Staudruck ½·ρ·v²·c_w auf die angeströmten Flächen (z. B.
-   Schild, Halter im Fahrtwind, Teil unter Wasser). Mit Felix entscheiden: behalten, umbenennen („Staudruck (überschlägig)“),
-   unter „Mehr“ verstecken oder entfernen. Echte Strömungssimulation (CFD) wäre ein eigenes, großes Projekt.
+1. ✅ **Onshape-API-Verbrauch:** Zähler (Einstellungen › CAD-Verbindungen, Bibliothek), Dokumentliste 10 min und
+   Teilenamen gemerkt, Vorschaubilder auf der Festplatte, keine Teilestudio-Vorschaubilder, STEP-Export seltener
+   nachfragen (2 s warten, dann 1,5–4 s), Suche erst ab 2 Zeichen, Variablen je Teilestudio nur einmal holen.
+   Offen: bei Variablen-Studien die Feature-Liste zwischen den Werten weiterverwenden (spart 1 Aufruf je Wert).
+2. ✅ **Ergebnisgrößen wieder als Liste** (nur verfügbare Größen).
+3. ✅ **Server wie MathPad:** Dockerfile, docker-compose, `server/deploy.sh`, öffentlicher Modus (nur eigene Dateien),
+   Anleitung mit https/Caddy in `server/README.md`. Image hier nicht baubar (Paketquellen gesperrt) → auf dem Server testen.
+4. ✅ **Neue Symbole:** App-Icon (Hebel mit Spannungsfarben, Netz, Einspannung, Kraft) und Lager-/Lastsymbole mit
+   angedeutetem Bauteil.
+5. ✅ **Wind-Last entfernt** (alte Projekte: Wind-Lasten werden beim Öffnen mit Hinweis entfernt).
+
+## Baugruppen
+
+- ✅ **Stufe 1:** Körper mit Namen aus STEP (Gmsh-XAO), Werkstoff je Körper (Statik, Eigenfrequenzen mit Dichte je
+  Körper, Knicken), ein-/ausblenden, Fläche anklicken wählt Körper, flächige Verbindung über Spalt, Ergebnis je Körper
+  und Kräfte zwischen den Körpern, Onshape-Baugruppen holen, SolidWorks-Makro und Fusion lassen Baugruppen zu.
+  Prüffall „Zugstab Stahl + Alu“ (exakt).
+- **Stufe 2:** Kontakt ohne feste Verbindung (kann sich öffnen; reibungsfrei bzw. mit Reibung – nichtlinear,
+  iterativ), Schrauben (Balken mit Vorspannung zwischen Bohrungen, Nachweis nach VDI 2230 vereinfacht), Bolzen-
+  verbindung (Bolzen im Loch, drehbar), 3D-Druck-Füllung zusammen mit Werkstoff je Körper.
+- **Stufe 3:** Bewegungssimulation mit FEM entlang der Bewegung (siehe unten).
 
 ## 1. Ansys-Vergleich Hebel (wartet auf Felix)
 Geometrie: `Daten/Hebel.step` (Onshape, in Metern gespeichert → wird korrekt in mm gelesen).

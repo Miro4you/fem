@@ -6,8 +6,10 @@
 //! Portal → API keys). „FEM-Ergebnis → Onshape“ schreibt die Ergebniswerte in die Beschreibung der Teile.
 //! Die Schlüssel liegen nur auf dem rechnenden Rechner (`~/.config/projekt-fem/onshape.json`).
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,64 @@ use serde_json::{json, Value};
 pub struct Keys {
     pub access: String,
     pub secret: String,
+}
+
+// --- Verbrauch: Onshape zählt API-Aufrufe (kostenlose Konten: 2500 im Jahr) ------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Usage {
+    /// Jahr, für das `year_count` gilt
+    pub year: i32,
+    pub year_count: u64,
+    /// Aufrufe insgesamt seit `since` (Datum der ersten Zählung)
+    pub total: u64,
+    pub since: String,
+}
+
+static USAGE_LOCK: Mutex<()> = Mutex::new(());
+
+fn usage_path() -> Option<PathBuf> {
+    Some(crate::server::config_dir()?.join("onshape-aufrufe.json"))
+}
+
+fn today() -> (i32, String) {
+    // Tage seit 1970 → Datum (ohne zusätzliche Bibliothek)
+    let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86400).unwrap_or(0) as i64;
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    (y as i32, format!("{d:02}.{m:02}.{y}"))
+}
+
+pub fn usage() -> Usage {
+    let (year, date) = today();
+    let mut u: Usage = usage_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    if u.since.is_empty() {
+        u.since = date;
+    }
+    if u.year != year {
+        u.year = year;
+        u.year_count = 0;
+    }
+    u
+}
+
+/// einen Aufruf zählen (vor dem Senden, damit auch fehlgeschlagene mitzählen)
+fn count_call() {
+    let _g = USAGE_LOCK.lock();
+    let mut u = usage();
+    u.year_count += 1;
+    u.total += 1;
+    if let Some(p) = usage_path() {
+        let _ = std::fs::create_dir_all(p.parent().unwrap());
+        let _ = std::fs::write(p, serde_json::to_string(&u).unwrap_or_default());
+    }
 }
 
 fn keys_path() -> Option<PathBuf> {
@@ -127,6 +187,7 @@ impl Client {
     }
 
     fn get(&self, path: &str) -> Result<Value, String> {
+        count_call();
         self.agent
             .get(&format!("{}/api/v6/{path}", self.base))
             .set("Authorization", &self.auth)
@@ -138,6 +199,7 @@ impl Client {
     }
 
     fn post(&self, path: &str, body: Value) -> Result<Value, String> {
+        count_call();
         self.agent
             .post(&format!("{}/api/v6/{path}", self.base))
             .set("Authorization", &self.auth)
@@ -154,6 +216,7 @@ impl Client {
 
     /// Rohdaten von einer Adresse dieses Onshape-Servers → (Bytes, Inhaltstyp)
     fn fetch(&self, url: &str, accept: &str) -> Result<(Vec<u8>, String), String> {
+        count_call();
         let r = self.agent.get(url).set("Authorization", &self.auth).set("Accept", accept).call().map_err(api_error)?;
         let kind = r.content_type().to_string();
         let mut buf = Vec::new();
@@ -207,16 +270,40 @@ fn thumb_href(v: &Value) -> Option<String> {
     pick["href"].as_str().map(String::from)
 }
 
-/// Eigene und geteilte Dokumente, zuletzt geänderte zuerst; `q` sucht im Namen
-pub fn documents(q: &str) -> Result<Vec<Document>, String> {
-    let c = Client::with_base(&library_base())?;
+// Zwischenspeicher, damit Blättern und erneutes Öffnen der Bibliothek keine Aufrufe kostet
+type Cache<T> = Mutex<Option<HashMap<String, (Instant, T)>>>;
+static DOCS: Cache<Vec<Document>> = Mutex::new(None);
+static ELEMENTS: Cache<Vec<Element>> = Mutex::new(None);
+static NAMES: Cache<(String, bool)> = Mutex::new(None);
+const LIST_TTL: Duration = Duration::from_secs(600);
+
+fn cached<T: Clone>(c: &Cache<T>, key: &str, ttl: Duration) -> Option<T> {
+    let g = c.lock().ok()?;
+    let (at, v) = g.as_ref()?.get(key)?;
+    (at.elapsed() < ttl).then(|| v.clone())
+}
+
+fn remember<T>(c: &Cache<T>, key: &str, v: T) {
+    if let Ok(mut g) = c.lock() {
+        g.get_or_insert_with(HashMap::new).insert(key.to_string(), (Instant::now(), v));
+    }
+}
+
+/// Eigene und geteilte Dokumente, zuletzt geänderte zuerst; `q` sucht im Namen. `fresh` = Zwischenspeicher übergehen.
+pub fn documents(q: &str, fresh: bool) -> Result<Vec<Document>, String> {
     let q = q.trim();
+    if !fresh {
+        if let Some(d) = cached(&DOCS, q, LIST_TTL) {
+            return Ok(d);
+        }
+    }
+    let c = Client::with_base(&library_base())?;
     let mut path = "documents?sortColumn=modifiedAt&sortOrder=desc&offset=0&limit=20".to_string();
     if !q.is_empty() {
         path += &format!("&q={}", urlencode(q));
     }
     let r = c.get(&path)?;
-    Ok(r["items"]
+    let list: Vec<Document> = r["items"]
         .as_array()
         .into_iter()
         .flatten()
@@ -232,7 +319,9 @@ pub fn documents(q: &str) -> Result<Vec<Document>, String> {
                 thumbnail: thumb_href(d),
             })
         })
-        .collect())
+        .collect();
+    remember(&DOCS, q, list.clone());
+    Ok(list)
 }
 
 /// Teilestudios (und Baugruppen) im Arbeitsbereich eines Dokuments
@@ -240,10 +329,14 @@ pub fn elements(did: &str, wid: &str) -> Result<Vec<Element>, String> {
     if !id_ok(did) || !id_ok(wid) {
         return Err("Ungültige Dokumentkennung".into());
     }
+    let key = format!("{did}/{wid}");
+    if let Some(e) = cached(&ELEMENTS, &key, LIST_TTL) {
+        return Ok(e);
+    }
     let base = library_base();
     let c = Client::with_base(&base)?;
     let r = c.get(&format!("documents/d/{did}/w/{wid}/elements"))?;
-    Ok(r.as_array()
+    let list: Vec<Element> = r.as_array()
         .into_iter()
         .flatten()
         .filter_map(|e| {
@@ -256,7 +349,9 @@ pub fn elements(did: &str, wid: &str) -> Result<Vec<Element>, String> {
                 url: format!("{base}/documents/{did}/w/{wid}/e/{id}"),
             })
         })
-        .collect())
+        .collect();
+    remember(&ELEMENTS, &key, list.clone());
+    Ok(list)
 }
 
 /// Bildadresse prüfen: nur der Onshape-Server selbst (dorthin gehen die Schlüssel mit). Im Test gegen einen Nachbau
@@ -281,7 +376,6 @@ fn thumb_url(h: &str, base: &str) -> Result<String, String> {
 pub fn thumbnail(href: Option<&str>, did: &str, wid: &str, eid: &str) -> Result<String, String> {
     use base64::Engine;
     let base = library_base();
-    let c = Client::with_base(&base)?;
     let url = match href {
         Some(h) => thumb_url(h, &base)?,
         None => {
@@ -291,56 +385,83 @@ pub fn thumbnail(href: Option<&str>, did: &str, wid: &str, eid: &str) -> Result<
             format!("{base}/api/v6/thumbnails/d/{did}/w/{wid}/e/{eid}/s/300x170")
         }
     };
+    let c = Client::with_base(&base)?;
+    let file = crate::server::config_dir().map(|d| d.join("onshape-vorschau").join(format!("{:016x}.txt", fnv(&url))));
+    if let Some(t) = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()) {
+        return Ok(t);
+    }
     let (data, kind) = c.fetch(&url, "image/*")?;
     let kind = if kind.starts_with("image/") { kind } else { "image/png".into() };
-    Ok(format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(data)))
+    let out = format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(data));
+    if let Some(f) = file {
+        let _ = std::fs::create_dir_all(f.parent().unwrap());
+        let _ = std::fs::write(f, &out);
+    }
+    Ok(out)
 }
 
-/// Teilname in Projekt-FEM: „Dokument - Teilestudio“ (bleibt über Änderungen gleich)
-fn part_name(c: &Client, t: &Target) -> Result<String, String> {
+fn fnv(s: &str) -> u64 {
+    s.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+}
+
+/// Teilname in Projekt-FEM: „Dokument - Teilestudio“ (bleibt über Änderungen gleich) und ob es eine Baugruppe ist
+fn part_name(c: &Client, t: &Target) -> Result<(String, bool), String> {
+    let key = format!("{}/{}", t.did, t.eid);
+    if let Some(n) = cached(&NAMES, &key, Duration::from_secs(24 * 3600)) {
+        return Ok(n);
+    }
+    let n = part_name_fetch(c, t)?;
+    remember(&NAMES, &key, n.clone());
+    Ok(n)
+}
+
+fn part_name_fetch(c: &Client, t: &Target) -> Result<(String, bool), String> {
     let doc = c.get(&format!("documents/{}", t.did))?;
     let els = c.get(&format!("documents/d/{}/{}/{}/elements?elementId={}", t.did, t.wvm, t.wvmid, t.eid))?;
     let el = els.as_array().and_then(|a| a.first()).cloned().unwrap_or(Value::Null);
     let kind = el["elementType"].as_str().unwrap_or("PARTSTUDIO");
-    if kind != "PARTSTUDIO" {
-        return Err(if kind == "ASSEMBLY" {
-            "Baugruppen kann Projekt-FEM noch nicht rechnen – bitte das Teilestudio öffnen".into()
-        } else {
-            "Bitte ein Teilestudio öffnen (der aktive Reiter ist kein Teilestudio)".into()
-        });
+    if kind != "PARTSTUDIO" && kind != "ASSEMBLY" {
+        return Err("Bitte ein Teilestudio oder eine Baugruppe öffnen (der aktive Reiter ist keins von beiden)".into());
     }
     let d = doc["name"].as_str().unwrap_or("Onshape");
-    Ok(match el["name"].as_str() {
+    let name = match el["name"].as_str() {
         Some(e) if !e.is_empty() => format!("{d} - {e}"),
         _ => d.to_string(),
-    })
+    };
+    Ok((name, kind == "ASSEMBLY"))
 }
 
 /// Teilestudio als STEP holen und wie ein Teil aus dem CAD an Projekt-FEM übergeben
 pub fn import(url: &str) -> Result<crate::cad::Incoming, String> {
     let t = parse_url(url)?;
     let c = Client::new(&t)?;
-    let name = part_name(&c, &t)?;
-    let data = export_step(&c, &t)?;
+    let (name, assembly) = part_name(&c, &t)?;
+    let data = export_step(&c, &t, assembly)?;
     crate::cad::receive_from(&name, "Onshape", &data, Some(url.trim().to_string()))
 }
 
-/// Teilestudio als STEP (Onshape erzeugt die Datei im Hintergrund)
-fn export_step(c: &Client, t: &Target) -> Result<Vec<u8>, String> {
+/// Teilestudio bzw. Baugruppe als STEP (Onshape erzeugt die Datei im Hintergrund). Baugruppen behalten ihre
+/// Teilenamen; jedes Teil wird ein Körper.
+fn export_step(c: &Client, t: &Target, assembly: bool) -> Result<Vec<u8>, String> {
     let tr = c.post(
-        &format!("partstudios/{}/translations", t.element()),
+        &format!("{}/{}/translations", if assembly { "assemblies" } else { "partstudios" }, t.element()),
         json!({ "formatName": "STEP", "storeInDocument": false, "flattenAssemblies": false, "yAxisIsUp": false }),
     )?;
     let id = tr["id"].as_str().ok_or("Onshape hat die STEP-Ausgabe nicht gestartet")?.to_string();
     // Onshape erzeugt die Datei im Hintergrund – nachfragen, bis sie fertig ist
     let start = Instant::now();
+    let mut polls = 0u64;
+    // die Ausgabe dauert meist ein paar Sekunden – erst warten, dann nachfragen
+    std::thread::sleep(Duration::from_millis(2000));
     let fid = loop {
+        polls += 1;
         let s = c.get(&format!("translations/{id}"))?;
         match s["requestState"].as_str().unwrap_or("") {
             "DONE" => break s["resultExternalDataIds"][0].as_str().ok_or("Onshape hat keine STEP-Datei geliefert")?.to_string(),
             "FAILED" => return Err(format!("STEP-Ausgabe in Onshape fehlgeschlagen: {}", s["failureReason"].as_str().unwrap_or("unbekannt"))),
             _ if start.elapsed() > Duration::from_secs(180) => return Err("STEP-Ausgabe in Onshape dauert zu lange".into()),
-            _ => std::thread::sleep(Duration::from_millis(700)),
+            // seltener nachfragen: jede Abfrage zählt bei Onshape (1,5 s, dann länger)
+            _ => std::thread::sleep(Duration::from_millis((1500 + 500 * polls).min(4000))),
         }
     };
     c.bytes(&format!("documents/d/{}/externaldata/{fid}", t.did))
@@ -442,7 +563,7 @@ pub fn study_value(url: &str, name: &str, expression: &str) -> Result<String, St
     set_variable(url, name, expression)?;
     let t = parse_url(url)?;
     let c = Client::new(&t)?;
-    let data = export_step(&c, &t)?;
+    let data = export_step(&c, &t, false)?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let path = std::env::temp_dir().join(format!("projekt-fem-onshape-studie-{stamp}.step"));
     std::fs::write(&path, data).map_err(|e| e.to_string())?;
@@ -501,7 +622,10 @@ pub fn write_result(url: &str) -> Result<(String, String, usize), String> {
         return Err("Ergebnisse lassen sich nur in den Arbeitsbereich schreiben, nicht in eine gespeicherte Version".into());
     }
     let c = Client::new(&t)?;
-    let name = part_name(&c, &t)?;
+    let (name, assembly) = part_name(&c, &t)?;
+    if assembly {
+        return Err("Ergebnisse zurück nach Onshape gehen bisher nur für Teilestudios, nicht für Baugruppen".into());
+    }
     let summary = crate::cad::summary(&name).ok_or(format!("Für „{name}“ gibt es noch kein Ergebnis – erst in Projekt-FEM rechnen"))?;
     let text = result_text(&summary);
     let parts = c.get(&format!("parts/{}", t.element()))?;

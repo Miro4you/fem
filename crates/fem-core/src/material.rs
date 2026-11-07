@@ -23,6 +23,9 @@ pub struct Material {
     /// Füllung (3D-Druck): volle Wände/Deckschichten außen, Infill innen
     #[serde(default)]
     pub infill: Option<Infill>,
+    /// Dichte [g/cm³] (nur für Eigenfrequenzen in Baugruppen mit verschiedenen Werkstoffen nötig)
+    #[serde(default, rename = "rho")]
+    pub density: Option<f64>,
 }
 
 /// Füllmuster des Slicers
@@ -169,6 +172,7 @@ impl Material {
             tensile_strength: Some(360.0),
             layers: None,
             infill: None,
+            density: None,
         }
     }
 
@@ -205,6 +209,7 @@ impl Material {
             tensile_strength: self.tensile_strength.map(|v| v * fr),
             layers: Some(layers),
             infill: None,
+            density: None,
         })
     }
 
@@ -338,6 +343,7 @@ mod tests {
             tensile_strength: Some(50.0),
             layers: Some(Layers { build_dir: dir, e_z: 2500.0, nu_z: None, g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
             infill: None,
+            density: None,
         }
     }
 

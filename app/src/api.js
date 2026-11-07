@@ -167,7 +167,7 @@ export async function openJson(filterName, ext) {
 export async function cadInfo() {
   if (isDesktop) return invoke('cad_info')
   const st = await http('/onshape/status')
-  return { key: storage.get(KEY_STORE) ?? '', onshape: st.configured, web: window.location.origin }
+  return { key: storage.get(KEY_STORE) ?? '', onshape: st.configured, onshapeUsage: st.usage, web: window.location.origin }
 }
 export const onshapeSetKeys = (access, secret) =>
   isDesktop ? invoke('onshape_set_keys', { access, secret }) : http('/onshape/keys', { method: 'POST', json: { access, secret } })
@@ -180,7 +180,8 @@ export const onshapeStudy = (url, name, expression) =>
   isDesktop ? invoke('onshape_study', { url, name, expression }) : http('/onshape/study', { method: 'POST', json: { url, name, expression } })
 export const onshapeImport = (url) => (isDesktop ? invoke('onshape_import', { url }) : http('/onshape/import', { method: 'POST', json: { url } }))
 /// Bibliothek: eigene Onshape-Dokumente, Teilestudios eines Dokuments, Vorschaubilder (data:-Adresse)
-export const onshapeDocuments = (q = '') => (isDesktop ? invoke('onshape_documents', { q }) : http('/onshape/documents', { method: 'POST', json: { q } }))
+export const onshapeDocuments = (q = '', fresh = false) =>
+  isDesktop ? invoke('onshape_documents', { q, fresh }) : http('/onshape/documents', { method: 'POST', json: { q, fresh } })
 export const onshapeElements = (did, wid) =>
   isDesktop ? invoke('onshape_elements', { did, wid }) : http('/onshape/elements', { method: 'POST', json: { did, wid } })
 export const onshapeThumbnail = ({ href = null, did = '', wid = '', eid = '' }) =>

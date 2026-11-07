@@ -298,6 +298,24 @@ async fn api_upload(State(s): State<Shared>, Query(q): Query<UploadQuery>, body:
     Ok(Json(path.display().to_string()))
 }
 
+/// Öffentlicher Betrieb (Server im Internet, `PROJEKT_FEM_OEFFENTLICH=1`): nur Dateien, die Projekt-FEM selbst
+/// angelegt hat (Hochgeladenes, CAD-Eingang, geänderte Geometrie im Temp-Ordner) – keine beliebigen Pfade des Servers.
+pub fn public_mode() -> bool {
+    std::env::var("PROJEKT_FEM_OEFFENTLICH").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+fn path_allowed(p: &str) -> bool {
+    if !public_mode() {
+        return true;
+    }
+    let Ok(p) = Path::new(p).canonicalize() else { return false };
+    let mut roots = vec![std::env::temp_dir()];
+    if let Some(c) = config_dir() {
+        roots.push(c);
+    }
+    roots.iter().filter_map(|r| r.canonicalize().ok()).any(|r| p.starts_with(r))
+}
+
 fn is_step(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))
 }
@@ -310,7 +328,7 @@ struct FileQuery {
 /// STEP-Datei zurückgeben (zum Einbetten ins Projekt beim Speichern im Browser)
 async fn api_file(Query(q): Query<FileQuery>) -> ApiResult<Response> {
     let p = PathBuf::from(&q.path);
-    if !is_step(&p) {
+    if !is_step(&p) || !path_allowed(&q.path) {
         return Err(bad("Nur STEP-Dateien"));
     }
     let data = tokio::fs::read(&p).await.map_err(bad)?;
@@ -330,6 +348,9 @@ async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Jso
     if !is_step(Path::new(&a.path)) {
         return Err(bad("Nur STEP-Dateien (.step, .stp)"));
     }
+    if !path_allowed(&a.path) {
+        return Err(bad("Datei nicht gefunden – bitte neu hochladen"));
+    }
     let state = s.session(&headers);
     let view = tokio::task::spawn_blocking(move || open_step_impl(&state, &a.path, a.size, a.linear == Some(true), &a.refine))
         .await
@@ -348,7 +369,7 @@ struct ModifyArgs {
 }
 
 async fn api_modify_geometry(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<ModifyArgs>) -> ApiResult<Response> {
-    if !is_step(Path::new(&a.base)) {
+    if !is_step(Path::new(&a.base)) || !path_allowed(&a.base) {
         return Err(bad("Nur STEP-Dateien (.step, .stp)"));
     }
     let state = s.session(&headers);
@@ -406,6 +427,8 @@ async fn os_study(Json(a): Json<OsVar>) -> ApiResult<Response> {
 struct OsQuery {
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    fresh: bool,
 }
 
 #[derive(Deserialize)]
@@ -419,7 +442,7 @@ struct OsDoc {
 }
 
 async fn os_documents(Json(a): Json<OsQuery>) -> ApiResult<Response> {
-    sc_blocking(move || crate::onshape::documents(&a.q)).await
+    sc_blocking(move || crate::onshape::documents(&a.q, a.fresh)).await
 }
 
 async fn os_elements(Json(a): Json<OsDoc>) -> ApiResult<Response> {
@@ -610,6 +633,15 @@ pub fn run_headless(port: Option<u16>) {
     if let Some(p) = port {
         cfg.port = p;
     }
+    // fester Zugangsschlüssel für den Server (sonst der gespeicherte bzw. ein neuer)
+    if let Ok(k) = std::env::var("PROJEKT_FEM_SCHLUESSEL") {
+        let k: String = k.trim().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        if k.len() >= 12 {
+            cfg.key = k;
+        } else if !k.is_empty() {
+            eprintln!("PROJEKT_FEM_SCHLUESSEL zu kurz (mindestens 12 Buchstaben/Ziffern) – nehme den gespeicherten");
+        }
+    }
     let _ = cfg.save();
     let rt = tokio::runtime::Runtime::new().expect("Tokio");
     rt.block_on(async {
@@ -618,11 +650,25 @@ pub fn run_headless(port: Option<u16>) {
                 if let Err(e) = crate::cad::start_local().await {
                     eprintln!("{e}");
                 }
-                println!("Projekt-FEM läuft im Heimnetz. Im Browser öffnen:");
-                for u in info(&cfg).urls {
-                    println!("  {u}");
+                if public_mode() {
+                    println!("Projekt-FEM läuft als Server (öffentlicher Modus). Im Browser öffnen: https://<Adresse>/#k={}", cfg.key);
+                } else {
+                    println!("Projekt-FEM läuft im Heimnetz. Im Browser öffnen:");
+                    for u in info(&cfg).urls {
+                        println!("  {u}");
+                    }
                 }
                 println!("Beenden mit Strg+C.");
+                // Strg+C oder (Docker) SIGTERM
+                #[cfg(unix)]
+                {
+                    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("Signal");
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = term.recv() => {}
+                    }
+                }
+                #[cfg(not(unix))]
                 let _ = tokio::signal::ctrl_c().await;
             }
             Err(e) => {

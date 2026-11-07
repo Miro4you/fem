@@ -67,6 +67,16 @@ struct SurfaceInfo {
     normal: Option<[f64; 3]>,
     /// Achse, Radius usw., falls die Fläche ein Zylinder(ausschnitt) ist (Welle, Bohrung)
     cylinder: Option<Cylinder>,
+    /// Körper der Baugruppe, zu dem die Fläche gehört
+    body: i32,
+}
+
+/// Körper einer Baugruppe (mehrere Volumen in der STEP-Datei)
+#[derive(Serialize)]
+struct BodyView {
+    body: i32,
+    name: String,
+    volume: f64,
 }
 
 #[derive(Serialize)]
@@ -88,6 +98,8 @@ pub struct MeshView {
     /// alle Netzkanten der Oberfläche
     mesh_edges: Vec<u32>,
     surfaces: Vec<SurfaceInfo>,
+    /// Körper (nur bei Baugruppen mit mehreren Körpern)
+    bodies: Vec<BodyView>,
 }
 
 fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usize>) {
@@ -106,9 +118,11 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
     let mut surf: HashMap<i32, (f64, [f64; 3], [f64; 3], Vec<[f64; 3]>)> = HashMap::new();
     // Integrationspunkte je Fläche (Lage, Normale mit Flächengewicht) für die Zylindererkennung
     let mut samples: HashMap<i32, (Vec<[f64; 3]>, Vec<([f64; 3], [f64; 3], f64)>)> = HashMap::new();
+    let mut surf_body: HashMap<i32, i32> = HashMap::new();
 
     for f in faces {
         let tag = f.tag.unwrap_or(-1);
+        surf_body.entry(tag).or_insert_with(|| mesh.body_of(f.elem));
         let n = &f.nodes;
         let subs: Vec<[usize; 3]> = if n.len() == 6 {
             vec![[n[0], n[3], n[5]], [n[3], n[1], n[4]], [n[5], n[4], n[2]], [n[3], n[4], n[5]]]
@@ -181,7 +195,8 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
             let n = [n[0] / l, n[1] / l, n[2] / l];
             let planar = normals.iter().all(|m| m[0] * n[0] + m[1] * n[1] + m[2] * n[2] > 1.0 - 1e-6);
             let cylinder = if planar { None } else { samples.get(&tag).and_then(|(p, nr)| fit_cylinder(p, nr)) };
-            SurfaceInfo { tag, area, center: [c[0] / area, c[1] / area, c[2] / area], normal: planar.then_some(n), cylinder }
+            let body = surf_body.get(&tag).copied().unwrap_or(1);
+            SurfaceInfo { tag, area, center: [c[0] / area, c[1] / area, c[2] / area], normal: planar.then_some(n), cylinder, body }
         })
         .collect();
     surfaces.sort_by_key(|s| s.tag);
@@ -201,6 +216,18 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
         feature_edges,
         mesh_edges,
         surfaces,
+        bodies: {
+            let ids = mesh.bodies();
+            if ids.len() < 2 {
+                vec![]
+            } else {
+                let mut vol: HashMap<i32, f64> = HashMap::new();
+                for e in 0..mesh.n_elems() {
+                    *vol.entry(mesh.body_of(e)).or_default() += fem_core::element::tet_volume(&mesh.elem_coords(e)[..4]).abs();
+                }
+                ids.into_iter().map(|b| BodyView { body: b, name: mesh.body_name(b), volume: vol.get(&b).copied().unwrap_or(0.0) }).collect()
+            }
+        },
     };
     (view, disp_nodes)
 }
@@ -316,6 +343,7 @@ fn cad_info() -> serde_json::Value {
         "key": server::ServerConfig::load_saved().key,
         "localPort": cad::LOCAL_PORT,
         "onshape": onshape::configured(),
+        "onshapeUsage": onshape::usage(),
     })
 }
 
@@ -346,8 +374,8 @@ async fn onshape_import(url: String) -> Result<cad::Incoming, String> {
 }
 
 #[tauri::command]
-async fn onshape_documents(q: String) -> Result<Vec<onshape::Document>, String> {
-    tauri::async_runtime::spawn_blocking(move || onshape::documents(&q)).await.map_err(|e| e.to_string())?
+async fn onshape_documents(q: String, fresh: Option<bool>) -> Result<Vec<onshape::Document>, String> {
+    tauri::async_runtime::spawn_blocking(move || onshape::documents(&q, fresh.unwrap_or(false))).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -483,9 +511,18 @@ struct SupportDef {
     local: Option<LocalFix>,
 }
 
+#[derive(Deserialize)]
+struct BodyMaterial {
+    body: i32,
+    material: Material,
+}
+
 /// Schweißnaht: Fläche A wird über den Spalt an Fläche B gekoppelt
 #[derive(Deserialize)]
 struct WeldDef {
+    /// Anzeigename (z. B. „Naht 2“, „Verbindung 1“)
+    #[serde(default)]
+    name: Option<String>,
     a: Vec<i32>,
     b: Vec<i32>,
     /// a-Maß [mm]; leer = durchgeschweißte Stumpfnaht
@@ -515,6 +552,9 @@ pub struct Setup {
     /// Schweißnähte (Bleche mit Spalt an den Ecken, getrennte Teile)
     #[serde(default)]
     welds: Vec<WeldDef>,
+    /// Baugruppe: eigener Werkstoff je Körper
+    #[serde(default)]
+    bodies: Vec<BodyMaterial>,
     /// Gleichungslöser, Standard: automatisch nach Modellgröße
     #[serde(default)]
     solver: SolverKind,
@@ -563,6 +603,8 @@ pub struct ResultView {
     warnings: Vec<String>,
     /// Schweißnähte: übertragene Kraft, Linienkraft, Nahtspannung
     welds: Vec<fem_core::weld::WeldResult>,
+    /// Baugruppe: Kennwerte je Körper und Kräfte zwischen den Körpern
+    bodies: Vec<fem_core::results::BodyResult>,
 }
 
 #[tauri::command]
@@ -586,6 +628,7 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
     }
     let (progress, slot) = progress_for(state);
     let mut model = Model::new(mesh, setup.material.clone()).solver(setup.solver).progress(progress);
+    model.body_materials = setup.bodies.iter().map(|b| (b.body, b.material.clone())).collect();
         for (i, s) in setup.supports.iter().enumerate() {
             let name = format!("Lager {}", i + 1);
             model = model.group_in(&name, Selection::Surfaces(s.surfaces.clone()), s.region.clone());
@@ -611,7 +654,7 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
             model = model.group_in(&name, Selection::Surfaces(sel.clone()), region.clone()).load(load);
         }
         for (i, w) in setup.welds.iter().enumerate() {
-            let name = format!("Naht {}", i + 1);
+            let name = w.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| format!("Naht {}", i + 1));
             let (ga, gb) = (format!("{name} A"), format!("{name} B"));
             model = model.group(&ga, Selection::Surfaces(w.a.clone())).group(&gb, Selection::Surfaces(w.b.clone()));
             model.welds.push(fem_core::weld::Weld { name, a: ga, b: gb, max_gap: w.max_gap, throat: w.throat.filter(|t| *t > 0.0) });
@@ -627,8 +670,8 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
         *slot.lock().unwrap() = None;
         let res = res.map_err(|e| match e {
             fem_core::FemError::Underconstrained if setup.welds.is_empty() => format!(
-                "{e}. Bei Blechen mit Spalt an den Ecken oder mehreren getrennten Teilen: Schweißnähte anlegen \
-                 (Modell → Schweißnähte → „Spalte suchen“)."
+                "{e}. Bei Blechen mit Spalt an den Ecken oder losen Teilen einer Baugruppe: Verbindungen anlegen \
+                 (Studienbaum → Verbindungen → „Spalte suchen“, als Naht oder „flächig verbunden“)."
             ),
             e => e.to_string(),
         })?;
@@ -650,7 +693,11 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
                     .into(),
             );
         }
-        let safety = res.safety_factor(&model.material);
+        // Baugruppe: kleinste Sicherheit der Körper (jeder mit seinem Werkstoff)
+        let safety = match res.bodies.iter().filter_map(|b| b.safety).reduce(f64::min) {
+            Some(s) if res.bodies.len() > 1 => Some(s),
+            _ => res.safety_factor(&model.material),
+        };
         // maßgeblich bei Schichtaufbau: Schichthaftung oder Festigkeit in der Schicht
         // maßgeblich: Infill, Schichthaftung oder Festigkeit in der Schicht
         let governing = match (res.max_utilization(), &res.utilization_layers, &res.utilization_infill) {
@@ -731,6 +778,7 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
             seconds: t0.elapsed().as_secs_f64(),
             warnings,
             welds: res.welds.clone(),
+            bodies: res.bodies.clone(),
         };
         let mut s = state.lock().unwrap();
         s.model = Some(model);

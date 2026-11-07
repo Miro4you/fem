@@ -21,6 +21,10 @@ pub struct Mesh {
     pub conn: Vec<usize>,
     /// CAD-Fläche je Randdreieck (sortierte Eckknoten → Flächennummer), leer bei eingebauten Netzen
     pub surface_tags: HashMap<[usize; 3], i32>,
+    /// Körper (CAD-Volumen) je Element; leer = ein Körper (eingebaute Netze)
+    pub elem_body: Vec<i32>,
+    /// Namen der Körper aus der STEP-Datei (Körpernummer → Name), soweit vorhanden
+    pub body_names: Vec<(i32, String)>,
 }
 
 /// Randfläche eines Elements (3 oder 6 Knoten, Normale nach außen).
@@ -35,6 +39,24 @@ pub struct Face {
 impl Mesh {
     pub fn order(&self) -> Order {
         if self.npe == 10 { Order::Quadratic } else { Order::Linear }
+    }
+
+    /// Körper des Elements (1, wenn das Netz keine Körper kennt)
+    pub fn body_of(&self, e: usize) -> i32 {
+        self.elem_body.get(e).copied().unwrap_or(1)
+    }
+
+    /// Alle Körper, aufsteigend
+    pub fn bodies(&self) -> Vec<i32> {
+        let mut b: Vec<i32> = if self.elem_body.is_empty() { vec![1] } else { self.elem_body.clone() };
+        b.sort_unstable();
+        b.dedup();
+        b
+    }
+
+    /// Name eines Körpers (aus der STEP-Datei) oder „Körper n“
+    pub fn body_name(&self, b: i32) -> String {
+        self.body_names.iter().find(|(t, _)| *t == b).map(|(_, n)| n.clone()).unwrap_or_else(|| format!("Körper {b}"))
     }
 
     pub fn n_elems(&self) -> usize {
@@ -109,7 +131,7 @@ impl Mesh {
                 conn.push(id);
             }
         }
-        Mesh { nodes, npe: 10, conn, surface_tags: self.surface_tags.clone() }
+        Mesh { nodes, npe: 10, conn, surface_tags: self.surface_tags.clone(), elem_body: self.elem_body.clone(), body_names: self.body_names.clone() }
     }
 
     /// Alle Außenflächen (Flächen, die nur zu einem Element gehören).

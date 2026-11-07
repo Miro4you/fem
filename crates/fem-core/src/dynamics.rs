@@ -101,13 +101,14 @@ fn reduce(
             "{neq} Unbekannte sind für Eigenfrequenzen/Knicken zu viele (höchstens {MAX_EQUATIONS}) – gröberes Netz wählen"
         )));
     }
-    let d = model.material.d_matrix();
+    // Baugruppe: Steifigkeit mit dem Werkstoff des jeweiligen Körpers
+    let d_of = |e: usize| model.material_of(e).d_matrix();
     model.progress.report(&format!("Matrizen aufbauen ({neq} Unbekannte)"), None);
     let per: Vec<Result<(Vec<(u32, u32, f64)>, Vec<(u32, u32, f64)>)>> = (0..mesh.n_elems())
         .into_par_iter()
         .map(|e| {
             let coords = mesh.elem_coords(e);
-            let mut ke = tet_stiffness(&coords, &d).ok_or(FemError::DegenerateElement(e))?;
+            let mut ke = tet_stiffness(&coords, &d_of(e)).ok_or(FemError::DegenerateElement(e))?;
             let mut bm = be(e, &coords);
             c.frames.transform_element(mesh.elem(e), &mut ke);
             c.frames.transform_element(mesh.elem(e), &mut bm);
@@ -262,7 +263,8 @@ pub fn eigenfrequencies(model: &Model, density: f64, count: usize) -> Result<Mod
     model.material.check()?;
     let faces = model.mesh.boundary_faces();
     let c = constraints(model, &faces)?;
-    let r = reduce(model, &c, &|_, coords| tet_mass(coords, density))?;
+    // Baugruppe: Dichte des Körpers, falls beim Werkstoff angegeben (g/cm³ → t/mm³)
+    let r = reduce(model, &c, &|e, coords| tet_mass(coords, model.material_of(e).density.map(|r| r * 1e-9).unwrap_or(density)))?;
     let steps = (3 * count).max(count + 30);
     let (theta, vecs) = lanczos(&r, true, steps, &model.progress)?;
     // größte θ = kleinste ω² (θ = 1/ω²)
@@ -281,13 +283,12 @@ pub fn buckling(model: &Model, count: usize) -> Result<Modes> {
     model.progress.report("Grundzustand (Statik) rechnen", None);
     let stat = solve(model)?;
     let u: Vec<f64> = stat.displacement.iter().flat_map(|v| *v).collect();
-    let d = model.material.d_matrix();
     let mesh = &model.mesh;
     let faces = mesh.boundary_faces();
     let c = constraints(model, &faces)?;
     let r = reduce(model, &c, &|e, coords| {
         let ue: Vec<f64> = mesh.elem(e).iter().flat_map(|&n| [u[3 * n], u[3 * n + 1], u[3 * n + 2]]).collect();
-        tet_geometric_stiffness(coords, &ue, &d)
+        tet_geometric_stiffness(coords, &ue, &model.material_of(e).d_matrix())
     })?;
     let steps = (3 * count).max(count + 30);
     let (theta, vecs) = lanczos(&r, false, steps, &model.progress)?;

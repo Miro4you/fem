@@ -1,0 +1,18 @@
+# Projekt-FEM auf einem Server (wie MathPad): docker compose up -d --build
+services:
+  projekt-fem:
+    build: .
+    container_name: projekt-fem
+    restart: unless-stopped
+    ports:
+      - "8790:8790"
+    environment:
+      # fester Zugangsschlüssel (mindestens 12 Buchstaben/Ziffern), steht in der Adresse …/#k=SCHLÜSSEL
+      - PROJEKT_FEM_SCHLUESSEL=${PROJEKT_FEM_SCHLUESSEL:-}
+    volumes:
+      - fem-daten:/daten
+    # Rechnen braucht Arbeitsspeicher: ~2,5 GB je Million Unbekannte
+    mem_limit: ${PROJEKT_FEM_SPEICHER:-6g}
+
+volumes:
+  fem-daten:

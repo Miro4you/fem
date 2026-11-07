@@ -24,12 +24,13 @@ Bedienung auch im Browser über das Heimnetz.
 | **Nachweis & Bericht** | Werkstoffdatenbank (Stahl, Alu, Kunststoffe, Druckwerkstoffe, eigene), Masse, Festigkeitsnachweis mit erforderlichen Sicherheiten, PDF-Bericht, MathPad-Rechenblatt, ParaView-Export |
 | **3D-Druck** | Schichtaufbau mit Werten in und quer zu den Schichten, Aufbaurichtung frei optimieren (≈ 400 Richtungen) inkl. Überhänge, Wände + Infill (Gyroid, Gitter, Waben …), Kalibrierung mit eigenem Zugstab |
 | **Schweißnähte** | Spalte an Blechecken automatisch finden, Stumpf-/Kehlnaht, Nahtkraft und Nachweis nach EN 1993-1-8 (vereinfacht) |
+| **Baugruppen** | mehrere Körper aus einer STEP-Datei bzw. Onshape-Baugruppe mit Namen, Werkstoff je Körper, ein-/ausblenden, Berührflächen verbunden, Spalte als Naht oder flächige Verbindung, Ergebnis und Kräfte je Körper |
 | **Studien** | Parameterstudie (Netz, Füllgrad, Maße, **Onshape-Variablen**, **SolidCraft-Parameter**), Vergleich mit voriger Version |
 | **Weitere Analysen** | Eigenfrequenzen, Knicken (Lanczos), Leichtbau-Vorschlag (Topologieoptimierung, STL-Export), Stabwerk (Balken, Rahmen, Fachwerke mit IPE-Profilen) |
 | **Geometrie anpassen** | Radien/Bohrungen ändern, Material per Skizze hinzufügen oder entfernen, Ergebnis mit vorher vergleichen |
 | **CAD-Anbindung** | Onshape (**Bibliothek** mit Vorschaubildern, Lesezeichen, API), SolidWorks (Makro), Fusion (Add-in), SolidCraft (live), NX, Solid Edge, „Senden an“ für jedes CAD – Ergebnis zurück ins CAD |
-| **Heimnetz** | starker PC rechnet, Laptop/Arbeits-PC bedient im Browser – ohne Installation |
-| **Rechenkern** | Rust, direkter Löser (Cholesky) und iterativer Löser (PCG + algebraisches Mehrgitter) bis über 2 Mio. Unbekannte, 56 Lehrbuchprüfungen |
+| **Heimnetz & Server** | starker PC rechnet, Laptop/Arbeits-PC bedient im Browser – ohne Installation; oder als Docker-Container auf einem Server (wie MathPad) |
+| **Rechenkern** | Rust, direkter Löser (Cholesky) und iterativer Löser (PCG + algebraisches Mehrgitter) bis über 2 Mio. Unbekannte, 66 Lehrbuchprüfungen |
 
 ## Bilder
 
@@ -39,6 +40,8 @@ Bedienung auch im Browser über das Heimnetz.
 | **Startseite:** Datei öffnen oder hierher ziehen, aus Onshape holen, zuletzt geöffnet mit Vorschaubild | **Modell:** Studienbaum wie im CAD, darunter die Eigenschaften des gewählten Eintrags – hier die Kraft mit Betrag und Richtung als Symbole |
 | ![Onshape-Bibliothek](docs/bilder/onshape-bibliothek.png) | ![Iso-Clip](docs/bilder/iso-clip.png) |
 | **Onshape-Bibliothek:** eigene Dokumente durchsuchen, Teilestudio wählen, holen – ohne Adresse kopieren | **Iso-Clip:** nur die Bereiche über 84 MPa farbig, der Rest grau – wie in SolidWorks Simulation |
+| ![Baugruppe: Körper mit eigenem Werkstoff](docs/bilder/baugruppe-modell.png) | ![Baugruppe: Ergebnis je Körper](docs/bilder/baugruppe-ergebnis.png) |
+| **Baugruppe:** Körper mit Namen aus dem CAD, Block aus Alu, loser Zapfen flächig verbunden (türkis) | **Ergebnis je Körper:** Spannung, Verformung, Sicherheit mit eigenem Werkstoff, Kräfte zwischen den Körpern |
 | ![3D-Druck: Wand/Infill im Schnitt](docs/bilder/3d-druck-infill-schnitt.png) | ![Schweißnähte am Blechkasten](docs/bilder/schweissnaehte-blechkasten.png) |
 | **3D-Druck:** Wand (rot) und Gyroid-Infill im Schnitt, Sicherheit getrennt für Wand, Infill und Schichthaftung | **Schweißnähte:** Blechkasten mit vier gefundenen Eckspalten, Nahtkräfte und Nachweis |
 | ![Parameterstudie über eine Onshape-Variable](docs/bilder/studie-onshape-variable.png) | ![Stabwerk: Rahmen](docs/bilder/stabwerk-rahmen.png) |
@@ -195,12 +198,6 @@ TET10-Massenmatrix (Dichte aus dem Werkstoff), lineares Knicken mit geometrische
 Lösung (Knicklast = Lastfaktor × Last). Lanczos-Verfahren mit Spektraltransformation (direkte Zerlegung, bis
 600 000 Unbekannte). Schwing-/Knickform animiert. Infill wird hier nicht berücksichtigt (massiver Werkstoff).
 
-### Strömung / Wind (überschlägig)
-
-Lastart „Strömung / Wind“: Medium (Luft, Wasser, eigene Dichte), Geschwindigkeit, c_w und Strömungsrichtung →
-Druck q = ½·ρ·v²·c_w auf allen angeströmten Flächen (Außennormale gegen die Strömung), Gesamtkraft = q × Projektions-
-fläche. Keine Sogseite, keine Umströmung – für genaue Strömungslasten wäre eine CFD-Rechnung (z. B. OpenFOAM) nötig.
-
 ### Stabwerk: Balken, Rahmen, Fachwerke
 
 Reiter **„Stabwerk“** (ohne STEP-Datei): Knoten, Stäbe, Profile (Rechteck, Rund, Rohr, Rechteckrohr, IPE 100–300),
@@ -227,6 +224,34 @@ Sicherheit: Zugriff nur mit dem Schlüssel im Link (bleibt gleich, bis man einen
 `~/.config/projekt-fem/server.json`). Verbindung unverschlüsselt (http) – nur im eigenen Heimnetz verwenden, nicht
 ins Internet freigeben. Falls der Link nicht erreichbar ist: Firewall des Rechners für Port 8790 öffnen
 (macOS fragt beim ersten Start nach).
+
+### Auf einem Server (wie MathPad)
+
+Docker-Container mit Rechenkern, Oberfläche und Gmsh: `server/deploy.sh root@SERVER` bzw.
+`docker compose up -d --build`. Im Server-Modus öffnet Projekt-FEM nur selbst angelegte Dateien, Einstellungen und
+Onshape-Schlüssel liegen im Docker-Volume. Anleitung mit https (Caddy) und Speicherbedarf: [`server/README.md`](server/README.md).
+
+### Baugruppen
+
+Eine STEP-Datei mit mehreren Teilen (Baugruppe aus SolidWorks, Fusion oder Onshape – auch direkt aus der
+Onshape-Bibliothek) wird zu mehreren **Körpern** mit ihren Namen aus dem CAD:
+
+- Im Studienbaum unter **Teil** steht jeder Körper: eigener **Werkstoff je Körper** (z. B. Stahlplatte mit
+  Alu-Block), **ein-/ausblenden** bzw. „nur diesen zeigen“ (rechnet trotzdem mit). Fläche anklicken wählt ihren Körper.
+- Körper, die sich **berühren**, sind an der gemeinsamen Fläche fest verbunden (verklebt). Liegt ein **Spalt**
+  dazwischen (lose Teile, Bleche zum Schweißen): Verbindungen → „Spalte suchen“ → als Schweißnaht oder
+  **flächig verbunden** (verklebt, fest verschraubt; ohne Nahtnachweis) übernehmen.
+- Ergebnis: Tabelle **je Körper** (σv, u, Sicherheit mit dem eigenen Werkstoff, Spannungen nur aus den eigenen
+  Elementen gemittelt) und **Kräfte zwischen den Körpern**. Das Urteil oben richtet sich nach dem schwächsten Körper;
+  Masse aus den Dichten der Körper.
+- Noch nicht: Kontakt, der sich öffnen/rutschen kann, Schrauben mit Vorspannung, Bewegung (Gelenke) – siehe Roadmap.
+
+### Onshape: API-Aufrufe sparen
+
+Onshape zählt API-Aufrufe (kostenlose Konten: 2500 im Jahr). Projekt-FEM zählt mit (Einstellungen ›
+CAD-Verbindungen und unten in der Bibliothek), merkt sich Dokumentliste (10 min), Teilenamen und Vorschaubilder
+(auf der Festplatte) und fragt beim STEP-Export seltener nach. Richtwerte: Teil holen ≈ 4–6 Aufrufe, Bibliothek
+öffnen ≈ 1 (+ neue Vorschaubilder), Variablen-Studie ≈ 7 je Wert.
 
 ### Eingabedatei (TOML)
 
@@ -267,11 +292,12 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 
 ## Validierung
 
-`projekt-fem validieren` vergleicht mit der Theorie (läuft auch bei `cargo test`) – derzeit **56 von 56 Prüfungen** bestanden:
+`projekt-fem validieren` vergleicht mit der Theorie (läuft auch bei `cargo test`) – derzeit **66 von 66 Prüfungen** bestanden:
 
 | Fall | Größe | Abweichung |
 |---|---|---|
 | Zugstab TET4/TET10 | σ, Δl, Querkontraktion, Lagerkraft | exakt |
+| Zugstab Stahl + Alu (Baugruppe, ν = 0, direkt und iterativ) | Δl, σ, Sicherheit je Körper, Kraft an der Trennfläche | exakt |
 | Kragbalken TET10 (40×2×4) | Durchbiegung (Timoshenko) | −0,5 % |
 | Kragbalken TET10 (40×2×4) | Biegespannung bei l/2 | +0,2 % |
 | Lochplatte d/W = 0,2 (STEP + Gmsh) | Kerbspannung (Peterson-Kt), Mittel über Dicke | +0,5 % |
@@ -292,10 +318,9 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
 ## Bekannte Grenzen
 
 - Linear-elastisch, kleine Verformungen; kein Kontakt, keine Plastizität, kein Kriechen.
-- Baugruppen: mehrere Körper werden an gemeinsamen Flächen verklebt oder über Schweißnähte gekoppelt; Werkstoff je
-  Körper, Kontakt und Schrauben fehlen noch. Schalenelemente (Bleche) gibt es nicht – Bleche mit feinem Volumennetz
+- Baugruppen: Körper an Berührflächen verklebt bzw. über Spalt-Verbindungen fest gekoppelt; Kontakt (öffnen,
+  rutschen) und Schrauben fehlen noch. Schalenelemente (Bleche) gibt es nicht – Bleche mit feinem Volumennetz
   rechnen (Elementgröße ≈ Blechdicke).
-
 - **Spannungsspitzen an starren Einspannungen/Kanten sind Singularitäten:** Sie wachsen bei Netzverfeinerung
   immer weiter (Kragbalken-Einspannkante: 128 MPa grob, 169 MPa fein; Theorie 120 MPa). Werte mit Abstand zur
   Einspannung auswerten – die Oberfläche warnt, wenn das Maximum an einem Lager liegt.
@@ -320,11 +345,13 @@ Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernach
 2. ✅ **Desktop-App:** STEP-Import, Vernetzung, Lager/Lasten per Klick, Wirkbereiche, Heimnetz-Bedienung im Browser
 3. ✅ **Nachweis & Bericht:** Werkstoffdatenbank, Festigkeitsnachweis, PDF-Bericht, Parameterstudien, MathPad
 4. ✅ **3D-Druck:** Schichtaufbau, Aufbaurichtung, Wände + Infill, Kalibrierung · **Leichtbau** · **Geometrie anpassen**
-5. ✅ **Weitere Analysen:** Stabwerk, Eigenfrequenzen, Knicken, Strömung (überschlägig), Schweißnähte
+5. ✅ **Weitere Analysen:** Stabwerk, Eigenfrequenzen, Knicken, Schweißnähte
 6. ✅ **CAD-Anbindung:** Onshape, SolidWorks, Fusion, SolidCraft, NX, Solid Edge, Parameterstudien über CAD-Variablen
 7. ✅ **Neue Oberfläche:** Startseite, Studienbaum, Rechnen-Knopf mit offenen Punkten, Ergebnis-Urteil, Darstellungsleiste
    (Schnitt, Iso-Clip, Animation), Ansichtswürfel, CAD-Maussteuerung, Onshape-Bibliothek
-8. **Als Nächstes:** „Fläche teilen“ (Skizze auf der Fläche statt Rechteck ziehen) → Baugruppen (Werkstoff je Körper, Verbindungen, Kontakt, Schrauben) → Bewegungssimulation mit
+8. ✅ **Baugruppen (Stufe 1):** Körper mit Namen, Werkstoff je Körper, ein-/ausblenden, Verbindungen, Ergebnis und Kräfte je Körper,
+   Onshape-Baugruppen · **Server-Betrieb** (Docker)
+9. **Als Nächstes:** „Fläche teilen“ (Skizze auf der Fläche statt Rechteck ziehen) → Baugruppen Stufe 2 (Kontakt, Schrauben) → Bewegungssimulation mit
    FEM entlang der Bewegung (z. B. Koppelstange und Bolzen) → Onshape-Konfigurationen, SolidWorks-Konfigurationen,
    DXF → Stabwerk, Slicer-Einstellungen (3MF) übernehmen
 

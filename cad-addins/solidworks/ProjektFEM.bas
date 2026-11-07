@@ -20,8 +20,8 @@ Public Sub InProjektFEMRechnen()
         MsgBox "Bitte zuerst ein Teil laden.", vbExclamation, TITEL
         Exit Sub
     End If
-    If doc.GetType <> 1 Then ' 1 = Teil
-        MsgBox "Projekt-FEM rechnet bisher einzelne Teile - Baugruppen folgen.", vbExclamation, TITEL
+    If doc.GetType <> 1 And doc.GetType <> 2 Then ' 1 = Teil, 2 = Baugruppe (jedes Teil wird ein Koerper)
+        MsgBox "Bitte ein Teil oder eine Baugruppe oeffnen (keine Zeichnung).", vbExclamation, TITEL
         Exit Sub
     End If
     Dim name As String, pfad As String, fehler As Long, warnungen As Long

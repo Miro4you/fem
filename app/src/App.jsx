@@ -9,6 +9,7 @@ import Settings from './ui/Settings.jsx'
 import OnshapeLibrary from './ui/OnshapeLibrary.jsx'
 import { Menu, MenuItem, MenuSep } from './ui/Menu.jsx'
 import * as I from './ui/icons.jsx'
+import logo from './ui/logo.svg'
 import { usePref, addRecent, NAV_DEFAULT, NAV_PRESETS, DISPLAY_DEFAULT, applyTheme } from './prefs.js'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
@@ -34,6 +35,9 @@ const LOAD_PALE = '#f1cfa9'
 // Schweißnähte: Fläche A (wird angekoppelt) und Gegenfläche B
 const WELD_A = '#c2410c'
 const WELD_B = '#e9a23b'
+// flächige Verbindung (Baugruppe): türkis, damit sie nicht wie eine Last aussieht
+const BOND_A = '#0f9f8f'
+const BOND_B = '#5fd4c4'
 
 const QUANTITIES = {
   von_mises: { label: 'Vergleichsspannung', unit: 'MPa', hint: 'von Mises' },
@@ -68,7 +72,6 @@ const newSupport = () => ({
 })
 const newLoad = () => ({
   id: nextId++, kind: 'force', force: [0, 0, -1000], followNormal: true, pressure: 1, moment: [0, 0, 100], surfaces: [], region: null,
-  flowDir: [1, 0, 0], medium: 'luft', velocity: '30', cw: '1.2', rhoFluid: '1000',
 })
 
 const LOAD_KINDS = {
@@ -76,7 +79,6 @@ const LOAD_KINDS = {
   pressure: 'Druck',
   moment: 'Moment',
   bearing: 'Lagerlast (Bolzen/Welle, halber Umfang)',
-  flow: 'Strömung / Wind (überschlägig)',
 }
 
 // Auswahl als Symbole: Lagerarten und Lastarten
@@ -92,7 +94,6 @@ const LOAD_CHOICES = [
   ['pressure', 'Druck', I.IcPressure],
   ['moment', 'Moment', I.IcMoment],
   ['bearing', 'Bolzenlast', I.IcBearing],
-  ['flow', 'Wind', I.IcWind],
 ]
 const ANALYSES = {
   static: ['Statik', 'Spannung, Verformung, Sicherheit'],
@@ -107,12 +108,6 @@ const tidy = (x) => {
   return Math.abs(v) < 1e-9 ? 0 : v
 }
 
-// Strömung: Staudruck q = ½·ρ·v² [Pa], Druck auf angeströmte Flächen p = q·c_w
-const MEDIA = { luft: ['Luft', 1.225], wasser: ['Wasser', 1000], eigen: ['eigene Dichte', null] }
-const flowPressurePa = (l) => {
-  const rho = l.medium === 'eigen' ? Number(l.rhoFluid) : MEDIA[l.medium ?? 'luft'][1]
-  return 0.5 * rho * Number(l.velocity) ** 2 * Number(l.cw)
-}
 
 export default function App() {
   const [gmsh, setGmsh] = useState(undefined)
@@ -126,6 +121,9 @@ export default function App() {
   const [orientations, setOrientations] = useState(null)
   const [supports, setSupports] = useState([])
   const [welds, setWelds] = useState([])
+  // Baugruppe: eigener Werkstoff je Körper (nach Körpername, bleibt bei neuer CAD-Version) und ausgeblendete Körper
+  const [bodyMats, setBodyMats] = useState({})
+  const [hiddenBodies, setHiddenBodies] = useState([])
   // Herkunft des offenen Teils (Onshape-Adresse) – für die Parameterstudie über Onshape-Variablen
   const [partOrigin, setPartOrigin] = useState(null)
   const [gaps, setGaps] = useState({ max: '1', list: null })
@@ -250,9 +248,25 @@ export default function App() {
   useEffect(() => {
     if (result) setResultStale(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [material, supports, loads, welds])
+  }, [material, supports, loads, welds, bodyMats])
 
   const surfaceInfo = useMemo(() => new Map((mesh?.surfaces ?? []).map((s) => [s.tag, s])), [mesh])
+  // Baugruppe: Masse aus Volumen und Dichte je Körper (null = nicht ermittelbar bzw. ein Körper)
+  const assemblyMass = useMemo(() => {
+    if (!(mesh?.bodies?.length > 1)) return null
+    let m = 0
+    for (const b of mesh.bodies) {
+      const rho = Number((bodyMats[b.name] ?? material).rho)
+      if (!(rho > 0)) return null
+      m += (b.volume / 1000) * rho
+    }
+    return m
+  }, [mesh, bodyMats, material])
+  // ausgeblendete Körper → ihre Flächen werden in der 3D-Ansicht nicht gezeichnet
+  const hiddenSurfaces = useMemo(
+    () => new Set((mesh?.surfaces ?? []).filter((x) => hiddenBodies.includes(x.body)).map((x) => x.tag)),
+    [mesh, hiddenBodies],
+  )
 
   // Während einer Rechnung den Fortschritt abfragen
   useEffect(() => {
@@ -334,6 +348,8 @@ export default function App() {
         setSupports([])
         setLoads([])
         setWelds([])
+        setBodyMats({})
+        setHiddenBodies([])
         if (base) setPartOrigin(null)
         setGaps((g) => ({ ...g, list: null }))
         setActive(null)
@@ -409,7 +425,7 @@ export default function App() {
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
     if (!stepPath) return
-    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin }
+    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies }
     try {
       const p = await api.saveProject(stepPath, data)
       if (p) addRecent({ kind: 'project', path: p, name: baseName(p), info: result ? `${material.name} · σv ${fmt(result.max_von_mises.value)} MPa` : material.name })
@@ -457,8 +473,12 @@ export default function App() {
       setPartOrigin(d.origin ?? null)
       setSupports(d.supports.map((s) => ({ ...newSupport(), ...s, id: nextId++ })))
       // ältere Projekte: Kraftrichtung fest (nicht der Fläche folgend)
-      setLoads(d.loads.map((l) => ({ ...newLoad(), followNormal: false, ...l, id: nextId++ })))
+      const windLoads = d.loads.filter((l) => l.kind === 'flow').length
+      setLoads(d.loads.filter((l) => l.kind !== 'flow').map((l) => ({ ...newLoad(), followNormal: false, ...l, id: nextId++ })))
+      if (windLoads) setNotice(`${windLoads} Wind-Last(en) aus dem Projekt entfernt – die überschlägige Windlast gibt es nicht mehr`)
       setWelds((d.welds ?? []).map((w) => ({ ...newWeld(), ...w, id: nextId++ })))
+      setBodyMats(d.bodyMaterials ?? {})
+      setHiddenBodies(d.hiddenBodies ?? [])
       setActive(null)
       setPartSource(d.origin?.includes('/documents/') ? 'Onshape' : 'Projekt')
       if (d.file) addRecent({ kind: 'project', path: d.file, name: baseName(d.file), info: d.material?.name ?? '' })
@@ -512,6 +532,9 @@ export default function App() {
         const l = loads.find((x) => x.surfaces.includes(tag))
         if (l) return setSel('l:' + l.id)
         if (welds.some((w) => w.a.includes(tag) || w.b.includes(tag))) return setSel('verb')
+        // Baugruppe: Körper der Fläche wählen
+        const b = surfaceInfo.get(tag)?.body
+        if (mesh?.bodies?.length > 1 && b != null) return setSel('b:' + b)
         return
       }
       if (active.type === 'weldA' || active.type === 'weldB') {
@@ -550,8 +573,8 @@ export default function App() {
       for (const s of supports)
         if (s.surfaces.includes(tag)) return s.region ? SUPPORT_PALE : hot(s.id) ? SUPPORT_ACTIVE : SUPPORT_COLOR
       for (const w of welds) {
-        if (w.a.includes(tag)) return WELD_A
-        if (w.b.includes(tag)) return WELD_B
+        if (w.a.includes(tag)) return w.kind === 'bond' ? BOND_A : WELD_A
+        if (w.b.includes(tag)) return w.kind === 'bond' ? BOND_B : WELD_B
       }
       return null
     },
@@ -679,7 +702,6 @@ export default function App() {
       if (region) tip = regionAnchor(region, selectionCylinder(l.surfaces, surfaceInfo))
       let dir = null
       if ((l.kind === 'force' || l.kind === 'bearing') && Math.hypot(...l.force) > 0) dir = l.force
-      if (l.kind === 'flow' && Math.hypot(...l.flowDir.map(Number)) > 0) dir = l.flowDir.map(Number)
       if (l.kind === 'moment' && Math.hypot(...l.moment.map(Number)) > 0) {
         // Momentenvektor (rechte Hand) vom Bereich weg
         const m = l.moment.map(Number)
@@ -805,15 +827,24 @@ export default function App() {
 
   // Onshape-Variablen, wenn das offene Teil aus Onshape kommt
   const [osVars, setOsVars] = useState(null)
+  // Variablen je Teilestudio nur einmal holen (jeder Aufruf zählt bei Onshape)
+  const osVarsCache = useRef(new Map())
   useEffect(() => {
     if (view !== 'study' || !partOrigin?.includes('/documents/')) {
       setOsVars(null)
       return
     }
+    if (osVarsCache.current.has(partOrigin)) {
+      setOsVars(osVarsCache.current.get(partOrigin))
+      return
+    }
     let stop = false
     api
       .onshapeVariables(partOrigin)
-      .then((v) => !stop && setOsVars(v))
+      .then((v) => {
+        osVarsCache.current.set(partOrigin, v)
+        if (!stop) setOsVars(v)
+      })
       .catch((e) => !stop && setOsVars({ error: String(e) }))
     return () => {
       stop = true
@@ -1023,7 +1054,7 @@ export default function App() {
       if (!l.surfaces.length) add(`Last ${i + 1}: Flächen wählen`, 'l:' + l.id)
       if (l.kind === 'bearing' && l.surfaces.some((t) => !surfaceInfo.get(t)?.cylinder))
         add(`Last ${i + 1}: Bolzenlast nur auf zylindrischen Flächen (Bohrung, Welle)`, 'l:' + l.id)
-      const v = l.kind === 'moment' ? l.moment : l.kind === 'flow' ? l.flowDir : l.kind === 'pressure' ? [l.pressure] : l.force
+      const v = l.kind === 'moment' ? l.moment : l.kind === 'pressure' ? [l.pressure] : l.force
       if (l.surfaces.length && !(Math.hypot(...v.map(Number)) > 0)) add(`Last ${i + 1}: Betrag angeben`, 'l:' + l.id)
     })
     for (const [what, items, k] of [['Lager', supports, 's:'], ['Last', loads, 'l:']])
@@ -1097,7 +1128,14 @@ export default function App() {
         material: materialPayload(mat),
         welds: wls
           .filter((w) => w.a.length && w.b.length)
-          .map((w) => ({ a: w.a, b: w.b, throat: w.kind === 'fillet' ? num(w.throat) : null, max_gap: num(w.maxGap) > 0 ? num(w.maxGap) : null })),
+          .map((w, i) => ({
+            name: `${w.kind === 'bond' ? 'Verbindung' : 'Naht'} ${i + 1}`,
+            a: w.a,
+            b: w.b,
+            throat: w.kind === 'fillet' ? num(w.throat) : null,
+            max_gap: num(w.maxGap) > 0 ? num(w.maxGap) : null,
+          })),
+        bodies: (mesh?.bodies ?? []).filter((b) => bodyMats[b.name]).map((b) => ({ body: b.body, material: materialPayload(bodyMats[b.name]) })),
         supports: sups.map((s) => {
           const f = supportFix(s)
           return { surfaces: s.surfaces, fix: f.fix, local: f.local ?? null, region: regionNumbers(s.region) }
@@ -1107,7 +1145,6 @@ export default function App() {
           if (l.kind === 'pressure') return { ...base, pressure: Number(l.pressure) }
           // Moment in der Oberfläche in N·m, im Rechenkern N·mm
           if (l.kind === 'moment') return { ...base, moment: l.moment.map((v) => Number(v) * 1000) }
-          if (l.kind === 'flow') return { ...base, direction: l.flowDir.map(Number), pressure: flowPressurePa(l) * 1e-6 }
           return { ...base, force: l.force.map(Number) }
         }),
       }
@@ -1189,7 +1226,7 @@ export default function App() {
         FEM_Sicherheit_Bruch: num(r.safety_break),
         FEM_SigmaV_MPa: num(r.max_von_mises.value),
         FEM_Verformung_mm: num(r.max_displacement.value),
-        FEM_Masse_g: rho > 0 ? num((r.solid_volume / 1000) * rho) : null,
+        FEM_Masse_g: assemblyMass != null ? num(assemblyMass) : rho > 0 ? num((r.solid_volume / 1000) * rho) : null,
         FEM_Nachweis: rows.length ? (rows.every((x) => x[3] <= 1) ? 'erfüllt' : 'nicht erfüllt') : null,
         FEM_Massgeblich: r.governing ?? null,
         FEM_Werkstoff: mat.name,
@@ -1654,7 +1691,6 @@ export default function App() {
       let t
       if (l.kind === 'pressure') t = `Druck ${fmt(Number(l.pressure))} MPa`
       else if (l.kind === 'moment') t = `Moment (${fmtVec(l.moment.map(Number))}) N·m`
-      else if (l.kind === 'flow') t = `Strömung ${MEDIA[l.medium ?? 'luft'][0]}, v = ${fmt(Number(l.velocity))} m/s, c_w = ${fmt(Number(l.cw))}, Richtung (${fmtVec(l.flowDir.map(Number))}), Druck ${fmt(flowPressurePa(l))} Pa`
       else t = `${l.kind === 'bearing' ? 'Lagerlast' : 'Kraft'} (${fmtVec(l.force.map(Number))}) N, Betrag ${fmt(Math.hypot(...l.force.map(Number)))} N`
       return [`Last ${i + 1}`, `${t}, ${l.surfaces.length} Fläche(n)${regionText(l.region)}`]
     })
@@ -1802,7 +1838,7 @@ export default function App() {
     </div>
   )
 
-  // --- Richtung und Betrag einer Last (Kraft, Moment, Strömung) -----------------------------------
+  // --- Richtung und Betrag einer Last (Kraft, Moment) -----------------------------------
   function dirEditor(l, field, { unit = '', normal = null, axisPreset = null, noMag = false } = {}) {
     const upd = (patch) => setLoads((ls) => ls.map((x) => (x.id === l.id ? { ...x, ...patch } : x)))
     const vec = l[field].map(Number)
@@ -1828,7 +1864,6 @@ export default function App() {
       text = `schräg: Winkel in XY ${fmt(Number(a.a))}°, Neigung ${fmt(Number(a.b))}°`
     }
     if (field === 'moment' && u) text = 'Drehachse ' + text.replace('in Richtung ', '') + ' (Drehsinn nach der rechten Hand)'
-    if (field === 'flowDir' && u) text = 'Strömung ' + text
     return (
       <div className="dir-editor">
         {!noMag && (
@@ -1842,7 +1877,7 @@ export default function App() {
           </label>
         )}
         <div className="field">
-          <span>{field === 'moment' ? 'Drehachse' : field === 'flowDir' ? 'Strömungsrichtung' : 'Richtung'}</span>
+          <span>{field === 'moment' ? 'Drehachse' : 'Richtung'}</span>
           <div className="dir-row">
             {field === 'force' && l.kind === 'force' && (
               <button
@@ -1881,7 +1916,7 @@ export default function App() {
             >
               <I.IcDrag />
             </button>
-            {field !== 'flowDir' && (
+            {
               <button
                 className={'dir' + (picking ? ' on' : '')}
                 title="Richtung von einer Fläche übernehmen: senkrecht darauf bzw. entlang der Bohrungsachse"
@@ -1895,7 +1930,7 @@ export default function App() {
               >
                 <I.IcFacePick />
               </button>
-            )}
+            }
           </div>
           <p className="hint">{text}</p>
         </div>
@@ -1939,7 +1974,6 @@ export default function App() {
     }
     if (l.kind === 'pressure') return `Druck ${fmt(Number(l.pressure))} MPa`
     if (l.kind === 'moment') return `Moment ${fmt(mag(l.moment))} N·m · ${axis(l.moment)}`
-    if (l.kind === 'flow') return `Wind ${fmt(Number(l.velocity))} m/s · ${axis(l.flowDir)}`
     if (l.kind === 'bearing') return `Bolzenlast ${fmt(mag(l.force))} N · ${axis(l.force)}`
     return `Kraft ${fmt(mag(l.force))} N · ${l.followNormal ? 'senkrecht auf Fläche' : axis(l.force)}`
   }
@@ -2173,7 +2207,7 @@ export default function App() {
       const n = loadNormal(l)
       const cyl = selectionCylinder(l.surfaces, surfaceInfo)
       const p = Number(l.pressure)
-      const vecField = l.kind === 'moment' ? 'moment' : l.kind === 'flow' ? 'flowDir' : 'force'
+      const vecField = l.kind === 'moment' ? 'moment' : 'force'
       return (
         <>
           <PropsHead
@@ -2224,43 +2258,14 @@ export default function App() {
               <p className="hint">1 MPa = 1 N/mm² = 10 bar. Wirkt immer senkrecht auf jede gewählte Fläche.</p>
             </>
           )}
-          {l.kind === 'flow' && (
-            <>
-              <div className="grid3">
-                <label className="field">
-                  <span>Medium</span>
-                  <select value={l.medium ?? 'luft'} onChange={(e) => upd({ medium: e.target.value })}>
-                    {Object.entries(MEDIA).map(([k, [lab]]) => (
-                      <option key={k} value={k}>
-                        {lab}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <NumField label="Geschwindigkeit" unit="m/s" value={l.velocity} onChange={(v) => upd({ velocity: v })} />
-                <NumField label="c_w" value={l.cw} onChange={(v) => upd({ cw: v })} />
-              </div>
-              {l.medium === 'eigen' && <NumField label="Dichte" unit="kg/m³" value={l.rhoFluid} onChange={(v) => upd({ rhoFluid: v })} />}
-              {dirEditor(l, 'flowDir', { noMag: true })}
-              <p className="hint">
-                Staudruck × c_w = {fmt(flowPressurePa(l))} Pa auf alle angeströmten Flächen. Überschlägig (keine Sogseite); c_w z. B. Platte quer 1,2, Zylinder
-                1,0, Kugel 0,5.
-              </p>
-            </>
-          )}
           {facesCard(l, 'load', LOAD_ACTIVE)}
-          {l.kind === 'flow' && (
-            <button className="link" onClick={() => upd({ surfaces: (mesh?.surfaces ?? []).map((x) => x.tag) })}>
-              Alle Außenflächen wählen
-            </button>
-          )}
           <More title="Mehr: Komponenten, nur Teil der Fläche" open={!!l.region}>
             {l.kind !== 'pressure' && (
               <VectorInput
                 item={l}
                 field={vecField}
-                labels={l.kind === 'moment' ? ['Mx', 'My', 'Mz'] : l.kind === 'flow' ? ['x', 'y', 'z'] : ['Fx', 'Fy', 'Fz']}
-                unit={l.kind === 'moment' ? 'N·m' : l.kind === 'flow' ? '' : 'N'}
+                labels={l.kind === 'moment' ? ['Mx', 'My', 'Mz'] : ['Fx', 'Fy', 'Fz']}
+                unit={l.kind === 'moment' ? 'N·m' : 'N'}
                 upd={(patch) => upd({ ...patch, ...(vecField === 'force' ? { followNormal: false } : {}) })}
                 picking={false}
                 onPick={() => {}}
@@ -2281,6 +2286,86 @@ export default function App() {
         </>
       )
     }
+    // Körper einer Baugruppe
+    const bd = sel.startsWith('b:') ? mesh.bodies?.find((x) => 'b:' + x.body === sel) : null
+    if (bd) {
+      const own = bodyMats[bd.name]
+      const mat = own ?? material
+      const rho = Number(mat.rho)
+      const hidden = hiddenBodies.includes(bd.body)
+      const nSurf = mesh.surfaces.filter((x) => x.body === bd.body).length
+      return (
+        <>
+          <PropsHead title={bd.name} />
+          <div className="card">
+            <Stat label="Volumen" value={`${fmt(bd.volume / 1000)} cm³`} />
+            {rho > 0 && <Stat label="Masse" value={`${fmt((bd.volume / 1000) * rho)} g`} />}
+            <Stat label="Flächen" value={nSurf} />
+          </div>
+          <label className="field">
+            <span>Werkstoff dieses Körpers</span>
+            <select
+              value={own ? own.name : ''}
+              onChange={(e) => {
+                const v = e.target.value
+                const m = [...userMaterials, ...MATERIALS].find((x) => x.name === v)
+                setBodyMats((bm) => {
+                  const next = { ...bm }
+                  if (!m) delete next[bd.name]
+                  else next[bd.name] = materialFromPreset(m)
+                  return next
+                })
+              }}
+            >
+              <option value="">wie Werkstoff ({material.name})</option>
+              {MATERIAL_GROUPS.map((g) => (
+                <optgroup key={g} label={g}>
+                  {MATERIALS.filter((m) => m.group === g).map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+              {userMaterials.length > 0 && (
+                <optgroup label="Eigene Werkstoffe">
+                  {userMaterials.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </label>
+          {own && (
+            <div className="card kv-grid">
+              <Stat label="E" value={`${fmt(Number(own.E))} MPa`} />
+              <Stat label="Re" value={own.yield !== '' && own.yield != null ? `${fmt(Number(own.yield))} MPa` : '–'} />
+              <Stat label="Rm" value={own.tensile !== '' && own.tensile != null ? `${fmt(Number(own.tensile))} MPa` : '–'} />
+              <Stat label="Dichte" value={own.rho ? `${fmt(Number(own.rho))} g/cm³` : '–'} />
+            </div>
+          )}
+          <div className="row wrap">
+            <label className="check">
+              <input type="checkbox" checked={!hidden} onChange={() => setHiddenBodies((h) => (hidden ? h.filter((x) => x !== bd.body) : [...h, bd.body]))} /> sichtbar
+            </label>
+            <button className="link" onClick={() => setHiddenBodies(mesh.bodies.filter((x) => x.body !== bd.body).map((x) => x.body))}>
+              nur diesen zeigen
+            </button>
+            {hiddenBodies.length > 0 && (
+              <button className="link" onClick={() => setHiddenBodies([])}>
+                alle zeigen
+              </button>
+            )}
+          </div>
+          <p className="hint">
+            Körper, die sich berühren, sind an der gemeinsamen Fläche fest verbunden (verklebt). Liegt ein Spalt dazwischen (lose Teile, Schweißteile):
+            unter Verbindungen „Spalte suchen“ und als Naht oder flächige Verbindung übernehmen. Ausgeblendete Körper rechnen mit.
+          </p>
+        </>
+      )
+    }
     // Teil
     const dims = mesh.bbox[1].map((v, k) => v - mesh.bbox[0][k])
     const rho = Number(material.rho)
@@ -2291,9 +2376,10 @@ export default function App() {
           <Stat label="Name" value={stemOf(fileName)} />
           <Stat label="Quelle" value={partSource ?? 'STEP-Datei'} />
           <Stat label="Volumen" value={`${fmt(mesh.volume / 1000)} cm³`} />
-          {rho > 0 && <Stat label="Masse" value={`${fmt((mesh.volume / 1000) * rho)} g`} />}
+          {(assemblyMass ?? (rho > 0 ? (mesh.volume / 1000) * rho : null)) != null && <Stat label="Masse" value={`${fmt(assemblyMass ?? (mesh.volume / 1000) * rho)} g`} />}
           <Stat label="Abmessungen" value={dims.map((v) => fmt(v)).join(' × ') + ' mm'} />
           <Stat label="Flächen" value={mesh.surfaces.length} />
+          {mesh.bodies?.length > 1 && <Stat label="Baugruppe" value={`${mesh.bodies.length} Körper`} />}
         </div>
         <div className="row wrap">
           <button className="btn" disabled title="Kommt bald: eine Fläche mit Linie, Rechteck oder Kreis teilen – Lager und Lasten wirken dann auf eine Teilfläche">
@@ -2335,6 +2421,20 @@ export default function App() {
       </div>
       <div className="tree" role="tree">
         <TreeRow icon={I.IcPart} title="Teil" sum={[partSource ?? 'STEP-Datei', `${mesh.surfaces.length} Flächen`].join(' · ')} state="ok" on={sel === 'teil'} onClick={() => selectItem('teil')} />
+        {mesh.bodies?.length > 1 &&
+          mesh.bodies.map((bd) => (
+            <TreeRow
+              key={'b' + bd.body}
+              sub
+              icon={I.IcPart}
+              title={bd.name}
+              sum={(bodyMats[bd.name]?.name ?? `wie Werkstoff`) + (hiddenBodies.includes(bd.body) ? ' · ausgeblendet' : '')}
+              muted={hiddenBodies.includes(bd.body)}
+              state={null}
+              on={sel === 'b:' + bd.body}
+              onClick={() => selectItem('b:' + bd.body)}
+            />
+          ))}
         <TreeRow
           icon={I.IcMaterial}
           title="Werkstoff"
@@ -2383,7 +2483,17 @@ export default function App() {
           icon={I.IcLink}
           title="Verbindungen"
           muted={!welds.length}
-          sum={welds.length ? `${welds.length} ${welds.length > 1 ? 'Schweißnähte' : 'Schweißnaht'}` : 'optional – Schweißnähte an Blechen'}
+          sum={
+            welds.length
+              ? [
+                  [welds.filter((w) => w.kind !== 'bond').length, 'Schweißnaht', 'Schweißnähte'],
+                  [welds.filter((w) => w.kind === 'bond').length, 'Verbindung', 'Verbindungen'],
+                ]
+                  .filter(([n]) => n)
+                  .map(([n, a, b]) => `${n} ${n > 1 ? b : a}`)
+                  .join(' · ')
+              : 'optional – Schweißnähte, lose Teile'
+          }
           state={welds.length ? itemState('verb') : null}
           on={sel === 'verb'}
           onClick={() => selectItem('verb')}
@@ -2406,7 +2516,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <button className="brand" onClick={() => setHome(true)} title="Startseite">
-          <I.IcPart size={18} />
+          <img src={logo} alt="" width={22} height={22} />
           <span>Projekt-FEM</span>
         </button>
         {!showStart && modelView && mesh && (
@@ -2547,6 +2657,7 @@ export default function App() {
                       onPin={() => setReference(summary(result, mesh, geoStep ? 'Geändert' : 'Vorher'))}
                       onUnpin={() => setReference(null)}
                       detailsOpen={detailsOpen}
+                      mass={assemblyMass}
                       setDetailsOpen={setDetailsOpen}
                     />
                   )
@@ -2657,6 +2768,7 @@ export default function App() {
                 onAim={onAim}
                 nav={nav}
                 look={look}
+                hiddenSurfaces={hiddenSurfaces}
               />
               {aim && aimView && view === 'setup' && (
                 <div className="pick-hint aim-bar">
@@ -2999,10 +3111,66 @@ function NumInput({ value, unit, onChange }) {
   )
 }
 
+// Baugruppe: Kennwerte je Körper und Kräfte zwischen den Körpern
+function BodiesCard({ result }) {
+  const bodies = result.bodies ?? []
+  const bonds = (result.welds ?? []).filter((w) => w.name?.startsWith('Verbindung'))
+  if (bodies.length < 2 && !bonds.length) return null
+  const nameOf = (id) => bodies.find((b) => b.body === id)?.name ?? `Körper ${id}`
+  const pairs = []
+  for (const b of bodies) for (const [o, f] of b.interfaces ?? []) if (b.body < o) pairs.push([b.name, nameOf(o), f])
+  return (
+    <div className="proof bodies-card">
+      <div className="item-head">
+        <I.IcPart size={15} />
+        <strong>Körper der Baugruppe</strong>
+      </div>
+      {bodies.length > 1 && (
+        <table>
+          <thead>
+            <tr>
+              <th />
+              <th>σv max</th>
+              <th>u max</th>
+              <th>S</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bodies.map((b) => (
+              <tr key={b.body} title={b.material}>
+                <td>{b.name}</td>
+                <td>{fmt(b.max_von_mises)} MPa</td>
+                <td>{fmt(b.max_displacement)} mm</td>
+                <td className={b.safety == null ? '' : b.safety >= 1 ? 'good' : 'bad'}>{b.safety == null ? '–' : fmt(b.safety)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {(pairs.length > 0 || bonds.length > 0) && (
+        <>
+          <span className="mat-head">Kräfte zwischen den Körpern</span>
+          {pairs.map(([a, o, f]) => (
+            <div key={a + o} title={`(${fmtVec(f)}) N`}>
+              <Stat label={`${a} ↔ ${o}`} value={`${fmt(Math.hypot(...f))} N`} />
+            </div>
+          ))}
+          {bonds.map((w) => (
+            <div key={w.name} title={`(${fmtVec(w.force)}) N`}>
+              <Stat label={w.name} value={`${fmt(Math.hypot(...w.force))} N`} />
+            </div>
+          ))}
+        </>
+      )}
+      <p className="hint">Spannungen je Körper nur aus seinen eigenen Elementen; Sicherheit mit dem Werkstoff des Körpers.</p>
+    </div>
+  )
+}
+
 // Ergebnis: Urteil oben (grün/rot), Größe wählen, Kennwerte, Details zum Aufklappen
-function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, canRerun, onRerun, reference, current, onPin, onUnpin, detailsOpen, setDetailsOpen }) {
+function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, canRerun, onRerun, reference, current, onPin, onUnpin, detailsOpen, setDetailsOpen, mass }) {
   const rho = Number(material.rho)
-  const massG = rho > 0 ? (result.solid_volume / 1000) * rho : null
+  const massG = mass ?? (rho > 0 ? (result.solid_volume / 1000) * rho : null)
   const rows = proofRows(result, proof)
   const wrows = weldRows(result, material)
   const weldBad = wrows.some((w) => w.util != null && w.util > 1)
@@ -3044,10 +3212,13 @@ function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, 
       : material.tensile !== '' && material.tensile != null
         ? `gegen Bruch, Rm = ${fmt(Number(material.tensile))} MPa`
         : ''
+  // Baugruppe: der Körper mit der kleinsten Sicherheit bestimmt das Urteil
+  const weakest = (result.bodies ?? []).filter((b) => b.safety != null).sort((a, b) => a.safety - b.safety)[0]
+  const basisText =
+    result.bodies?.length > 1 && weakest ? `Baugruppe · maßgeblich: ${weakest.name} (${weakest.material})` : `${material.name}${basis ? ` · ${basis}` : ''}`
   const singular = result.warnings.some((w) => w.includes('direkt an einem Lager'))
+  // nur Größen, die es für dieses Ergebnis gibt (Sicherheit nur mit Festigkeitswerten, Schicht/Infill nur beim 3D-Druck)
   const avail = (k) => !(FIELD_OF[k] && FIELD_OF[k][0] !== 'von_mises' && !result[FIELD_OF[k][0]] && !['sigma1', 'sigma3'].includes(k))
-  const chips = [['von_mises', 'σv Spannung'], ['disp', 'u Verformung'], ...(result.utilization ? [['safety', 'S Sicherheit']] : [])]
-  const more = Object.keys(QUANTITIES).filter((k) => !chips.some((c) => c[0] === k) && avail(k))
   const loadMag = Math.hypot(...result.total_load) || 1
   const balance = Math.hypot(...result.total_load.map((v, k) => v + result.total_reaction[k]))
   return (
@@ -3072,30 +3243,21 @@ function ResultSidebar({ result, material, proof, quantity, setQuantity, stale, 
           {lines.map((l, i) => (
             <div key={i}>{l}</div>
           ))}
-          <div className="verdict-basis">
-            {material.name}
-            {basis ? ` · ${basis}` : ''}
-          </div>
+          <div className="verdict-basis">{basisText}</div>
           {singular && <div className="verdict-basis">Spitze direkt an einem Lager – dort nicht bewerten (siehe Details)</div>}
         </div>
       </div>
       <WeldCard result={result} material={material} />
-      <div className="chips" role="group" aria-label="Ergebnisgröße">
-        {chips.map(([k, lab]) => (
-          <button key={k} className={'chip' + (quantity === k ? ' on' : '')} onClick={() => setQuantity(k)}>
-            {lab}
-          </button>
-        ))}
-        {more.length > 0 && (
-          <select className={'chip' + (more.includes(quantity) ? ' on' : '')} value={more.includes(quantity) ? quantity : ''} onChange={(e) => e.target.value && setQuantity(e.target.value)} aria-label="weitere Größen">
-            <option value="">mehr …</option>
-            {more.map((k) => (
-              <option key={k} value={k}>
-                {QUANTITIES[k].label}
-              </option>
-            ))}
-          </select>
-        )}
+      <BodiesCard result={result} />
+      <div className="quantities" role="radiogroup" aria-label="Ergebnisgröße">
+        {Object.entries(QUANTITIES)
+          .filter(([k]) => avail(k))
+          .map(([k, q]) => (
+            <button key={k} role="radio" aria-checked={quantity === k} className={'q' + (quantity === k ? ' on' : '')} onClick={() => setQuantity(k)}>
+              <span>{q.label}</span>
+              <em>{q.hint}</em>
+            </button>
+          ))}
       </div>
       <div className="card">
         <Stat label="max. Vergleichsspannung σv" value={`${fmt(result.max_von_mises.value)} MPa`} />
@@ -3254,7 +3416,9 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
           <div key={w.id} className={'item' + (pickA || pickB ? ' active weld' : '')}>
             <div className="item-head">
               <Spline size={14} color={WELD_A} />
-              <strong>Naht {i + 1}</strong>
+              <strong>
+                {w.kind === 'bond' ? 'Verbindung' : 'Naht'} {i + 1}
+              </strong>
               <span className="spacer" />
               <button className="icon-btn" title="Löschen" onClick={() => { setWelds(welds.filter((x) => x.id !== w.id)); if (pickA || pickB) setActive(null) }}>
                 <Trash2 size={14} />
@@ -3263,6 +3427,7 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
             <select value={w.kind} onChange={(e) => upd(w.id, { kind: e.target.value })}>
               <option value="butt">Stumpfnaht, durchgeschweißt (a = Blechdicke)</option>
               <option value="fillet">Kehlnaht mit a-Maß</option>
+              <option value="bond">flächig verbunden (verklebt, fest verschraubt) – ohne Nahtnachweis</option>
             </select>
             <div className="grid2">
               {w.kind === 'fillet' && <NumField label="a-Maß" unit="mm" value={w.throat} onChange={(v) => upd(w.id, { throat: v })} />}
@@ -3270,11 +3435,11 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
             </div>
             <div className="weld-picks">
               <button className={'btn pick' + (pickA ? ' on' : '')} onClick={() => setActive(pickA ? null : { type: 'weldA', id: w.id })}>
-                <span className="swatch" style={{ background: WELD_A }} /> {pickA ? 'Fertig' : 'Fläche A'}
+                <span className="swatch" style={{ background: w.kind === 'bond' ? BOND_A : WELD_A }} /> {pickA ? 'Fertig' : 'Fläche A'}
                 <span className="count">{w.a.length}</span>
               </button>
               <button className={'btn pick' + (pickB ? ' on' : '')} onClick={() => setActive(pickB ? null : { type: 'weldB', id: w.id })}>
-                <span className="swatch" style={{ background: WELD_B }} /> {pickB ? 'Fertig' : 'Fläche B'}
+                <span className="swatch" style={{ background: w.kind === 'bond' ? BOND_B : WELD_B }} /> {pickB ? 'Fertig' : 'Fläche B'}
                 <span className="count">{w.b.length}</span>
               </button>
             </div>
@@ -3581,9 +3746,10 @@ function weldRows(result, material) {
   const fu = Number(material.tensile)
   const bw = betaW(material.name)
   const fvw = fu > 0 ? fu / (Math.sqrt(3) * bw * GAMMA_M2) : null
-  return (result.welds ?? []).map((w, i) => ({
+  // flächige Verbindungen (Baugruppe) haben keinen Nahtnachweis
+  return (result.welds ?? []).filter((w) => !w.name?.startsWith('Verbindung')).map((w, i) => ({
     ...w,
-    label: `Naht ${i + 1}`,
+    label: w.name || `Naht ${i + 1}`,
     force: Math.hypot(...w.force),
     fvw,
     util: fvw ? w.stress_max / fvw : null,

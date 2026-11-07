@@ -50,6 +50,7 @@ export default function Viewport({
   topoShape,
   nav,
   look,
+  hiddenSurfaces,
   ref,
 }) {
   const host = useRef(null)
@@ -574,6 +575,8 @@ export default function Viewport({
       pos[3 * v + 1] = tmp[1]
       pos[3 * v + 2] = tmp[2]
     }
+    s.hidden = hiddenSurfaces?.size ? hiddenSurfaces : null
+    collapseHidden(s)
     s.surf.geometry.attributes.position.needsUpdate = true
     smoothNormals(s)
     s.surf.geometry.computeBoundingSphere()
@@ -591,7 +594,7 @@ export default function Viewport({
     s.ghost.visible = mode === 'result' && scale > 0 && look?.ghost !== false
     s.wire.visible = !!showMesh
     s.dirty = true
-  }, [mesh, mode, result, showMesh, look?.ghost])
+  }, [mesh, mode, result, showMesh, look?.ghost, hiddenSurfaces])
 
   useEffect(() => {
     const s = ctx.current
@@ -984,12 +987,23 @@ function paintResult(s, result, k) {
   s.surf.geometry.attributes.uv.needsUpdate = true
 }
 
+// ausgeblendete Körper: deren Dreiecke auf einen Punkt zusammenziehen (unsichtbar, nicht anklickbar)
+function collapseHidden(s) {
+  if (!s.hidden) return
+  const pos = s.surf.geometry.attributes.position.array
+  for (let t = 0; t < s.triSurface.length; t++) {
+    if (!s.hidden.has(s.triSurface[t])) continue
+    for (let k = 1; k < 3; k++) for (let c = 0; c < 3; c++) pos[9 * t + 3 * k + c] = pos[9 * t + c]
+  }
+}
+
 function deform(s, scale, disp) {
   const pos = s.surf.geometry.attributes.position.array
   for (let v = 0; v < s.vertNode.length; v++) {
     const n = s.vertNode[v]
     for (let k = 0; k < 3; k++) pos[3 * v + k] = s.base[3 * n + k] + (disp ? scale * disp[3 * n + k] : 0)
   }
+  collapseHidden(s)
   s.surf.geometry.attributes.position.needsUpdate = true
   for (const line of [s.edges, s.wire]) {
     const arr = line.geometry.attributes.position.array

@@ -135,6 +135,7 @@ pub fn mesh_step(step: &Path, opts: &MeshOptions) -> Result<Mesh> {
 Geometry.OCCTargetUnit = "MM";
 Merge "{step}";
 Coherence;
+Save "{xao}";
 {size}
 Mesh.MeshSizeFromCurvature = {curv};
 {fields}
@@ -149,6 +150,7 @@ Save "{msh}";
 "#,
         step = escape(&step),
         msh = escape(&msh),
+        xao = escape(&dir.join("geometrie.geo_unrolled")),
         curv = opts.curvature_points,
         fields = refine_fields(&opts.refine),
         order = if opts.order == Order::Quadratic { 2 } else { 1 },
@@ -164,6 +166,7 @@ Save "{msh}";
         .output()
         .map_err(|e| FemError::Gmsh(format!("{} konnte nicht gestartet werden: {e}", gmsh.display())))?;
     let text = std::fs::read_to_string(&msh);
+    let names = std::fs::read_to_string(dir.join("geometrie.geo_unrolled.xao")).map(|x| solid_names(&x)).unwrap_or_default();
     let _ = std::fs::remove_dir_all(&dir);
     let log = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
     // Gmsh beendet sich auch bei Skriptfehlern erfolgreich → Fehlerzeilen selbst prüfen
@@ -172,7 +175,28 @@ Save "{msh}";
         Ok(t) if out.status.success() && errors.is_empty() => t,
         _ => return Err(FemError::Gmsh(if errors.is_empty() { log } else { errors.join("\n") })),
     };
-    read_msh(&text)
+    let mut mesh = read_msh(&text)?;
+    // Körpernamen: Reihenfolge der Volumen in der Geometrie = Gmsh-Volumennummer
+    let bodies = mesh.bodies();
+    if bodies.len() > 1 && names.len() == bodies.len() && bodies.iter().enumerate().all(|(i, &b)| b == i as i32 + 1) {
+        mesh.body_names = bodies.into_iter().zip(names).filter(|(_, n)| !n.is_empty()).collect();
+    }
+    Ok(mesh)
+}
+
+/// Namen der Volumenkörper aus der XAO-Datei von Gmsh (`<solid index="0" name="Shapes/Baugruppe/1/Platte" …/>`).
+/// Gmsh übernimmt die Namen (Labels) aus der STEP-Datei; doppelte Namen bekommen eine Nummer.
+fn solid_names(xao: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in xao.lines().map(str::trim).filter(|l| l.starts_with("<solid ")) {
+        let name = line.split("name=\"").nth(1).and_then(|r| r.split('"').next()).unwrap_or("");
+        let name = name.rsplit('/').find(|p| !p.trim().is_empty() && p.parse::<u32>().is_err()).unwrap_or("").trim();
+        let name = name.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'");
+        let name = if name == "Shapes" || name.starts_with("Open CASCADE STEP translator") { String::new() } else { name };
+        let n = out.iter().filter(|o| *o == &name || o.starts_with(&format!("{name} ("))).count();
+        out.push(if n > 0 && !name.is_empty() { format!("{name} ({})", n + 1) } else { name });
+    }
+    out
 }
 
 fn escape(p: &Path) -> String {
@@ -186,6 +210,7 @@ pub fn read_msh(text: &str) -> Result<Mesh> {
     let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
     let mut file_nodes: HashMap<usize, [f64; 3]> = HashMap::new();
     let mut tets: Vec<Vec<usize>> = Vec::new();
+    let mut tet_body: Vec<i32> = Vec::new();
     let mut tris: Vec<(i32, Vec<usize>)> = Vec::new();
 
     let num = |s: Option<&str>| -> Result<f64> { s.and_then(|v| v.parse().ok()).ok_or_else(|| err("Zahl erwartet")) };
@@ -227,7 +252,10 @@ pub fn read_msh(text: &str) -> Result<Mesh> {
                         let l = lines.next().ok_or_else(|| err("Element fehlt"))?;
                         let ids: Vec<usize> = l.split_whitespace().skip(1).filter_map(|v| v.parse().ok()).collect();
                         match etype {
-                            4 | 11 => tets.push(ids),
+                            4 | 11 => {
+                                tets.push(ids);
+                                tet_body.push(entity);
+                            }
                             2 | 9 => tris.push((entity, ids)),
                             _ => {}
                         }
@@ -272,7 +300,10 @@ pub fn read_msh(text: &str) -> Result<Mesh> {
         }
     }
 
-    let mut mesh = Mesh { nodes, npe, conn, surface_tags };
+    // ein Körper: keine Körperliste nötig
+    let single = tet_body.iter().all(|&b| b == tet_body[0]);
+    let elem_body = if single { vec![] } else { tet_body };
+    let mut mesh = Mesh { nodes, npe, conn, surface_tags, elem_body, body_names: vec![] };
     mesh.fix_orientation()?;
     Ok(mesh)
 }
@@ -315,6 +346,26 @@ mod tests {
         let v = 80.0 * 40.0 * 8.0 + 8.0 * 40.0 * 52.0 + (36.0 - std::f64::consts::PI * 9.0) * 40.0
             - std::f64::consts::PI * (2.0 * 4.5f64.powi(2) * 8.0 + 5.5f64.powi(2) * 8.0);
         assert!((m.volume() - v).abs() / v < 0.005, "Volumen {} statt {v}", m.volume());
+    }
+
+    #[test]
+    fn baugruppe_koerper_und_namen() {
+        if find_gmsh().is_none() {
+            eprintln!("Gmsh fehlt – Test übersprungen");
+            return;
+        }
+        // Grundplatte 100×40×5, Block 40×40×20 darauf (verklebt), Zapfen Ø8 mit 0,1 mm Spalt (lose)
+        let m = mesh_step(&step("baugruppe.step"), &MeshOptions { size: Some(5.0), ..Default::default() }).unwrap();
+        assert_eq!(m.bodies(), vec![1, 2, 3]);
+        let names: Vec<String> = m.bodies().iter().map(|&b| m.body_name(b)).collect();
+        assert_eq!(names, vec!["Grundplatte", "Block", "Zapfen"]);
+        let mut vol = std::collections::HashMap::new();
+        for e in 0..m.n_elems() {
+            *vol.entry(m.body_of(e)).or_insert(0.0) += crate::element::tet_volume(&m.elem_coords(e)[..4]).abs();
+        }
+        assert!((vol[&1] - 20000.0).abs() < 50.0, "{vol:?}");
+        assert!((vol[&2] - 32000.0).abs() < 50.0, "{vol:?}");
+        assert!((vol[&3] - std::f64::consts::PI * 16.0 * 15.0).abs() < 15.0, "{vol:?}");
     }
 
     #[test]

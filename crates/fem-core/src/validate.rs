@@ -287,6 +287,7 @@ pub fn zugstab_gedruckt() -> Result<Vec<Check>> {
             tensile_strength: Some(50.0),
             layers: Some(Layers { build_dir: dir, e_z: 2600.0, nu_z: Some(0.3), g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
             infill: None,
+            density: None,
         };
         let model = Model::new(box_mesh([l, b, h], [10, 2, 2], Order::Quadratic)?, mat.clone())
             .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
@@ -326,6 +327,7 @@ pub fn zugstab_infill(kind: crate::SolverKind) -> Result<Vec<Check>> {
         tensile_strength: Some(50.0),
         layers: Some(Layers { build_dir: [0.0, 0.0, 1.0], e_z: 2600.0, nu_z: None, g_z: None, yield_z: None, tensile_z: Some(28.0), shear_z: None }),
         infill: Some(inf.clone()),
+        density: None,
     };
     let core = mat.core_material().expect("Kern");
     let model = Model::new(box_mesh([l, b, h], [20, 10, 10], Order::Quadratic)?, mat.clone())
@@ -466,6 +468,57 @@ pub fn zugstab_geschweisst(kind: crate::SolverKind) -> Result<Vec<Check>> {
 }
 
 /// Alle Referenzfälle, die bestanden werden müssen. Die Lochplatte nur, wenn Gmsh vorhanden ist.
+/// Baugruppe: Zugstab aus zwei Körpern (Stahl x < 50, Alu x > 50), an der Trennfläche verbunden.
+/// Δl = F·l₁/(E₁·A) + F·l₂/(E₂·A); Spannung überall F/A; Sicherheit je Körper Re/σ (ν = 0).
+pub fn zugstab_zwei_werkstoffe(kind: crate::SolverKind) -> Result<Vec<Check>> {
+    let (l, b, h, f) = (100.0, 10.0, 10.0, 1000.0);
+    // ν = 0: keine Querdehnung, sonst behindern sich die Körper an der Trennfläche (dann keine exakte Lösung)
+    let mut steel = Material::steel();
+    steel.nu = 0.0;
+    let mut alu = steel.clone();
+    alu.name = "Alu".into();
+    alu.e = 70000.0;
+    alu.yield_strength = Some(200.0);
+    let mut mesh = box_mesh([l, b, h], [10, 2, 2], Order::Quadratic)?;
+    mesh.elem_body = (0..mesh.n_elems())
+        .map(|e| {
+            let c = mesh.elem_coords(e);
+            if (c[0][0] + c[1][0] + c[2][0] + c[3][0]) / 4.0 < l / 2.0 { 1 } else { 2 }
+        })
+        .collect();
+    let mut model = Model::new(mesh, steel.clone())
+        .group("x0", Selection::Plane { axis: Axis::X, value: 0.0 })
+        .group("y0", Selection::Plane { axis: Axis::Y, value: 0.0 })
+        .group("z0", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("ende", Selection::Plane { axis: Axis::X, value: l })
+        .support("x0", Fix::only(Axis::X))
+        .support("y0", Fix::only(Axis::Y))
+        .support("z0", Fix::only(Axis::Z))
+        .load(Load::Force { group: "ende".into(), force: [f, 0.0, 0.0] });
+    model.body_materials = vec![(2, alu.clone())];
+    model.solver = kind;
+    let res = solve(&model)?;
+    let m = &model.mesh;
+    let tol = m.tolerance();
+    let a = b * h;
+    let name = format!("Zugstab Stahl + Alu ({})", if kind == crate::SolverKind::Iterative { "iterativ" } else { "direkt" });
+    let sxx_max = res.stress.iter().map(|s| s[0]).fold(f64::NEG_INFINITY, f64::max);
+    let alu_res = res.bodies.iter().find(|r| r.body == 2).ok_or(crate::FemError::Input("Körper fehlt".into()))?;
+    Ok(vec![
+        check(
+            &name,
+            "Δl [mm]",
+            mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[0] - l).abs() < tol).map(|(_, u)| u[0])),
+            f * (l / 2.0) / (steel.e * a) + f * (l / 2.0) / (alu.e * a),
+            1e-6,
+        ),
+        check(&name, "σx max [MPa]", sxx_max, f / a, 1e-6),
+        check(&name, "Sicherheit Alu-Körper", alu_res.safety.unwrap_or(0.0), 200.0 / (f / a), 1e-6),
+        check(&name, "Kraft Stahl → Alu an der Trennfläche [N]", alu_res.interfaces.first().map(|x| -x.1[0]).unwrap_or(0.0), f, 1e-6),
+        check(&name, "Lagerkraft Fx [N]", -res.reactions[0].1[0], f, 1e-6),
+    ])
+}
+
 pub fn all() -> Result<Vec<Check>> {
     let mut v = zugstab(Order::Linear)?;
     v.extend(zugstab(Order::Quadratic)?);
@@ -483,6 +536,8 @@ pub fn all() -> Result<Vec<Check>> {
     v.extend(zugstab_schraeg(crate::SolverKind::Iterative)?);
     v.extend(zugstab_geschweisst(crate::SolverKind::Direct)?);
     v.extend(zugstab_geschweisst(crate::SolverKind::Iterative)?);
+    v.extend(zugstab_zwei_werkstoffe(crate::SolverKind::Direct)?);
+    v.extend(zugstab_zwei_werkstoffe(crate::SolverKind::Iterative)?);
     let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/geometrie/balken_gelenk.step");
     if crate::gmsh::find_gmsh().is_some() && step.exists() {
         v.extend(balken_gelenk(&step)?);

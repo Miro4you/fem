@@ -177,12 +177,23 @@ pub struct Model {
     pub loads: Vec<Load>,
     /// Schweißnähte (Kopplung über einen Spalt)
     pub welds: Vec<crate::weld::Weld>,
+    /// Baugruppe: eigener Werkstoff je Körper (Körpernummer → Werkstoff); übrige Körper: `material`
+    pub body_materials: Vec<(i32, Material)>,
     pub solver: SolverKind,
     /// Fortschrittsmeldungen (Oberfläche)
     pub progress: crate::Progress,
 }
 
 impl Model {
+    /// Werkstoff eines Elements (Baugruppe: Werkstoff seines Körpers)
+    pub fn material_of(&self, e: usize) -> &Material {
+        if self.body_materials.is_empty() {
+            return &self.material;
+        }
+        let b = self.mesh.body_of(e);
+        self.body_materials.iter().find(|(t, _)| *t == b).map(|(_, m)| m).unwrap_or(&self.material)
+    }
+
     pub fn new(mesh: Mesh, material: Material) -> Self {
         Model {
             mesh,
@@ -191,6 +202,7 @@ impl Model {
             supports: vec![],
             loads: vec![],
             welds: vec![],
+            body_materials: vec![],
             solver: SolverKind::Auto,
             progress: Default::default(),
         }

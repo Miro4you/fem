@@ -1,7 +1,7 @@
 # Testprotokoll Projekt-FEM
 
-Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 56 von 56 Lehrbuchprüfungen bestanden
-(`./target/release/projekt-fem validieren`), 43 automatische Tests grün.
+Stand: 06.11.2026 · Branch `claude/stoic-maxwell-rtmn09` · Rechenkern: 66 von 66 Lehrbuchprüfungen bestanden
+(`./target/release/projekt-fem validieren`), 45 automatische Tests grün.
 
 **So ausfüllen:** Jeden Punkt durchgehen, abhaken wenn es passt, sonst Anmerkung dazuschreiben (was du gemacht hast,
 was passiert ist, gern mit Screenshot). Die Datei oder ein Foto des ausgedruckten PDFs kannst du mir einfach schicken.
@@ -155,13 +155,6 @@ Onshape: öffentliches Testdokument „Projekt-FEM Test 1“ (Lasche mit `#dicke
 | 11.4 | „Knicken“, rechnen | Lastfaktoren λ und Knicklast (Hebel 1000 N: λ ≈ 82) | [ ] |
 | 11.5 | Zurück auf „Statik“ | normales Ergebnis wieder sichtbar | [ ] |
 
-## 12. Strömung / Wind
-
-| | Schritt | Erwartet | OK / Anmerkung |
-|---|---|---|---|
-| 12.1 | Last „Strömung / Wind“, „Alle Außenflächen wählen“, Luft 30 m/s, c_w 1,2, Richtung −z | Hinweis mit Druck ≈ 662 Pa; Pfeil in Strömungsrichtung | [ ] |
-| 12.2 | Rechnen | „Summe Lasten“ ≈ Druck × angeströmte Fläche (Hebel Oberseite 26,8 cm² → ≈ 1,8 N) | [ ] |
-
 ## 13. Stabwerk (Startseite oder Werkzeugleiste „Stabwerk“)
 
 | | Schritt | Erwartet | OK / Anmerkung |
@@ -232,16 +225,44 @@ selbst starten.
 | 16.8 | PDF-Bericht | Abschnitt „Schweißnähte“ | [ ] |
 | 16.9 | Projekt speichern und öffnen | Nähte wieder da | [ ] |
 
-## 17. Aufräumen und Sicherheit (nach dem Test)
+## 18. Baugruppen (neu) – Testteil `examples/geometrie/baugruppe.step` (Grundplatte, Block, Zapfen mit 0,1 mm Spalt)
 
 | | Schritt | Erwartet | OK / Anmerkung |
 |---|---|---|---|
-| 17.1 | Onshape-Passwort ändern (war kurz im Speicher der Cloud-Umgebung), Zwei-Faktor-Anmeldung einschalten | erledigt | [ ] |
-| 17.2 | Test-API-Schlüssel löschen: dev-portal.onshape.com → API keys (stand im Chat, gültig bis 13.11.) | Schlüssel weg | [ ] |
-| 17.3 | Neuen API-Schlüssel anlegen und **nur** in Projekt-FEM unter Einstellungen › CAD-Verbindungen eintragen | „API-Schlüssel hinterlegt“ | [ ] |
-| 17.4 | In der Claude-Sitzung: Cloud-Umgebungs-Menü → Bearbeiten → Network secrets → Eintrag cad.onshape.com entfernen | Eintrag weg | [ ] |
-| 17.5 | Onshape-Testdokument „Projekt-FEM Test 1“ behalten oder löschen | entschieden | [ ] |
-| 17.6 | Heimnetz-Freigabe: Link mit Schlüssel nur auf eigenen Geräten; bei Bedarf „Neuen Zugangsschlüssel erzeugen“ (Lesezeichen danach neu anlegen) | ok | [ ] |
+| 18.1 | `baugruppe.step` öffnen | im Studienbaum unter Teil: Grundplatte, Block, Zapfen (Namen aus der STEP-Datei) | [ ] |
+| 18.2 | Block anklicken → Werkstoff „EN AW-6082 T6“ | Zeile zeigt den Werkstoff, Masse ändert sich | [ ] |
+| 18.3 | Zapfen „sichtbar“ aus, „nur diesen zeigen“, „alle zeigen“ | Körper verschwinden/erscheinen im Bild | [ ] |
+| 18.4 | Grundplatte Stirnseite fest, Kraft auf Block oben; Verbindungen → Spalte suchen → Naht übernehmen → Art „flächig verbunden“; rechnen | Ergebnis mit Tabelle je Körper, Kräfte zwischen den Körpern; Urteil nennt den schwächsten Körper | [ ] |
+| 18.5 | Ohne Verbindung für den losen Zapfen rechnen | Meldung „nicht ausreichend gelagert … Verbindungen“ | [ ] |
+| 18.6 | **Eigene Baugruppe** aus SolidWorks (Makro, jetzt auch für Baugruppen) bzw. Fusion | Körpernamen = Teilenamen | [ ] |
+| 18.7 | **Onshape:** Bibliothek → „Assembly 1“ in „Projekt-FEM Test 1“ holen | Körper je Teil (kostet ≈ 5 API-Aufrufe) | [ ] |
+| 18.8 | Projekt speichern und öffnen | Werkstoffe je Körper und ausgeblendete Körper wieder da | [ ] |
+
+## 19. Server (wie MathPad) – Anleitung `server/README.md`
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 19.1 | `server/deploy.sh root@<MathPad-Server>` | Container baut (~10–15 min) und startet | [ ] |
+| 19.2 | `http://<Server>:8790/#k=<Schlüssel>` öffnen, Hebel hochladen, rechnen | wie zu Hause | [ ] |
+| 19.3 | Empfehlung: Domain + Caddy für https | Adresse mit https | [ ] |
+
+## 20. Onshape-Verbrauch
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 20.1 | Einstellungen › CAD-Verbindungen | „API-Aufrufe 2026: N“ | [ ] |
+| 20.2 | Bibliothek zweimal hintereinander öffnen | Zähler steigt beim zweiten Mal nicht (Liste und Bilder gespeichert) | [ ] |
+
+## 21. Aufräumen und Sicherheit (nach dem Test)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 21.1 | Onshape-Passwort ändern (war kurz im Speicher der Cloud-Umgebung), Zwei-Faktor-Anmeldung einschalten | erledigt | [ ] |
+| 21.2 | Test-API-Schlüssel löschen: dev-portal.onshape.com → API keys (stand im Chat, gültig bis 13.11.) | Schlüssel weg | [ ] |
+| 21.3 | Neuen API-Schlüssel anlegen und **nur** in Projekt-FEM unter Einstellungen › CAD-Verbindungen eintragen | „API-Schlüssel hinterlegt“ | [ ] |
+| 21.4 | In der Claude-Sitzung: Cloud-Umgebungs-Menü → Bearbeiten → Network secrets → Eintrag cad.onshape.com entfernen | Eintrag weg | [ ] |
+| 21.5 | Onshape-Testdokument „Projekt-FEM Test 1“ behalten oder löschen | entschieden | [ ] |
+| 21.6 | Heimnetz-Freigabe: Link mit Schlüssel nur auf eigenen Geräten; bei Bedarf „Neuen Zugangsschlüssel erzeugen“ (Lesezeichen danach neu anlegen) | ok | [ ] |
 
 ---
 
@@ -253,7 +274,6 @@ selbst starten.
 - **Slicer-Voreinstellung**: Gyroid 20 %, 2 Wände × 0,45 mm, Schicht 0,2 mm, 5 Deck- / 4 Bodenschichten.
 - **Überhang** ab 45° (FDM-Faustregel).
 - **Erforderliche Sicherheiten** Standard 1,5 (Fließen) / 2,0 (Bruch).
-- **Strömung**: nur Staudruck × c_w auf der angeströmten Seite, keine Sogseite.
 - **IPE-Profilwerte** aus der Profiltabelle (DIN 1025-5) – bei Bedarf gegenprüfen.
 - **Schweißnähte**: Nachweis vereinfacht nach EN 1993-1-8 (Linienkraft / a ≤ Rm/(√3·β_w·1,25)), β_w aus dem
   Werkstoffnamen (S235 0,8, S275 0,85, S355 0,9, S420/S460 und Edelstahl 1,0, sonst 0,8). Nahtenden/Kerben und
@@ -268,7 +288,6 @@ selbst starten.
 - Baugruppen: Körper nur verklebt (gemeinsame Flächen) oder über Schweißnähte gekoppelt; kein Kontakt, keine Schrauben,
   ein Werkstoff für alle Körper.
 - Video-Aufnahme in der Linux-Desktop-App je nach WebKit-Version nicht verfügbar (dann im Browser aufnehmen).
-- Strömung nur überschlägig (keine CFD).
 - Topologieoptimierung: Form ist ein Vorschlag (STL), keine fertige CAD-Geometrie.
 
 ## Fragen an dich

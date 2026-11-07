@@ -307,7 +307,7 @@ pub async fn http_onshape_result(Query(q): Query<UrlQuery>) -> Html<String> {
 }
 
 pub async fn http_onshape_status() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "configured": crate::onshape::configured() }))
+    Json(serde_json::json!({ "configured": crate::onshape::configured(), "usage": crate::onshape::usage() }))
 }
 
 #[derive(Deserialize)]

@@ -36,6 +36,24 @@ pub struct Results {
     pub solid_volume: f64,
     /// Schweißnähte: übertragene Kräfte und Nahtspannungen
     pub welds: Vec<crate::weld::WeldResult>,
+    /// Baugruppe: Kennwerte je Körper (leer bei einem Körper)
+    pub bodies: Vec<BodyResult>,
+}
+
+/// Kennwerte eines Körpers der Baugruppe (Spannungen nur aus seinen eigenen Elementen gemittelt)
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BodyResult {
+    pub body: i32,
+    pub name: String,
+    pub material: String,
+    /// Volumen [mm³]
+    pub volume: f64,
+    pub max_von_mises: f64,
+    pub max_displacement: f64,
+    /// Sicherheit gegen Fließen (bzw. Rm), falls der Werkstoff Festigkeiten hat
+    pub safety: Option<f64>,
+    /// Kräfte, die andere Körper über gemeinsame (verklebte) Flächen auf diesen Körper übertragen: (Körper, Kraft [N])
+    pub interfaces: Vec<(i32, [f64; 3])>,
 }
 
 /// Auslastung je Knoten: (gesamt, Schichthaftung). Gesamt = max(σv / R_xy, Schichthaftung).

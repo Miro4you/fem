@@ -5,77 +5,76 @@ const S = ({ size = 24, sw = 1.6, children, ...p }) => (
   </svg>
 )
 
-// --- Lager ---
+// --- Lager (Bauteil leicht gefüllt, daran das technische Zeichen) ---
+const body = { fill: 'currentColor', fillOpacity: 0.18 }
 export const IcFixed = (p) => (
   <S {...p}>
-    <path d="M6 4v16" />
-    <path d="M6 6 3.5 8.5M6 10 3.5 12.5M6 14 3.5 16.5M6 18 3.5 20.5" />
-    <rect x="6" y="10" width="14" height="4" rx="1" />
+    <path d="M5 3v18" />
+    <path d="M5 5.5 2.5 8M5 9.5 2.5 12M5 13.5 2.5 16M5 17.5 2.5 20" opacity=".7" />
+    <rect x="5" y="8" width="15" height="8" rx="1.5" {...body} />
   </S>
 )
 export const IcSlide = (p) => (
   <S {...p}>
-    <path d="M12 6 7.5 13.5h9Z" />
-    <circle cx="9.5" cy="16" r="1.4" />
-    <circle cx="14.5" cy="16" r="1.4" />
-    <path d="M4 18.5h16" />
-    <path d="M6 18.5 4.5 21M10 18.5 8.5 21M14 18.5 12.5 21M18 18.5 16.5 21" />
+    <rect x="4" y="5" width="16" height="7" rx="1.5" {...body} />
+    <circle cx="8" cy="14.6" r="2" />
+    <circle cx="16" cy="14.6" r="2" />
+    <path d="M3 17.6h18" />
+    <path d="M5 17.6 3.5 20M9 17.6 7.5 20M13 17.6 11.5 20M17 17.6 15.5 20M21 17.6 19.5 20" opacity=".7" />
   </S>
 )
 export const IcPin = (p) => (
   <S {...p}>
-    <circle cx="12" cy="7" r="2.6" />
-    <path d="M10.6 9.2 7 16h10l-3.6-6.8" />
-    <path d="M4 16h16" />
-    <path d="M6 16 4.5 18.5M10 16 8.5 18.5M14 16 12.5 18.5M18 16 16.5 18.5" />
+    <path d="M4 21V12a8 8 0 0 1 16 0v9" {...body} />
+    <circle cx="12" cy="12" r="3.6" />
+    <circle cx="12" cy="12" r="1.3" fill="currentColor" />
   </S>
 )
 export const IcAxes = (p) => (
   <S {...p}>
-    <path d="M6 18V5" />
-    <path d="M6 18h13" />
-    <path d="m3.5 7.5 2.5-2.5 2.5 2.5" />
-    <path d="m16.5 15.5 2.5 2.5-2.5 2.5" />
-    <path d="m6 18-3 3" />
-    <rect x="12" y="7" width="6" height="5" rx="1" />
-    <path d="M13.5 7V5.5a1.5 1.5 0 0 1 3 0V7" />
+    <rect x="3.5" y="10" width="11" height="10" rx="1.5" {...body} />
+    <path d="M9 15V3.5" />
+    <path d="m6.8 5.7 2.2-2.2 2.2 2.2" />
+    <path d="M9 15h11.5" />
+    <path d="m18.3 12.8 2.2 2.2-2.2 2.2" />
+    <path d="M14.5 2.8h6v4.8h-6z" fill="currentColor" fillOpacity=".9" stroke="none" />
+    <path d="M15.8 2.8V1.9a1.7 1.7 0 0 1 3.4 0v.9" />
   </S>
 )
 
 // --- Lasten ---
 export const IcForce = (p) => (
   <S {...p}>
-    <path d="M4 20h16" />
-    <path d="M12 3v13" />
-    <path d="m8 12 4 4 4-4" />
+    <rect x="3" y="15" width="18" height="6" rx="1.5" {...body} />
+    <path d="M12 2.5v10" />
+    <path d="m8 9 4 4.2L16 9" />
   </S>
 )
 export const IcPressure = (p) => (
   <S {...p}>
-    <path d="M3 20h18" />
-    <path d="M6 5v10M12 5v10M18 5v10" />
-    <path d="m4.5 13 1.5 2 1.5-2M10.5 13l1.5 2 1.5-2M16.5 13l1.5 2 1.5-2" />
+    <rect x="3" y="16" width="18" height="5" rx="1.5" {...body} />
+    <path d="M6 3v9.5M12 3v9.5M18 3v9.5" />
+    <path d="m4.3 10.8 1.7 2.2 1.7-2.2M10.3 10.8 12 13l1.7-2.2M16.3 10.8 18 13l1.7-2.2" />
+    <path d="M4 3h16" opacity=".55" />
   </S>
 )
 export const IcMoment = (p) => (
   <S {...p}>
-    <circle cx="12" cy="12" r="1.5" />
-    <path d="M19 12a7 7 0 1 1-2.05-4.95" />
-    <path d="M17.2 3.2v3.9h-3.9" />
+    <circle cx="12" cy="12" r="4" {...body} />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+    <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" />
+    <path d="M17.8 2.6v4.4h-4.4" />
   </S>
 )
+// Bolzen drückt auf die untere Lochhälfte (Lochleibung)
 export const IcBearing = (p) => (
   <S {...p}>
-    <circle cx="12" cy="15" r="5.5" />
-    <path d="M12 2v8" />
-    <path d="m9 7 3 3 3-3" />
-  </S>
-)
-export const IcWind = (p) => (
-  <S {...p}>
-    <path d="M3 8h11a3 3 0 1 0-3-3" />
-    <path d="M3 16h15a3 3 0 1 1-3 3" />
-    <path d="M3 12h8" />
+    <path d="M3 21v-8a9 9 0 0 1 18 0v8z" {...body} />
+    <circle cx="12" cy="13" r="4.4" />
+    <circle cx="12" cy="14.2" r="2.6" fill="currentColor" fillOpacity=".55" />
+    <path d="M12 1.5v6" />
+    <path d="m9.7 5.3 2.3 2.3 2.3-2.3" />
+    <path d="M16.9 16.1l1.5.8M12 18.9v1.7M7.1 16.1l-1.5.8" opacity=".75" />
   </S>
 )
 

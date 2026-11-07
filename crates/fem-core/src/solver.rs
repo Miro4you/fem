@@ -35,6 +35,9 @@ pub fn solve(model: &Model) -> Result<Results> {
 /// Wie `solve`, mit zusätzlichen Einstellungen
 pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
     model.material.check()?;
+    for (_, m) in &model.body_materials {
+        m.check()?;
+    }
     let mesh = &model.mesh;
     let n_nodes = mesh.nodes.len();
     let ndof = 3 * n_nodes;
@@ -51,11 +54,24 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         }
         _ => None,
     };
+    // Baugruppe: Werkstoff je Körper (Index in body_materials je Element)
+    let body_mat: Vec<Option<usize>> = if model.body_materials.is_empty() {
+        vec![]
+    } else {
+        if zones.is_some() {
+            return Err(FemError::Input(
+                "3D-Druck-Füllung zusammen mit einem eigenen Werkstoff je Körper geht noch nicht – Füllung ausschalten oder alle Körper gleich".into(),
+            ));
+        }
+        (0..mesh.n_elems()).map(|e| model.body_materials.iter().position(|(b, _)| *b == mesh.body_of(e))).collect()
+    };
+    let d_body: Vec<DMat> = model.body_materials.iter().map(|(_, m)| m.d_matrix()).collect();
     // Steifigkeit je Element: Wand und Kern nach Volumenanteil gemischt (gleiche Dehnung)
     let elem_d = |e: usize| -> DMat {
-        let de = match &zones {
-            Some((f, _, dc)) => d * f[e] + dc * (1.0 - f[e]),
-            None => d,
+        let de = match (&zones, body_mat.get(e).copied().flatten()) {
+            (_, Some(i)) => d_body[i],
+            (Some((f, _, dc)), None) => d * f[e] + dc * (1.0 - f[e]),
+            (None, None) => d,
         };
         match opts.element_scale {
             Some(sc) => de * sc[e],
@@ -209,6 +225,39 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
     let total_reaction: [f64; 3] = total_reaction.into();
 
     let (utilization, utilization_layers, safety_break, utilization_infill, shell_fraction) = match &zones {
+        // Baugruppe mit verschiedenen Werkstoffen: Auslastung je Element mit seinem Werkstoff, am Knoten gemittelt
+        None if !body_mat.is_empty() => {
+            let mats: Vec<&crate::Material> = std::iter::once(&model.material).chain(model.body_materials.iter().map(|(_, m)| m)).collect();
+            let st: Vec<_> = mats.iter().map(|m| (crate::results::Strength::of(m, false), crate::results::Strength::of(m, true))).collect();
+            let mut acc = vec![[0.0f64; 3]; n_nodes];
+            let mut cnt = vec![0u32; n_nodes];
+            for (e, (s, _, _)) in per_elem.iter().enumerate() {
+                let k = body_mat[e].map(|i| i + 1).unwrap_or(0);
+                for (a, &n) in mesh.elem(e).iter().enumerate() {
+                    if let Some(t) = &st[k].0 {
+                        let (u, l) = t.eval(&s[a]);
+                        acc[n][0] += u;
+                        acc[n][1] += l;
+                    }
+                    if let Some(t) = &st[k].1 {
+                        acc[n][2] += t.eval(&s[a]).0;
+                    }
+                    cnt[n] += 1;
+                }
+            }
+            let avg = |n: usize, c: usize| if cnt[n] > 0 { acc[n][c] / cnt[n] as f64 } else { 0.0 };
+            let has = st.iter().any(|x| x.0.is_some());
+            let has_brk = st.iter().any(|x| x.1.is_some());
+            let layered = mats.iter().any(|m| m.layers.is_some());
+            let brk = (0..n_nodes).map(|n| avg(n, 2)).fold(0.0, f64::max);
+            (
+                has.then(|| (0..n_nodes).map(|n| avg(n, 0)).collect()),
+                (has && layered).then(|| (0..n_nodes).map(|n| avg(n, 1)).collect()),
+                (has_brk && brk > 0.0).then(|| 1.0 / brk),
+                None,
+                None,
+            )
+        }
         None => {
             let util = crate::results::utilization(&model.material, &stress, false);
             let safety_break = crate::results::utilization(&model.material, &stress, true)
@@ -287,7 +336,90 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         .sum();
 
     let welds = welds.map(|p| crate::weld::evaluate(model, &p, &u)).unwrap_or_default();
+
+    // Baugruppe: Kennwerte je Körper – Spannungen nur über die Elemente des Körpers gemittelt
+    let mut bodies = Vec::new();
+    let body_ids = mesh.bodies();
+    // Knoten → Körper (Bitmaske), für die Kräfte an gemeinsamen Flächen
+    let node_bodies: Vec<u64> = if body_ids.len() > 1 && body_ids.len() <= 64 {
+        let mut nb = vec![0u64; n_nodes];
+        for e in 0..mesh.n_elems() {
+            let bit = 1u64 << body_ids.binary_search(&mesh.body_of(e)).unwrap_or(0);
+            for &n in mesh.elem(e) {
+                nb[n] |= bit;
+            }
+        }
+        nb
+    } else {
+        vec![]
+    };
+    if body_ids.len() > 1 {
+        let mut buf = vec![[0.0f64; 6]; n_nodes];
+        let mut cnt = vec![0u32; n_nodes];
+        let mut touched = Vec::new();
+        for &b in &body_ids {
+            let mut volume = 0.0;
+            let mut mat = &model.material;
+            let me = body_ids.binary_search(&b).unwrap_or(0);
+            let mut iface = vec![[0.0f64; 3]; body_ids.len()];
+            for e in (0..mesh.n_elems()).filter(|&e| mesh.body_of(e) == b) {
+                // innere Knotenkräfte dieses Körpers an Knoten, die er mit anderen Körpern teilt = Kraft der anderen auf ihn
+                if !node_bodies.is_empty() {
+                    for (a, &n) in mesh.elem(e).iter().enumerate() {
+                        let others = node_bodies[n] & !(1u64 << me);
+                        if others != 0 {
+                            let j = others.trailing_zeros() as usize;
+                            for c in 0..3 {
+                                iface[j][c] += per_elem[e].1[3 * a + c];
+                            }
+                        }
+                    }
+                }
+                mat = model.material_of(e);
+                volume += crate::element::tet_volume(&mesh.elem_coords(e)[..4]).abs();
+                for (a, &n) in mesh.elem(e).iter().enumerate() {
+                    if cnt[n] == 0 {
+                        touched.push(n);
+                    }
+                    cnt[n] += 1;
+                    for c in 0..6 {
+                        buf[n][c] += per_elem[e].0[a][c];
+                    }
+                }
+            }
+            let strength = crate::results::Strength::of(mat, false);
+            let (mut vm_max, mut u_max, mut util_max) = (0.0f64, 0.0f64, 0.0f64);
+            for &n in &touched {
+                let s: [f64; 6] = std::array::from_fn(|c| buf[n][c] / cnt[n] as f64);
+                vm_max = vm_max.max(von_mises(&s));
+                u_max = u_max.max((u[3 * n].powi(2) + u[3 * n + 1].powi(2) + u[3 * n + 2].powi(2)).sqrt());
+                if let Some(t) = &strength {
+                    util_max = util_max.max(t.eval(&s).0);
+                }
+                buf[n] = [0.0; 6];
+                cnt[n] = 0;
+            }
+            touched.clear();
+            bodies.push(crate::results::BodyResult {
+                body: b,
+                name: mesh.body_name(b),
+                material: mat.name.clone(),
+                volume,
+                max_von_mises: vm_max,
+                max_displacement: u_max,
+                safety: strength.map(|_| 1.0 / util_max.max(1e-300)),
+                interfaces: iface
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, f)| *j != me && f.iter().any(|v| v.abs() > 0.0))
+                    .map(|(j, f)| (body_ids[j], *f))
+                    .collect(),
+            });
+        }
+    }
+
     Ok(Results {
+        bodies,
         welds,
         solid_volume,
         utilization_infill,

@@ -243,6 +243,13 @@ function CadSettings({ onError }) {
             </>
           )
         )}
+        {info?.onshapeUsage && (
+          <p className="hint">
+            API-Aufrufe {info.onshapeUsage.year}: <b>{info.onshapeUsage.year_count}</b> (seit {info.onshapeUsage.since} insgesamt {info.onshapeUsage.total}). Kostenlose
+            Onshape-Konten haben 2500 im Jahr. Teil holen ≈ 6 Aufrufe, Variablen-Studie ≈ 7 je Wert, Bibliothek öffnen ≈ 1 (Liste und Vorschaubilder
+            werden gespeichert).
+          </p>
+        )}
         {msg && <p className="hint cad-msg">{msg}</p>}
       </div>
 

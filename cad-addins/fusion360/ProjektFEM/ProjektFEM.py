@@ -90,12 +90,7 @@ def send():
     if not solids:
         raise RuntimeError('In der aktiven Komponente ist kein sichtbarer Volumenkörper.')
     name = part_name(d)
-    if len(solids) > 1:
-        r = UI.messageBox('„{}“ hat {} Körper. Projekt-FEM rechnet bisher einzelne Teile – Baugruppen folgen.\n\n'
-                          'Trotzdem schicken?'.format(name, len(solids)), 'Projekt-FEM',
-                          adsk.core.MessageBoxButtonTypes.YesNoButtonType)
-        if r != adsk.core.DialogResults.DialogYes:
-            return
+    # mehrere Körper = Baugruppe: in Projekt-FEM Werkstoff je Körper, Berührflächen verbunden
     path = os.path.join(tempfile.gettempdir(), 'projekt-fem-' + re.sub(r'[^\w.-]', '_', name) + '.step')
     em = d.exportManager
     if not em.execute(em.createSTEPExportOptions(path, comp)):
