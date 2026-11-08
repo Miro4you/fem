@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 COPY --from=ui /src/app/dist app/dist
-RUN cargo build --release -p projekt-fem-app -p projekt-fem
+RUN cargo build --release -p projekt-fem-app -p fem-cli
 
 # 3) Laufzeit: nur das Programm, Gmsh (Vernetzung) und die nötigen Bibliotheken
 FROM debian:bookworm-slim
