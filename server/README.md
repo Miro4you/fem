@@ -24,6 +24,28 @@ Oberfläche, Gmsh) und startet ihn. Danach: `http://SERVER-ADRESSE:8790/#k=SCHL�
 
 Direkt auf dem Server geht auch: `cd /opt/projekt-fem && docker compose up -d --build`.
 
+## Fertiges Image von GitHub (ohne selbst zu kompilieren)
+
+Bei jedem Push baut GitHub das Image (`.github/workflows/docker.yml`) und legt es in die Container Registry:
+
+| Tag | Inhalt |
+|---|---|
+| `ghcr.io/miro4you/fem:entwicklung` | neuester Stand des Entwicklungszweigs – zum Testen |
+| `ghcr.io/miro4you/fem:latest` | Stand von `main` |
+| `ghcr.io/miro4you/fem:sha-xxxxxxx` | genau ein Commit (zum Zurückgehen) |
+
+Das Repository ist privat, also auch das Image. Einmalig auf dem Server/NAS anmelden – mit einem GitHub-Token
+(Settings › Developer settings › Personal access tokens, Recht **read:packages**, sonst nichts):
+
+```bash
+echo DEIN_TOKEN | docker login ghcr.io -u DEIN_GITHUB_NAME --password-stdin
+docker compose pull && docker compose up -d        # im Ordner mit docker-compose.yml
+```
+
+Update: wieder `docker compose pull && docker compose up -d` – oder automatisch mit Watchtower bzw. unter Unraid
+„Check for Updates“ (Unraid-Vorlage: Repository `ghcr.io/miro4you/fem:entwicklung`, Port 8790, Pfad `/daten` →
+`/mnt/user/appdata/projekt-fem`, Variablen `PROJEKT_FEM_SCHLUESSEL` und ggf. Speichergrenze).
+
 ## Was im Server-Modus anders ist (`PROJEKT_FEM_OEFFENTLICH=1`)
 
 - Projekt-FEM öffnet nur Dateien, die es selbst angelegt hat (hochgeladene STEP-Dateien, CAD-Eingang, geänderte

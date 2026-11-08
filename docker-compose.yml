@@ -1,6 +1,9 @@
-# Projekt-FEM auf einem Server (wie MathPad): docker compose up -d --build
+# Projekt-FEM auf einem Server (wie MathPad).
+# Fertiges Image von GitHub holen (empfohlen):   docker compose pull && docker compose up -d
+# Selbst bauen (dauert 10–20 min):               docker compose up -d --build
 services:
   projekt-fem:
+    image: ghcr.io/miro4you/fem:${PROJEKT_FEM_TAG:-entwicklung}
     build: .
     container_name: projekt-fem
     restart: unless-stopped
