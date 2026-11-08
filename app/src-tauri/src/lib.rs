@@ -835,7 +835,16 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
                     .into(),
             );
         }
-        let (vm_node, vm) = res.max_von_mises();
+        // Höchstwert für Anzeige und Nachweis ohne die Krafteinleitung der Schrauben (dort Nachweis nach VDI 2230)
+        let (vm_node, vm) = res.max_von_mises_rated();
+        let (_, vm_all) = res.max_von_mises();
+        if vm_all > vm * 1.05 && !res.bolt_zone.is_empty() {
+            warnings.push(format!(
+                "An den Schraubenauflagen und im Gewinde gibt es örtliche Spannungsspitzen bis {vm_all:.0} MPa (Kraft wird dort über die Schraube \
+                 als Ersatzelement eingeleitet). Sie zählen nicht zum Nachweis; dort gelten Flächenpressung unter Kopf/Mutter und Einschraubtiefe \
+                 nach VDI 2230 (Tabelle bei den Schrauben)."
+            ));
+        }
         // Maximum auf einer gelagerten Fläche → wahrscheinlich Singularität
         let supported: Vec<i32> = setup.supports.iter().flat_map(|s| s.surfaces.clone()).collect();
         let on_support = faces
@@ -1422,6 +1431,9 @@ mod tests {
             assert!((fv - 18620.0).abs() < 100.0 && (fs - fv).abs() < 2500.0, "{b}");
             sum += fs;
         }
+        // angezeigtes σv max gehört zum Nachweis (ohne örtliche Spitzen an der Krafteinleitung): S = Re / σv
+        let (vm, sf) = (r["max_von_mises"]["value"].as_f64().unwrap(), r["safety"].as_f64().unwrap());
+        assert!((vm * sf - 235.0).abs() < 0.5, "σv {vm} · S {sf} ≠ Re");
         let j = &r["joints"].as_array().unwrap()[0];
         assert!((sum - 5000.0 - j["pressure_force"].as_f64().unwrap()).abs() < 1e-3 * sum, "Σ F_S = F_A + Restklemmkraft: {j}");
         assert!(!r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("eingependelt")), "{}", r["warnings"]);

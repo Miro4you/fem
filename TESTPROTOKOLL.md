@@ -265,6 +265,8 @@ selbst starten.
 | 18b.4 | `examples/geometrie/flansch.step` öffnen (zwei Platten, Bohrungen Ø9,6 – keine Normbohrung) | keine Schrauben-Vorschläge | [ ] |
 | 18b.5 | „Schraube an Bohrung anlegen“ → Bohrung anklicken, für die zweite wiederholen | „Schraube 1“, „Schraube 2“: M8 mit Mutter, Kopf oben; Größe änderbar, ⇅ dreht um, Papierkorb löscht | [ ] |
 | 18b.6 | Unterseite fest, oben 5 kN nach oben, rechnen | F_V ≈ 18,6 kN je Schraube (8.8), Fuge mit Restklemmkraft; Projekt speichern und wieder laden → Schrauben von Hand sind wieder da | [ ] |
+| 18b.6b | `examples/geometrie/schraubentest.step` öffnen (Nachbau deines SolidCraft-Schraubentests: Sacklöcher mit Bohrspitze, Schrauben heißen nur „Body4“) | öffnet in wenigen Sekunden; 6 Schrauben „Body4 … – M5“ an der Form erkannt; im Baum nur Body1 und Body2 | [ ] |
+| 18b.6c | dein `Schraubentest_1` direkt aus SolidCraft holen | vernetzt in Sekunden statt Minuten; Schrauben erkannt | [ ] |
 | 18b.7 | **Deine Baugruppe**: Teile, die nur aufliegen (z. B. Platte auf Rahmen), auf „Kontakt“ | Ergebnis plausibel? Rechenzeit? | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`

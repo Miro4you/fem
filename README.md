@@ -252,7 +252,8 @@ Onshape-Bibliothek) wird zu mehreren **Körpern** mit ihren Namen aus dem CAD:
   am Namen und an der Form erkannt und nicht als Körper vernetzt, sondern als **Schraubenelement** gerechnet (Balken
   zwischen Kopfauflage und Gewinde bzw. Mutter, Kraft flächenrichtig in Auflage und Gewindebohrung eingeleitet). Ohne
   modellierte Schrauben schlägt Projekt-FEM Schrauben an **fluchtenden Bohrungen** vor (Gewinde- oder Durchgangsbohrung
-  nach ISO 273) – oder du legst sie **von Hand** an: Bohrung anklicken, die fluchtenden Bohrungen der anderen Teile
+  nach ISO 273). Schrauben ohne sprechenden Namen (z. B. „Body4“ aus SolidCraft) werden **an der Form** erkannt:
+  Schaft in Regelgröße mit Kopf, der in einer Bohrung eines anderen Teils steckt. Oder du legst sie **von Hand** an: Bohrung anklicken, die fluchtenden Bohrungen der anderen Teile
   kommen dazu; Größe wählbar, Kopf umdrehbar. Je Schraube **Festigkeitsklasse** (4.6 … 12.9, A2/A4).
 - **Vorspannung (VDI 2230):** Vorspannkraft aus der Ausnutzung der Streckgrenze beim Anziehen (Standard 90 %, Reibwerte
   µ_G/µ_K 0,12), aus dem **Anziehmoment** je Schraube oder direkt als Kraft. Gerechnet in zwei Schritten: erst die

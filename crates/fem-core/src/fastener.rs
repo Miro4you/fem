@@ -190,10 +190,72 @@ fn all_points(s: &Solid) -> Vec<Vector3<f64>> {
     s.surfaces.iter().flatten().flat_map(|t| t.iter().map(|p| Vector3::from(*p))).collect()
 }
 
+/// Schraube an der Form erkennen (für Körper ohne sprechenden Namen, z. B. „Body4“): Schaft in Regelgröße M3 … M30,
+/// mindestens 1,5·d lang, an einem Ende ein breiterer Kopf (höchstens 1,2·d hoch), alles nahe der Achse – und der Schaft
+/// steckt in einer Bohrung eines anderen Körpers (Durchgangs- oder Gewindebohrung).
+fn bolt_by_shape(s: &Solid, others: &[&Solid]) -> bool {
+    let cyls = cylinders(s);
+    let Some(shaft) = cyls.iter().max_by(|a, b| ((a.t1 - a.t0) / a.r).partial_cmp(&((b.t1 - b.t0) / b.r)).unwrap()) else {
+        return false;
+    };
+    let d = 2.0 * shaft.r;
+    let m = nominal(d);
+    if !M_SIZES.contains(&m) || (m - d).abs() > 0.04 * m || shaft.t1 - shaft.t0 < 1.5 * d || shaft.t1 - shaft.t0 > 25.0 * d {
+        return false;
+    }
+    let a = shaft.axis;
+    let pts = all_points(s);
+    let radial = |p: &Vector3<f64>| {
+        let v = p - shaft.center;
+        (v - a * v.dot(&a)).norm()
+    };
+    // ganzer Körper nahe der Achse (Sechskant über Ecken ≈ 0,92·d, Zylinderkopf 0,75·d)
+    if pts.iter().any(|p| radial(p) > 1.2 * d) {
+        return false;
+    }
+    let ts: Vec<f64> = pts.iter().map(|p| p.dot(&a)).collect();
+    let (tmin, tmax) = ts.iter().fold((f64::MAX, f64::MIN), |(x, y), &t| (x.min(t), y.max(t)));
+    let (below, above) = (shaft.t0 - tmin, tmax - shaft.t1);
+    let head_at_low = below > above;
+    let head_len = below.max(above);
+    if head_len < 0.2 * d || head_len > 1.2 * d || below.min(above) > 0.3 * d {
+        return false;
+    }
+    let head_r = pts.iter().zip(&ts).filter(|(_, &t)| if head_at_low { t < shaft.t0 - 0.05 * d } else { t > shaft.t1 + 0.05 * d }).map(|(p, _)| radial(p)).fold(0.0, f64::max);
+    if head_r < 1.25 * shaft.r {
+        return false;
+    }
+    // Schaft steckt in einer Bohrung eines anderen Körpers (Kernloch ≈ 0,42·d … Durchgang ≈ 0,6·d Radius)
+    others.iter().any(|o| {
+        cylinders(o).iter().any(|c| {
+            let off = c.center - shaft.center;
+            // Bereich der Bohrung entlang der Schaftachse (Achse kann entgegengesetzt orientiert sein)
+            let sg = c.axis.dot(&a).signum();
+            let (c0, c1) = ((sg * c.t0).min(sg * c.t1), (sg * c.t0).max(sg * c.t1));
+            c.axis.dot(&a).abs() > 0.995
+                && (off - a * off.dot(&a)).norm() < 0.1 * d
+                && c.r > 0.38 * d
+                && c.r < 0.65 * d
+                && c1.min(shaft.t1) - c0.max(shaft.t0) > 0.2 * d
+        })
+    })
+}
+
 /// Schrauben (mit Muttern und Scheiben) in den Körpern einer Baugruppe finden
 pub fn detect(solids: &[Solid]) -> Vec<Detected> {
     let mut out: Vec<Detected> = Vec::new();
-    let kinds: Vec<Option<Kind>> = solids.iter().map(|s| kind_from_name(&s.name)).collect();
+    let mut kinds: Vec<Option<Kind>> = solids.iter().map(|s| kind_from_name(&s.name)).collect();
+    // ohne sprechenden Namen: an der Form
+    let by_shape: Vec<bool> = solids
+        .iter()
+        .enumerate()
+        .map(|(i, s)| kinds[i].is_none() && bolt_by_shape(s, &solids.iter().filter(|o| o.tag != s.tag).collect::<Vec<_>>()))
+        .collect();
+    for (k, &b) in kinds.iter_mut().zip(&by_shape) {
+        if b {
+            *k = Some(Kind::Bolt);
+        }
+    }
     for (i, s) in solids.iter().enumerate() {
         if kinds[i] != Some(Kind::Bolt) {
             continue;
@@ -224,7 +286,8 @@ pub fn detect(solids: &[Solid]) -> Vec<Detected> {
         let d = nominal(2.0 * shaft.r);
         let head_r = pts.iter().filter(|p| tt(p) < head_t + 0.02 * d).map(radial).fold(0.0, f64::max);
         let mut bolt = Bolt {
-            name: s.name.clone(),
+            // an der Form erkannt: Größe zum Namen, damit man sie in der Liste wiederfindet
+            name: if by_shape[i] { format!("{} – M{}", s.name, d) } else { s.name.clone() },
             d,
             stress_area: None,
             e: 210000.0,

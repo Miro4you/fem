@@ -42,6 +42,9 @@
   App-Test `flansch.step`.
 - ✅ **Kontakt an beliebigen Berührflächen (07.11.):** je Körperpaar „verklebt“ oder „Kontakt“, Stabilisierung gegen lose
   Teile mit Hinweis, weichere Tangentialfeder für stabile Reibung. Prüffall „Klotz angedrückt und geschoben“ (124/124).
+- ✅ **08.11. Schraubentest aus SolidCraft:** Vernetzen hing > 10 min an den Bohrspitzen (118°-Kegel, Verfeinerung nach
+  Krümmung lief an der Spitze davon) → kleinste Elementgröße begrenzt (jetzt 3 s). Schrauben ohne sprechenden Namen
+  werden an der Form erkannt. Anzeige „σv max“ wieder ohne die Spitzen an der Schrauben-Krafteinleitung.
 - **Schrauben/Kontakt danach:** Kontakt über einen Spalt, der sich erst schließt (Teile berühren sich im CAD nicht),
   Passschrauben/Bolzen im Loch (Lochleibung), Schraubenbild mit Querkraft-Verteilung als eigene Auswertung, Anziehen
   nacheinander (Reihenfolge), Temperatur (Wärmedehnung Alu/Stahl verändert die Vorspannung).

@@ -139,6 +139,10 @@ Merge "{step}";
 {exclude}Coherence;
 Save "{xao}";
 {size}
+// kleinste Elementgröße begrenzen: an Kegelspitzen (Bohrspitzen 118°) läuft die Krümmung gegen unendlich und die
+// Verfeinerung nach Krümmung würde dort Hunderttausende Elemente erzeugen
+hmin = hmax / 40;{refmin}
+Mesh.MeshSizeMin = hmin;
 Mesh.MeshSizeFromCurvature = {curv};
 {fields}
 Mesh.ElementOrder = {order};
@@ -153,6 +157,17 @@ Save "{msh}";
         step = escape(&step),
         msh = escape(&msh),
         xao = escape(&dir.join("geometrie.geo_unrolled")),
+        refmin = {
+            // gewünschte Verfeinerungen dürfen feiner sein als die Untergrenze
+            let r = opts
+                .refine
+                .iter()
+                .map(|r| match r {
+                    Refine::Ball { size, .. } | Refine::Box { size, .. } | Refine::Cylinder { size, .. } | Refine::Surface { size, .. } => *size,
+                })
+                .fold(f64::INFINITY, f64::min);
+            if r.is_finite() && r > 0.0 { format!("\nIf ({} < hmin)\n  hmin = {};\nEndIf", r / 2.0, r / 2.0) } else { String::new() }
+        },
         exclude = if opts.exclude.is_empty() {
             String::new()
         } else {
@@ -208,6 +223,7 @@ Save "{xao}";
 v() = Volume "*";
 bb() = BoundingBox Volume{{v()}};
 Mesh.MeshSizeMax = Sqrt((bb(3)-bb(0))^2 + (bb(4)-bb(1))^2 + (bb(5)-bb(2))^2) / 40;
+Mesh.MeshSizeMin = Sqrt((bb(3)-bb(0))^2 + (bb(4)-bb(1))^2 + (bb(5)-bb(2))^2) / 1600;
 Mesh.MeshSizeFromCurvature = 12;
 Mesh.SaveAll = 1;
 Mesh.MshFileVersion = 4.1;
@@ -607,6 +623,27 @@ mod tests {
         assert!((res.bolts[0].preload - 7384.0).abs() < 50.0, "{:?}", res.bolts[0]);
         let sum: f64 = res.bolts.iter().map(|b| b.axial).sum();
         assert!((sum - f - res.joints[0].pressure_force).abs() < 1e-3 * sum);
+    }
+
+    #[test]
+    fn bohrspitzen_und_schrauben_ohne_namen() {
+        if find_gmsh().is_none() {
+            eprintln!("Gmsh fehlt – Test übersprungen");
+            return;
+        }
+        // Nachbau aus SolidCraft: Sacklöcher mit 118°-Bohrspitze (Kegel) – früher lief die Verfeinerung nach Krümmung an
+        // der Kegelspitze davon (über 600 000 Dreiecke auf einer Fläche, Vernetzen > 10 min). Schrauben heißen nur „Body4“.
+        let path = step("schraubentest.step");
+        let solids = inspect_step(&path).unwrap();
+        let det = crate::fastener::detect(&solids);
+        assert_eq!(det.len(), 6, "{:?}", det.iter().map(|d| &d.bolt.name).collect::<Vec<_>>());
+        assert!(det.iter().all(|d| d.bolt.d == 5.0 && d.bolt.nut_t.is_none()));
+        let exclude: Vec<i32> = det.iter().flat_map(|d| d.volumes.clone()).collect();
+        let t = std::time::Instant::now();
+        let m = mesh_step(&path, &MeshOptions { exclude, ..Default::default() }).unwrap();
+        assert_eq!(m.bodies().len(), 2);
+        assert!(m.n_elems() < 100_000, "{} Elemente", m.n_elems());
+        assert!(t.elapsed().as_secs() < 60, "Vernetzen {:?}", t.elapsed());
     }
 
     #[test]
