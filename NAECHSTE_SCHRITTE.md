@@ -16,6 +16,28 @@
    angedeutetem Bauteil.
 5. ✅ **Wind-Last entfernt** (alte Projekte: Wind-Lasten werden beim Öffnen mit Hinweis entfernt).
 
+## Weitere Dateiformate einlesen (Wunsch von Felix, 08.11.) – offen
+
+Heute: STEP (Datei, Hochladen, aus Onshape, SolidCraft live, Add-ins für SolidWorks/Fusion/NX/Solid Edge).
+
+1. **Schnell machbar – IGES (.igs/.iges) und OpenCASCADE-BREP (.brep):** Gmsh liest beide direkt, nur Dateiauswahl,
+   Hochladen und Prüfung der Endung erweitern. Aufwand klein.
+2. **SolidCraft nativ (.sc):** Die Datei ist ein ZIP mit `document.json` (Features) und `cache/bodies.bin` (eigenes
+   B-Rep-Format „SCBREP04“). Weg A: läuft SolidCraft, die Datei über den Steuerkanal öffnen und als STEP exportieren
+   lassen (die Live-Anbindung kann das schon für das offene Design) – Aufwand klein bis mittel. Weg B: SCBREP selbst
+   lesen (SolidCraft ist quelloffen, Format aus dem Quelltext übernehmen) – geht dann ohne SolidCraft, Aufwand groß,
+   bricht bei Formatänderungen. Vorschlag: erst A, B nur bei Bedarf.
+3. **SolidWorks nativ (.sldprt/.sldasm):** Kein freier Leser (Parasolid im SolidWorks-Container). Möglich: auf einem
+   Rechner mit SolidWorks die Datei über das Makro bzw. die SolidWorks-API im Hintergrund öffnen und als STEP speichern
+   (Add-in ist da, Stapelbetrieb fehlt); ohne SolidWorks nur mit kostenpflichtigen Bibliotheken (z. B. CAD Exchanger,
+   HOOPS Exchange). Vorschlag: Stapelumwandlung über die vorhandene SolidWorks-Anbindung.
+4. **Andere CAD-Formate** (Parasolid .x_t, Inventor .ipt, Fusion .f3d, CATIA, NX .prt, Creo, JT): ebenfalls nur über
+   das jeweilige Programm (Export) oder kostenpflichtige Bibliotheken – im Einzelfall entscheiden, welche wirklich
+   gebraucht werden.
+5. **Netzformate aus dem 3D-Druck (STL, 3MF, OBJ):** Volumennetz aus der Oberfläche (Gmsh: Flächen klassifizieren,
+   dann vernetzen). Ohne CAD-Flächen gibt es keine sauberen Flächen zum Anklicken – Flächen nach Knickwinkel
+   zusammenfassen. Aufwand mittel; nützlich für Druckteile, deren Original nicht als STEP vorliegt.
+
 ## Baugruppen
 
 - ✅ **Stufe 1:** Körper mit Namen aus STEP (Gmsh-XAO), Werkstoff je Körper (Statik, Eigenfrequenzen mit Dichte je
