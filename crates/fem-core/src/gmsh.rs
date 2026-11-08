@@ -111,9 +111,108 @@ pub fn find_gmsh() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// Gmsh mit einem Skript laufen lassen, Ausgabe mitlesen: Fortschritt melden (Phase und Prozent aus den
+/// „Info : [ 45%] …“-Zeilen) und bei Abbruch den Prozess beenden. `full`: Volumennetz (sonst nur Flächen).
+/// Rückgabe: (erfolgreich beendet, gesamte Ausgabe)
+fn run_gmsh(gmsh: &Path, geo: &Path, progress: &crate::Progress, label: &str, full: bool) -> Result<(bool, String)> {
+    use std::io::BufRead;
+    use std::process::Stdio;
+    let mut child = Command::new(gmsh)
+        .arg(geo)
+        .arg("-")
+        // bewusst einthreadig: nur so liefert Gmsh bei gleicher Eingabe immer dasselbe Netz
+        .arg("-nt")
+        .arg("1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| FemError::Gmsh(format!("{} konnte nicht gestartet werden: {e}", gmsh.display())))?;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    for stream in [child.stdout.take().map(|o| Box::new(o) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|e| Box::new(e) as Box<dyn std::io::Read + Send>)]
+        .into_iter()
+        .flatten()
+    {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(stream).lines().map_while(|l| l.ok()) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    drop(tx);
+    // Phasen: (Anfang, Ende) des Gesamtfortschritts und Text
+    let phases: &[(&str, f64, f64, &str)] = if full {
+        &[
+            ("Meshing 1D", 0.02, 0.05, "Kanten"),
+            ("Meshing 2D", 0.05, 0.40, "Flächen"),
+            ("Meshing 3D", 0.40, 0.80, "Volumen"),
+            ("Meshing order 2", 0.80, 0.90, "Elemente 2. Ordnung"),
+            ("Optimizing", 0.90, 0.97, "Netz verbessern"),
+            ("Writing", 0.97, 1.0, "Netz speichern"),
+        ]
+    } else {
+        &[("Meshing 1D", 0.0, 0.1, "Kanten"), ("Meshing 2D", 0.1, 0.95, "Flächen"), ("Writing", 0.95, 1.0, "speichern")]
+    };
+    let mut phase: Option<usize> = None;
+    let mut log = String::new();
+    let start = std::time::Instant::now();
+    // aktueller Text und Anteil; die Zeit läuft sekündlich mit (auch in Phasen ohne Prozentangabe)
+    let mut text = "Geometrie lesen".to_string();
+    let mut frac = 0.0;
+    let mut shown = std::time::Instant::now() - std::time::Duration::from_secs(10);
+    loop {
+        let mut changed = false;
+        match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(line) => {
+                if let Some(i) = phases.iter().position(|p| line.contains(p.0)) {
+                    // nur vorwärts (z. B. „Optimizing“ kommt auch innerhalb anderer Phasen vor)
+                    if phase.is_none_or(|q| i > q) {
+                        phase = Some(i);
+                        text = phases[i].3.to_string();
+                        frac = phases[i].1;
+                        changed = true;
+                    }
+                }
+                // „Info    : [ 45%] Meshing surface 12 …“
+                if let (Some(i), Some(a), Some(b)) = (phase, line.find('['), line.find("%]")) {
+                    if let Ok(pct) = line[a + 1..b].trim().parse::<f64>() {
+                        let (_, f0, f1, what) = phases[i];
+                        text = format!("{what} {pct:.0} %");
+                        frac = f0 + (f1 - f0) * pct / 100.0;
+                        changed = true;
+                    }
+                }
+                log.push_str(&line);
+                log.push('\n');
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        if changed || shown.elapsed().as_millis() >= 1000 {
+            let secs = start.elapsed().as_secs();
+            progress.report(&format!("{label}: {text} · {}:{:02} min", secs / 60, secs % 60), Some(frac));
+            shown = std::time::Instant::now();
+        }
+        if progress.cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FemError::Cancelled);
+        }
+    }
+    let status = child.wait().map_err(|e| FemError::Gmsh(e.to_string()))?;
+    Ok((status.success(), log))
+}
+
 /// Vernetzt eine STEP-Datei (Einheit mm) mit Tetraedern. Mehrere Körper werden
 /// an gemeinsamen Flächen verbunden (verklebt).
 pub fn mesh_step(step: &Path, opts: &MeshOptions) -> Result<Mesh> {
+    mesh_step_with(step, opts, &crate::Progress::default())
+}
+
+/// Wie `mesh_step`, mit Fortschritt und Abbrechen
+pub fn mesh_step_with(step: &Path, opts: &MeshOptions, progress: &crate::Progress) -> Result<Mesh> {
     let gmsh = find_gmsh().ok_or_else(|| {
         FemError::Gmsh("Gmsh nicht gefunden – installieren (z. B. `uv tool install gmsh`) oder FEM_GMSH setzen".into())
     })?;
@@ -179,22 +278,15 @@ Save "{msh}";
     );
     std::fs::write(&geo, script).map_err(|e| FemError::Gmsh(e.to_string()))?;
 
-    let out = Command::new(&gmsh)
-        .arg(&geo)
-        .arg("-")
-        // bewusst einthreadig: nur so liefert Gmsh bei gleicher Eingabe immer dasselbe Netz
-        .arg("-nt")
-        .arg("1")
-        .output()
-        .map_err(|e| FemError::Gmsh(format!("{} konnte nicht gestartet werden: {e}", gmsh.display())))?;
+    let run = run_gmsh(&gmsh, &geo, progress, "Vernetzen", true);
     let text = std::fs::read_to_string(&msh);
     let names = std::fs::read_to_string(dir.join("geometrie.geo_unrolled.xao")).map(|x| solid_names(&x)).unwrap_or_default();
     let _ = std::fs::remove_dir_all(&dir);
-    let log = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    let (ok, log) = run?;
     // Gmsh beendet sich auch bei Skriptfehlern erfolgreich → Fehlerzeilen selbst prüfen
     let errors: Vec<&str> = log.lines().filter(|l| l.trim_start().starts_with("Error")).collect();
     let text = match text {
-        Ok(t) if out.status.success() && errors.is_empty() => t,
+        Ok(t) if ok && errors.is_empty() => t,
         _ => return Err(FemError::Gmsh(if errors.is_empty() { log } else { errors.join("\n") })),
     };
     let mut mesh = read_msh(&text)?;
@@ -209,6 +301,11 @@ Save "{msh}";
 /// Körper einer STEP-Datei mit Namen und Oberflächendreiecken (ohne Volumennetz, ohne Verschmelzen) – für die
 /// Erkennung von Schrauben, Muttern und Scheiben in Baugruppen. Die Nummern gelten für `MeshOptions::exclude`.
 pub fn inspect_step(step: &Path) -> Result<Vec<crate::fastener::Solid>> {
+    inspect_step_with(step, &crate::Progress::default())
+}
+
+/// Wie `inspect_step`, mit Fortschritt und Abbrechen
+pub fn inspect_step_with(step: &Path, progress: &crate::Progress) -> Result<Vec<crate::fastener::Solid>> {
     let gmsh = find_gmsh().ok_or_else(|| FemError::Gmsh("Gmsh nicht gefunden".into()))?;
     let step = step.canonicalize().map_err(|e| FemError::Gmsh(format!("{}: {e}", step.display())))?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -236,11 +333,12 @@ Save "{msh}";
         msh = escape(&msh),
     );
     std::fs::write(&geo, script).map_err(|e| FemError::Gmsh(e.to_string()))?;
-    let out = Command::new(&gmsh).arg(&geo).arg("-").arg("-nt").arg("1").output().map_err(|e| FemError::Gmsh(e.to_string()))?;
+    let run = run_gmsh(&gmsh, &geo, progress, "Baugruppe prüfen", false);
     let text = std::fs::read_to_string(&msh);
     let names = std::fs::read_to_string(dir.join("geometrie.geo_unrolled.xao")).map(|x| solid_names(&x)).unwrap_or_default();
     let _ = std::fs::remove_dir_all(&dir);
-    let text = text.map_err(|_| FemError::Gmsh(String::from_utf8_lossy(&out.stderr).to_string()))?;
+    let (_, log) = run?;
+    let text = text.map_err(|_| FemError::Gmsh(log.lines().filter(|l| l.contains("Error")).collect::<Vec<_>>().join("\n")))?;
     let mut solids = read_surfaces(&text)?;
     if names.len() == solids.len() {
         for (s, n) in solids.iter_mut().zip(names) {

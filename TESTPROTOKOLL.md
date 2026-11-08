@@ -269,6 +269,17 @@ selbst starten.
 | 18b.6c | dein `Schraubentest_1` direkt aus SolidCraft holen | vernetzt in Sekunden statt Minuten; Schrauben erkannt | [ ] |
 | 18b.7 | **Deine Baugruppe**: Teile, die nur aufliegen (z. B. Platte auf Rahmen), auf „Kontakt“ | Ergebnis plausibel? Rechenzeit? | [ ] |
 
+## 18c. Vernetzen: Fortschritt, Abbrechen, erst grob laden (neu)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 18c.1 | Große STEP-Datei öffnen | Fortschrittsbalken mit Phase (Flächen/Volumen …, Prozent) und laufender Zeit | [ ] |
+| 18c.2 | Während des Vernetzens „Erst grob laden“ | Datei mit grobem Netz geladen, Hinweis; Baum „Netz: grobe Vorschau – noch vernetzen“; Rechnen zeigt den offenen Punkt „Netz“ | [ ] |
+| 18c.3 | Lager/Lasten setzen, dann Netz › „Jetzt vernetzen“ | richtiges Netz, Lager und Lasten bleiben | [ ] |
+| 18c.4 | Beim Vernetzen „Abbrechen“ | sofort zurück; beim Neuvernetzen bleibt das alte Netz, beim Öffnen passiert nichts | [ ] |
+| 18c.5 | Beim Rechnen „Abbrechen“ (z. B. Verschraubung mit Kontakt) | hört nach dem laufenden Durchgang auf, Meldung „Abgebrochen“ | [ ] |
+| 18c.6 | Vernetzen schlägt fehl | Fehlermeldung, Datei wird trotzdem grob geladen | [ ] |
+
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
 | | Schritt | Erwartet | OK / Anmerkung |

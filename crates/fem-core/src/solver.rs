@@ -54,6 +54,7 @@ pub fn solve_with(model: &Model, opts: &SolveOptions) -> Result<Results> {
         b.preload_factor = Some(b.scatter_factors().1);
         b.preload_loss = b.scatter.filter(|s| s.setting).and(rb.setting_loss);
     }
+    model.progress.check()?;
     model.progress.report("Fall 2 von 2: kleinste Vorspannung nach dem Setzen", None);
     let r2 = solve_once(&m, opts)?;
     for (b, b2) in r.bolts.iter_mut().zip(&r2.bolts) {
@@ -286,6 +287,7 @@ fn solve_once(model: &Model, opts: &SolveOptions) -> Result<Results> {
             if let Some(c) = contact.as_mut() {
                 c.matrix_dirty = false;
             }
+            progress.check()?;
             let t_pass = std::time::Instant::now();
             let tol = if tight { tol_final } else { (tol_final * 1e3).max(tol_final).min(1e-6) };
             let (u, it) = solve_lin(&extra, &r, presc, Some(matrix_version), tol)?;

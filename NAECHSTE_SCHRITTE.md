@@ -45,6 +45,9 @@
 - ✅ **08.11. Schraubentest aus SolidCraft:** Vernetzen hing > 10 min an den Bohrspitzen (118°-Kegel, Verfeinerung nach
   Krümmung lief an der Spitze davon) → kleinste Elementgröße begrenzt (jetzt 3 s). Schrauben ohne sprechenden Namen
   werden an der Form erkannt. Anzeige „σv max“ wieder ohne die Spitzen an der Schrauben-Krafteinleitung.
+- ✅ **08.11. Vernetzen bedienbar:** Fortschrittsbalken aus der Gmsh-Ausgabe (Phase, Prozent, Zeit), „Abbrechen“ beendet
+  Gmsh bzw. den Löser (Kontakt-Durchgänge, PCG), „Erst grob laden“ lädt die Datei mit grobem Vorschau-Netz (bei Fehlern
+  automatisch), richtig vernetzen danach unter „Netz“; Rechnen erst mit richtigem Netz.
 - **Schrauben/Kontakt danach:** Kontakt über einen Spalt, der sich erst schließt (Teile berühren sich im CAD nicht),
   Passschrauben/Bolzen im Loch (Lochleibung), Schraubenbild mit Querkraft-Verteilung als eigene Auswertung, Anziehen
   nacheinander (Reihenfolge), Temperatur (Wärmedehnung Alu/Stahl verändert die Vorspannung).

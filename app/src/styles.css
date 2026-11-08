@@ -727,3 +727,4 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .touch-row .segmented { flex: none; }
 .hand-tools { display: flex; align-items: center; gap: 2px; }
 .hand-tools select { width: auto; height: 26px; font-size: 12px; }
+.busy-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }

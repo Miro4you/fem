@@ -82,10 +82,13 @@ function toBase64(buf) {
 export const gmshPath = () => (isDesktop ? invoke('gmsh_path') : http('/gmsh'))
 
 /// keepFasteners: Schrauben/Muttern/Scheiben aus dem CAD als Körper rechnen (sonst als Schraubenelement)
-export const openStep = (path, size, linear = false, refine = [], keepFasteners = false) =>
+export const openStep = (path, size, linear = false, refine = [], keepFasteners = false, preview = false) =>
   isDesktop
-    ? invoke('open_step', { path, size, linear, refine, keepFasteners })
-    : http('/open_step', { method: 'POST', json: { path, size, linear, refine, keep_fasteners: keepFasteners } })
+    ? invoke('open_step', { path, size, linear, refine, keepFasteners, preview })
+    : http('/open_step', { method: 'POST', json: { path, size, linear, refine, keep_fasteners: keepFasteners, preview } })
+
+/// Laufendes Vernetzen bzw. Rechnen abbrechen
+export const cancel = () => (isDesktop ? invoke('cancel') : http('/cancel', { method: 'POST' }))
 
 /// Fortschritt der laufenden Rechnung ({ text, fraction } oder null)
 export const progress = () => (isDesktop ? invoke('progress') : http('/progress'))

@@ -201,6 +201,7 @@ pub fn solve_amg(amg: &Amg, b: Vec<f64>, x0: Option<&[f64]>, tol: f64, max_iter:
         r.par_iter_mut().zip(q.par_iter()).for_each(|(r, q)| *r -= alpha * q);
         let res = dot(&r, &r).sqrt() / b_norm;
         if it % 5 == 0 {
+            progress.check()?;
             // Fortschritt über das Residuum (logarithmisch bis zur Abbruchgenauigkeit)
             let frac = (res.max(1e-300).ln() / tol.ln()).clamp(0.0, 1.0);
             progress.report(&format!("Iteration {it}, Restfehler {res:.1e}"), Some(frac));

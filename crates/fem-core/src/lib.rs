@@ -56,6 +56,8 @@ pub enum FemError {
     Gmsh(String),
     #[error("Ungültige Eingabe: {0}")]
     Input(String),
+    #[error("Abgebrochen")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, FemError>;

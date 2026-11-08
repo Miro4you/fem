@@ -467,12 +467,18 @@ export default function App() {
 
   // --- Geometrie ---------------------------------------------------------------
   // base = false: geänderte Geometrie neu vernetzen (Original und Änderungen bleiben)
-  async function loadGeometry(path, size, keepSetup = false, base = true, refineOverride = null) {
-    setBusy('Vernetze Geometrie …')
+  // Vernetzen läuft: darf „erst grob laden“ angeboten werden (nur beim Öffnen einer neuen Datei)?
+  const meshingRef = useRef(null)
+  const [meshing, setMeshing] = useState(null)
+  async function loadGeometry(path, size, keepSetup = false, base = true, refineOverride = null, preview = false) {
+    setBusy(preview ? 'Lade grobe Vorschau …' : 'Vernetze Geometrie …')
     setError(null)
+    const job = { preview, fresh: !keepSetup || !mesh, wantPreview: false }
+    meshingRef.current = job
+    setMeshing(job)
     try {
       const ref = refineOverride ?? (keepSetup ? currentRefine(size) : [])
-      const m = await api.openStep(path, size ? Number(size) : null, false, ref, keepFastenersRef.current)
+      const m = await api.openStep(path, size ? Number(size) : null, false, ref, keepFastenersRef.current, preview)
       setMeshRefineKey(JSON.stringify(ref))
       if (!keepSetup) {
         boltPrefs.current = {}
@@ -487,7 +493,9 @@ export default function App() {
             .filter(Boolean)
             .join(', ') + ' – unter Verbindungen Festigkeitsklasse wählen',
         )
-      setMeshSize(String(Number(m.mesh_size.toPrecision(3))))
+      if (!m.preview) setMeshSize(String(Number(m.mesh_size.toPrecision(3))))
+      if (m.preview)
+        setNotice('Grobe Vorschau geladen – Lager, Lasten und Verbindungen kannst du schon festlegen. Vor dem Rechnen unter „Netz“ vernetzen.')
       setResult(null)
       setResultStale(false)
       setProbe(null)
@@ -517,9 +525,22 @@ export default function App() {
       }
       return m
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      const cancelled = /Abgebrochen/.test(msg)
+      if (!preview && job.fresh && (job.wantPreview || !cancelled)) {
+        // nicht fertig vernetzt: Datei trotzdem laden (grob), damit man weiterarbeiten kann
+        if (!cancelled) setError(`Vernetzen fehlgeschlagen: ${msg.replace(/^Error: /, '')} – es wird eine grobe Vorschau geladen.`)
+        setBusy(null)
+        return loadGeometry(path, size, keepSetup, base, refineOverride, true)
+      }
+      if (cancelled) setNotice(keepSetup && mesh ? 'Vernetzen abgebrochen – das bisherige Netz bleibt.' : 'Abgebrochen.')
+      else setError(msg)
     } finally {
-      setBusy(null)
+      if (meshingRef.current === job) {
+        meshingRef.current = null
+        setMeshing(null)
+      }
+      setBusy((b) => (meshingRef.current ? b : null))
     }
   }
 
@@ -1228,6 +1249,7 @@ export default function App() {
     const p = []
     const add = (text, at) => p.push({ text, sel: at })
     if (!mesh) add('Geometrie öffnen', 'teil')
+    if (mesh?.preview) add('Netz: nur grobe Vorschau – unter „Netz“ vernetzen', 'netz')
     if (!supports.length) add('Mindestens ein Lager anlegen', 'lager+')
     supports.forEach((s, i) => {
       if (!s.surfaces.length) add(`Lager ${i + 1}: Flächen wählen`, 's:' + s.id)
@@ -2347,8 +2369,8 @@ export default function App() {
                 <em>mm</em>
               </div>
             </label>
-            <button className={'btn' + (meshPending ? ' primary' : '')} onClick={() => loadGeometry(geoStep ?? stepPath, meshSize, true, !geoStep)}>
-              <Grid3x3 size={15} /> Neu vernetzen
+            <button className={'btn' + (meshPending || mesh.preview ? ' primary' : '')} onClick={() => loadGeometry(geoStep ?? stepPath, meshSize, true, !geoStep)}>
+              <Grid3x3 size={15} /> {mesh.preview ? 'Jetzt vernetzen' : 'Neu vernetzen'}
             </button>
           </div>
           <MeshSlider mesh={mesh} diag={diag} value={meshSize} onChange={setMeshSize} />
@@ -2724,8 +2746,8 @@ export default function App() {
         <TreeRow
           icon={I.IcMesh}
           title="Netz"
-          sum={`${fmt(mesh.mesh_size)} mm · ${mesh.elements.toLocaleString('de-DE')} Elemente`}
-          state={meshPending ? 'todo' : 'ok'}
+          sum={mesh.preview ? 'grobe Vorschau – noch vernetzen' : `${fmt(mesh.mesh_size)} mm · ${mesh.elements.toLocaleString('de-DE')} Elemente`}
+          state={meshPending || mesh.preview ? 'todo' : 'ok'}
           on={sel === 'netz'}
           onClick={() => selectItem('netz')}
         />
@@ -3293,6 +3315,23 @@ export default function App() {
                   <div style={{ width: `${Math.round(100 * progressInfo.fraction)}%` }} />
                 </div>
               )}
+              <div className="busy-actions">
+                {meshing?.fresh && !meshing.preview && (
+                  <button
+                    className="btn small"
+                    title="Vernetzen abbrechen und die Datei mit einem groben Netz laden – richtig vernetzen geht später unter „Netz“"
+                    onClick={() => {
+                      if (meshingRef.current) meshingRef.current.wantPreview = true
+                      api.cancel().catch(() => {})
+                    }}
+                  >
+                    Erst grob laden
+                  </button>
+                )}
+                <button className="btn small" onClick={() => api.cancel().catch(() => {})}>
+                  <X size={13} /> Abbrechen
+                </button>
+              </div>
             </div>
           </div>
         )}

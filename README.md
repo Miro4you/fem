@@ -352,6 +352,13 @@ force = [0.0, 0.0, -100.0]   # oder: traction = [...] (N/mm²) oder: pressure = 
 Beispiel `platte_druck.toml` (Viertelplatte mit Symmetrie): Durchbiegung 0,166 mm vs. Kirchhoff 0,159 mm,
 Spannung 9,3 vs. 9,2 MPa – Unterschied durch die in der Plattentheorie vernachlässigte Dicke.
 
+## Lange Vernetzung
+
+Beim Vernetzen zeigt Projekt-FEM Phase, Prozent und Zeit. Dauert es zu lange: **„Erst grob laden“** – die Datei kommt
+mit einem groben Vorschau-Netz, Lager, Lasten und Verbindungen lassen sich schon festlegen, richtig vernetzt wird später
+unter „Netz“ (Rechnen geht erst dann). **„Abbrechen“** beendet Vernetzen oder Rechnen; schlägt das Vernetzen fehl, wird
+die Datei automatisch grob geladen.
+
 ## Bekannte Grenzen
 
 - Linear-elastisch, kleine Verformungen; keine Plastizität, kein Kriechen. Kontakt (nichtlinear, iterativ) nur in

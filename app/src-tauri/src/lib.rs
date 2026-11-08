@@ -27,12 +27,31 @@ pub type ProgressSlot = Arc<Mutex<Option<ProgressView>>>;
 
 /// Fortschritts-Empfänger, der in den Zustand der Sitzung schreibt
 fn progress_for(state: &AppState) -> (fem_core::Progress, ProgressSlot) {
-    let slot = state.lock().unwrap().progress.clone();
+    let (slot, cancel) = {
+        let s = state.lock().unwrap();
+        (s.progress.clone(), s.cancel.clone())
+    };
+    // neuer langer Schritt: ein früheres „Abbrechen“ gilt nicht mehr
+    cancel.store(false, std::sync::atomic::Ordering::Relaxed);
     let s2 = slot.clone();
     let p = fem_core::Progress::new(move |text, fraction| {
         *s2.lock().unwrap() = Some(ProgressView { text: text.to_string(), fraction });
-    });
+    })
+    .with_cancel(cancel);
     (p, slot)
+}
+
+/// Laufendes Vernetzen bzw. Rechnen abbrechen (Gmsh wird beendet, der Löser hört beim nächsten Durchgang auf)
+pub fn cancel_impl(state: &AppState) {
+    let flag = state.lock().map(|s| s.cancel.clone());
+    if let Ok(f) = flag {
+        f.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[tauri::command]
+fn cancel(state: tauri::State<'_, AppState>) {
+    cancel_impl(state.inner());
 }
 
 pub fn progress_impl(state: &AppState) -> Option<ProgressView> {
@@ -44,6 +63,10 @@ pub fn progress_impl(state: &AppState) -> Option<ProgressView> {
 #[derive(Default)]
 pub struct Inner {
     progress: ProgressSlot,
+    /// Abbrechen angefordert (gilt für die laufende Aufgabe dieser Sitzung)
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// nur grobes Vorschau-Netz geladen (zum Ansehen und Lager/Lasten setzen, nicht zum Rechnen)
+    preview: bool,
     /// Leichtbau-Vorschlag: Dichte je Element
     topo: Option<Vec<f64>>,
     mesh: Option<Mesh>,
@@ -104,6 +127,8 @@ pub struct MeshView {
     bolts: Vec<BoltView>,
     /// Körperpaare, die sich berühren (Körper A, Körper B, Fläche mm²) – wahlweise verklebt oder mit Kontakt
     touching: Vec<(i32, i32, f64)>,
+    /// nur grobes Vorschau-Netz (vor dem Rechnen vernetzen)
+    preview: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -233,6 +258,7 @@ fn build_view(mesh: &Mesh, faces: &[Face], mesh_size: f64) -> (MeshView, Vec<usi
         surfaces,
         bolts: vec![],
         touching: mesh.touching_bodies(),
+        preview: false,
         bodies: {
             let ids = mesh.bodies();
             if ids.len() < 2 {
@@ -437,10 +463,13 @@ async fn open_step(
     linear: Option<bool>,
     refine: Option<Vec<Refine>>,
     keep_fasteners: Option<bool>,
+    preview: Option<bool>,
 ) -> Result<MeshView, String> {
     let refine = refine.unwrap_or_default();
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || open_step_with(&state, &path, size, linear == Some(true), &refine, keep_fasteners == Some(true)))
+    tauri::async_runtime::spawn_blocking(move || {
+        open_step_full(&state, &path, size, linear == Some(true), &refine, keep_fasteners == Some(true), preview == Some(true))
+    })
         .await
         .map_err(|e| e.to_string())?
 }
@@ -458,24 +487,57 @@ fn several_solids(path: &str) -> bool {
 /// STEP öffnen; bei Baugruppen Schrauben/Muttern/Scheiben erkennen und (wenn `keep_fasteners` aus) als Verbinder
 /// statt als Körper rechnen
 pub fn open_step_with(state: &AppState, path: &str, size: Option<f64>, linear: bool, refine: &[Refine], keep_fasteners: bool) -> Result<MeshView, String> {
+    open_step_full(state, path, size, linear, refine, keep_fasteners, false)
+}
+
+/// STEP öffnen und vernetzen. `preview`: nur grobes Netz mit linearen Elementen (schnell; zum Ansehen und Einrichten,
+/// vor dem Rechnen richtig vernetzen)
+pub fn open_step_full(
+    state: &AppState,
+    path: &str,
+    size: Option<f64>,
+    linear: bool,
+    refine: &[Refine],
+    keep_fasteners: bool,
+    preview: bool,
+) -> Result<MeshView, String> {
     {
         let (progress, slot) = progress_for(state);
+        let done = |r: Result<MeshView, String>| {
+            *slot.lock().unwrap() = None;
+            r
+        };
         let mut found: Vec<fem_core::fastener::Detected> = Vec::new();
         if several_solids(path) {
             progress.report("Baugruppe prüfen: Schrauben suchen", None);
-            if let Ok(solids) = gmsh::inspect_step(&PathBuf::from(path)) {
-                found = fem_core::fastener::detect(&solids);
+            match gmsh::inspect_step_with(&PathBuf::from(path), &progress) {
+                Ok(solids) => found = fem_core::fastener::detect(&solids),
+                Err(fem_core::FemError::Cancelled) => return done(Err("Abgebrochen".into())),
+                Err(_) => {}
             }
         }
         let opts = MeshOptions {
             size,
-            order: if linear { Order::Linear } else { Order::Quadratic },
-            refine: refine.to_vec(),
+            order: if linear || preview { Order::Linear } else { Order::Quadratic },
+            curvature_points: if preview { 6 } else { 16 },
+            refine: if preview { vec![] } else { refine.to_vec() },
             exclude: if keep_fasteners { vec![] } else { found.iter().flat_map(|d| d.volumes.clone()).collect() },
-            ..Default::default()
         };
-        progress.report(if refine.is_empty() { "Vernetzen (Gmsh)" } else { "Vernetzen mit örtlicher Verfeinerung (Gmsh)" }, None);
-        let mesh = gmsh::mesh_step(&PathBuf::from(path), &opts).map_err(|e| e.to_string())?;
+        progress.report(
+            if preview {
+                "Vorschau vernetzen (grob)"
+            } else if refine.is_empty() {
+                "Vernetzen (Gmsh)"
+            } else {
+                "Vernetzen mit örtlicher Verfeinerung (Gmsh)"
+            },
+            Some(0.0),
+        );
+        let mesh = match gmsh::mesh_step_with(&PathBuf::from(path), &opts, &progress) {
+            Ok(m) => m,
+            Err(fem_core::FemError::Cancelled) => return done(Err("Abgebrochen".into())),
+            Err(e) => return done(Err(e.to_string())),
+        };
         let (lo, hi) = mesh.bbox();
         let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
         let faces = mesh.boundary_faces();
@@ -497,9 +559,11 @@ pub fn open_step_with(state: &AppState, path: &str, size: Option<f64>, linear: b
                 view.bolts.push(BoltView { bolt: b, class: None, source: "bohrung".into(), parts: vec![] });
             }
         }
+        view.preview = preview;
         *slot.lock().unwrap() = None;
         let mut s = state.lock().unwrap();
-        *s = Inner { progress: slot, topo: None, mesh: Some(mesh), faces, disp_nodes, model: None, results: None };
+        let cancel = s.cancel.clone();
+        *s = Inner { progress: slot, cancel, preview, topo: None, mesh: Some(mesh), faces, disp_nodes, model: None, results: None };
         Ok(view)
     }
 }
@@ -705,6 +769,9 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
     let (mesh, faces, disp_nodes) = {
         let s = state.lock().unwrap();
         let mesh = s.mesh.clone().ok_or("Zuerst eine Geometrie öffnen")?;
+        if s.preview {
+            return Err("Nur ein grobes Vorschau-Netz ist geladen – erst unter „Netz“ vernetzen, dann rechnen.".into());
+        }
         (mesh, s.faces.clone(), s.disp_nodes.clone())
     };
     if setup.supports.is_empty() {
@@ -1305,6 +1372,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             gmsh_path,
             progress,
+            cancel,
             startup_file,
             cad_set_summary,
             cad_info,

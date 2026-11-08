@@ -185,6 +185,7 @@ fn router(shared: Shared) -> Router {
         .route("/onshape/write_result", post(os_write_result))
         .route("/materials", get(api_materials_get).post(api_materials_set))
         .route("/progress", get(api_progress))
+        .route("/cancel", post(api_cancel))
         .route("/upload", post(api_upload))
         .route("/file", get(api_file))
         .route("/open_step", post(api_open_step))
@@ -256,6 +257,11 @@ async fn check_key(
         return (StatusCode::UNAUTHORIZED, "Zugangsschlüssel fehlt oder ist falsch").into_response();
     }
     next.run(req).await
+}
+
+async fn api_cancel(State(s): State<Shared>, headers: HeaderMap) -> Json<bool> {
+    crate::cancel_impl(&s.session(&headers));
+    Json(true)
 }
 
 async fn api_progress(State(s): State<Shared>, headers: HeaderMap) -> Json<Option<crate::ProgressView>> {
@@ -345,6 +351,8 @@ struct OpenStep {
     refine: Vec<Refine>,
     #[serde(default)]
     keep_fasteners: bool,
+    #[serde(default)]
+    preview: bool,
 }
 
 async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Json<OpenStep>) -> ApiResult<Response> {
@@ -355,7 +363,7 @@ async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Jso
         return Err(bad("Datei nicht gefunden – bitte neu hochladen"));
     }
     let state = s.session(&headers);
-    let view = tokio::task::spawn_blocking(move || crate::open_step_with(&state, &a.path, a.size, a.linear == Some(true), &a.refine, a.keep_fasteners))
+    let view = tokio::task::spawn_blocking(move || crate::open_step_full(&state, &a.path, a.size, a.linear == Some(true), &a.refine, a.keep_fasteners, a.preview))
         .await
         .map_err(bad)?
         .map_err(bad)?;
