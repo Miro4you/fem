@@ -22,7 +22,7 @@ RUN cargo build --release -p projekt-fem-app -p fem-cli
 # 3) Laufzeit: nur das Programm, Gmsh (Vernetzung) und die nötigen Bibliotheken
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libwebkit2gtk-4.1-0 libgtk-3-0 ca-certificates python3 python3-pip \
+      libwebkit2gtk-4.1-0 libgtk-3-0 ca-certificates python3 python3-pip python-is-python3 \
       libgl1 libglu1-mesa libxcursor1 libxft2 libxinerama1 libxrender1 libfontconfig1 libgomp1 \
     && pip3 install --no-cache-dir --break-system-packages gmsh \
     && rm -rf /var/lib/apt/lists/*
