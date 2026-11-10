@@ -11,7 +11,7 @@ echo "=== Projekt-FEM Deploy → $REMOTE ==="
 ssh "$REMOTE" "mkdir -p $REMOTE_DIR"
 rsync -az --delete --exclude target --exclude node_modules --exclude .git --exclude app/dist \
   "$PROJECT_DIR/" "$REMOTE:$REMOTE_DIR/"
-ssh "$REMOTE" "cd $REMOTE_DIR && PROJEKT_FEM_SCHLUESSEL='${PROJEKT_FEM_SCHLUESSEL:-}' docker compose up -d --build"
+ssh "$REMOTE" "cd $REMOTE_DIR && PROJEKT_FEM_SCHLUESSEL='${PROJEKT_FEM_SCHLUESSEL:-}' PROJEKT_FEM_OHNE_SCHLUESSEL=0 docker compose up -d --build"
 echo ""
 echo "Zugangsadresse (mit Schlüssel):"
 ssh "$REMOTE" "docker logs projekt-fem 2>&1 | grep -o '#k=[a-z0-9]*' | tail -1" | sed "s|^|  http://${REMOTE#*@}:8790/|"

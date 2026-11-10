@@ -12,8 +12,8 @@ services:
     environment:
       # fester Zugangsschlüssel (mindestens 12 Buchstaben/Ziffern), steht in der Adresse …/#k=SCHLÜSSEL
       - PROJEKT_FEM_SCHLUESSEL=${PROJEKT_FEM_SCHLUESSEL:-}
-      # 1 = ganz ohne Zugangsschlüssel (nur im Heimnetz, z. B. NAS – nie mit Portfreigabe ins Internet!)
-      - PROJEKT_FEM_OHNE_SCHLUESSEL=${PROJEKT_FEM_OHNE_SCHLUESSEL:-0}
+      # Standard 1 = ohne Zugangsschlüssel (Heimnetz/NAS). Für einen Server im Internet auf 0 setzen!
+      - PROJEKT_FEM_OHNE_SCHLUESSEL=${PROJEKT_FEM_OHNE_SCHLUESSEL:-1}
     volumes:
       - fem-daten:/daten
     # Rechnen braucht Arbeitsspeicher: ~2,5 GB je Million Unbekannte

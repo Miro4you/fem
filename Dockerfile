@@ -30,6 +30,7 @@ COPY --from=build /src/target/release/projekt-fem-app /src/target/release/projek
 # Einstellungen, Werkstoffe, Onshape-Schlüssel und CAD-Eingang bleiben im Volume /daten
 ENV XDG_CONFIG_HOME=/daten \
     PROJEKT_FEM_OEFFENTLICH=1 \
+    PROJEKT_FEM_OHNE_SCHLUESSEL=1 \
     RUST_LOG=warn
 VOLUME /daten
 EXPOSE 8790
