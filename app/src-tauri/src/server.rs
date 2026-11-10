@@ -251,7 +251,8 @@ async fn check_key(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
-    let ok = req.headers().get("x-fem-key").and_then(|v| v.to_str().ok()) == Some(s.key.as_str())
+    let ok = without_key()
+        || req.headers().get("x-fem-key").and_then(|v| v.to_str().ok()) == Some(s.key.as_str())
         || crate::cad::query_key(req.uri().query()).as_deref() == Some(s.key.as_str());
     if !ok {
         return (StatusCode::UNAUTHORIZED, "Zugangsschlüssel fehlt oder ist falsch").into_response();
@@ -303,6 +304,12 @@ async fn api_upload(State(s): State<Shared>, Query(q): Query<UploadQuery>, body:
     let path = dir.join(name);
     std::fs::write(&path, &body).map_err(bad)?;
     Ok(Json(path.display().to_string()))
+}
+
+/// Heimnetz ohne Zugangsschlüssel (`PROJEKT_FEM_OHNE_SCHLUESSEL=1`): jeder, der den Server erreicht, darf rechnen.
+/// Nur für ein abgeschottetes Heimnetz gedacht – nie mit Portfreigabe ins Internet.
+pub fn without_key() -> bool {
+    std::env::var("PROJEKT_FEM_OHNE_SCHLUESSEL").is_ok_and(|v| !v.is_empty() && v != "0")
 }
 
 /// Öffentlicher Betrieb (Server im Internet, `PROJEKT_FEM_OEFFENTLICH=1`): nur Dateien, die Projekt-FEM selbst
@@ -675,6 +682,9 @@ pub fn run_headless(port: Option<u16>) {
             Ok(_running) => {
                 if let Err(e) = crate::cad::start_local().await {
                     eprintln!("{e}");
+                }
+                if without_key() {
+                    println!("Achtung: PROJEKT_FEM_OHNE_SCHLUESSEL ist gesetzt – kein Zugangsschlüssel nötig. Nur im Heimnetz verwenden!");
                 }
                 if public_mode() {
                     println!("Projekt-FEM läuft als Server (öffentlicher Modus). Im Browser öffnen: https://<Adresse>/#k={}", cfg.key);

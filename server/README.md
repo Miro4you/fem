@@ -61,6 +61,9 @@ Update: wieder `docker compose pull && docker compose up -d` – oder automatisc
 
 - **Zugang nur mit Schlüssel** in der Adresse (`#k=…`). Wer den Schlüssel hat, kann rechnen und deine
   Onshape-Verbindung nutzen. Neuer Schlüssel: `PROJEKT_FEM_SCHLUESSEL` ändern und neu starten.
+  Der Browser merkt sich den Schlüssel (je Adresse: `http://nas:8790` und `http://192.168.…:8790` zählen getrennt).
+- **Ohne Schlüssel (nur Heimnetz, z. B. NAS):** `PROJEKT_FEM_OHNE_SCHLUESSEL=1` setzen. Dann darf jedes Gerät im
+  Heimnetz rechnen und deine Onshape-Verbindung nutzen. **Niemals zusammen mit einer Portfreigabe ins Internet.**
 - **Verschlüsselung (https):** Wie MathPad läuft der Container ohne https. Über das Internet sollte der Schlüssel
   nicht unverschlüsselt laufen. Empfehlung: eine Domain auf den Server zeigen lassen und davor **Caddy** setzen
   (holt das Zertifikat automatisch):

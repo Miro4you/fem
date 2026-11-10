@@ -24,6 +24,22 @@ if (!isDesktop && typeof window !== 'undefined') {
 // eigene Sitzung je Browser-Tab (eigenes Modell auf dem Server)
 const session = Math.random().toString(36).slice(2) + Date.now().toString(36)
 
+// mehrere Anfragen gleichzeitig abgewiesen → nur einmal nachfragen
+let keyPrompt = null
+function askKey() {
+  keyPrompt ??= Promise.resolve().then(() => {
+    const k = window.prompt(
+      'Zugangsschlüssel eingeben.\n\nDesktop-App: steht unter Einstellungen → Heimnetz.\n' +
+        'Server/NAS: steht im Container-Protokoll („Im Browser öffnen: …#k=…“) bzw. in PROJEKT_FEM_SCHLUESSEL.',
+    )
+    keyPrompt = null
+    if (!k?.trim()) return false
+    storage.set(KEY_STORE, k.trim())
+    return true
+  })
+  return keyPrompt
+}
+
 async function http(path, { method = 'GET', json, body, raw = false } = {}) {
   const headers = { 'X-FEM-Key': storage.get(KEY_STORE) ?? '', 'X-FEM-Session': session }
   if (json !== undefined) headers['Content-Type'] = 'application/json'
@@ -34,11 +50,7 @@ async function http(path, { method = 'GET', json, body, raw = false } = {}) {
     throw new Error('Keine Verbindung zum Rechner – läuft Projekt-FEM dort noch mit Heimnetz-Freigabe?')
   }
   if (r.status === 401) {
-    const k = window.prompt('Zugangsschlüssel eingeben (steht in der Desktop-App unter „Heimnetz“):')
-    if (k) {
-      storage.set(KEY_STORE, k.trim())
-      return http(path, { method, json, body, raw })
-    }
+    if (await askKey()) return http(path, { method, json, body, raw })
     throw new Error('Zugangsschlüssel fehlt oder ist falsch')
   }
   if (!r.ok) throw new Error(await r.text())
