@@ -127,7 +127,11 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
 - ✅ 3D-Druck: Schichtaufbau (E, Rp/Re, Rm je XY und Z), Aufbaurichtung wählen/vergleichen, Schichthaftung als
   eigene Auslastung. Ideen: Füllgrad/Wandlinien berücksichtigen, Ausrichtung frei optimieren (nicht nur X/Y/Z),
   Stützstrukturen/Überhänge bewerten, Materialdatenbank mit Herstellerwerten
-- Geometrie anpassen: Felix ist mit der Bearbeitung noch nicht zufrieden → Wunschablauf klären
+- ✅ Konstruktion (kleines CAD) statt „Geometrie anpassen“: Skizzen mit Maßen/Bedingungen, Extrudieren, Drehen,
+  Bohrung mit Senkung, Verrunden, Fase, Muster, Spiegeln, Fläche verschieben/entfernen, Feature-Verlauf
+  → Felix: bitte ausprobieren (Testprotokoll 18d). Ideen für danach: Variablen/Formeln für Maße (#dicke),
+  Rippe, Wandung (Shell), Langloch/Polygon/Spline in der Skizze, Trimmen, Skizzen-Muster, Fasen mit zwei Maßen,
+  Gewindebohrung, Baugruppen aus mehreren konstruierten Teilen, Skizze aus DXF
 - ✅ Geometrie anpassen (grobe Abschätzung): Reiter „Geometrie“ – Radius/Bohrung ändern, Material hinzu/weg per
   Skizze, Vorher/Nachher-Vergleich. Später möglich: Linienzug-Skizze, Kanten neu verrunden, Fasen
 - Hinweis: Die „R3“-Radien am Hebel (Flächen 16/17) sind laut Geometrie R6

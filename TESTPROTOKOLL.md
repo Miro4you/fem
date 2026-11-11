@@ -280,6 +280,25 @@ selbst starten.
 | 18c.5 | Beim Rechnen „Abbrechen“ (z. B. Verschraubung mit Kontakt) | hört nach dem laufenden Durchgang auf, Meldung „Abgebrochen“ | [ ] |
 | 18c.6 | Vernetzen schlägt fehl | Fehlermeldung, Datei wird trotzdem grob geladen | [ ] |
 
+## 18d. Konstruktion – kleines CAD (neu)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 18d.1 | Startseite › „Neues Teil konstruieren“ › Skizze › Ebene XY anklicken | Blick senkrecht auf die Ebene, Werkzeuge oben, roter Ursprungspunkt | [ ] |
+| 18d.2 | Rechteck mit einer Ecke im Ursprung, Kreis darin | Ecke rastet ein; Linien waagrecht/senkrecht (Zeichen —/\|) | [ ] |
+| 18d.3 | Maß (D): untere Linie → 60, rechte Linie → 40, Kreis → Ø12; Kreismitte mit Maßen festlegen | Skizze passt sich an, „Voll bestimmt“, alles schwarz | [ ] |
+| 18d.4 | Skizze fertig › Extrudieren 10 › OK | Platte mit Loch; Volumen (60·40 − π·36)·10 = 22,87 cm³ | [ ] |
+| 18d.5 | Skizze auf der Plattenfläche, zwei Punkte › Bohrung M8 mit Zylinderkopf-Senkung | Bohrungen mit Senkung in der Vorschau | [ ] |
+| 18d.6 | Verrunden: Außenkante anklicken, R2 | Kante wird orange, Verrundung in der Vorschau; zu großer Radius → rote Meldung | [ ] |
+| 18d.7 | Muster (Kreis, Ganzer Körper / einzelne Bohrung), Spiegeln an YZ | Vervielfältigt bzw. gespiegelt | [ ] |
+| 18d.8 | Feature im Verlauf anklicken, Wert ändern, Auge (unterdrücken), Strg+Z | Neuaufbau, unterdrückt = durchgestrichen | [ ] |
+| 18d.9 | „In die Rechnung übernehmen“ | Teil im Modell, Lager/Lasten setzen und rechnen | [ ] |
+| 18d.10 | Konstruktion ändern (z. B. Tiefe) und erneut übernehmen | Lager/Lasten bleiben auf denselben Flächen, Vergleich vorher/nachher | [ ] |
+| 18d.11 | STEP-Teil (Hebel) öffnen › Konstruktion › Radius/Bohrung › Bohrung anklicken, Ø ändern | „Bohrung ändern“ im Verlauf, Volumen ändert sich | [ ] |
+| 18d.12 | Projekt speichern, neu laden | Verlauf wieder da, „Übernommen“ | [ ] |
+| 18d.13 | Drehteil: Profil zeichnen, Drehen um eine Linie | Rotationskörper, Achse rot gestrichelt | [ ] |
+| 18d.14 | Parameterstudie: Skizzenmaß mit Namen versehen, in der Studie wählen | Werte werden nacheinander gebaut und gerechnet | [ ] |
+
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
 | | Schritt | Erwartet | OK / Anmerkung |

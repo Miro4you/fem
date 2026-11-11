@@ -27,7 +27,7 @@ Bedienung auch im Browser über das Heimnetz.
 | **Baugruppen** | mehrere Körper aus einer STEP-Datei bzw. Onshape-Baugruppe mit Namen, Werkstoff je Körper, ein-/ausblenden, Berührflächen verbunden, Spalte als Naht oder flächige Verbindung, **Schrauben** automatisch erkennen (Normteile, Bohrungen) oder von Hand an Bohrungen anlegen, Festigkeitsklasse, **Vorspannung nach VDI 2230** mit Anziehstreuung und Setzen, **Kontakt mit Reibung** (klaffen, rutschen) in Schraubenfugen und an beliebigen Berührflächen, Nachweis mit Flächenpressung, Einschraubtiefe und Dauerfestigkeit, Ergebnis und Kräfte je Körper |
 | **Studien** | Parameterstudie (Netz, Füllgrad, Maße, **Onshape-Variablen**, **SolidCraft-Parameter**), Vergleich mit voriger Version |
 | **Weitere Analysen** | Eigenfrequenzen, Knicken (Lanczos), Leichtbau-Vorschlag (Topologieoptimierung, STL-Export), Stabwerk (Balken, Rahmen, Fachwerke mit IPE-Profilen) |
-| **Geometrie anpassen** | Radien/Bohrungen ändern, Material per Skizze hinzufügen oder entfernen, Ergebnis mit vorher vergleichen |
+| **Konstruktion (kleines CAD)** | Teile direkt zeichnen oder importierte Teile ändern: Skizze mit Maßen und Bedingungen, Extrudieren, Drehen, Bohrung, Verrunden, Fase, Muster, Spiegeln, Feature-Verlauf |
 | **CAD-Anbindung** | Onshape (**Bibliothek** mit Vorschaubildern, Lesezeichen, API), SolidWorks (Makro), Fusion (Add-in), SolidCraft (live), NX, Solid Edge, „Senden an“ für jedes CAD – Ergebnis zurück ins CAD |
 | **Heimnetz & Server** | starker PC rechnet, Laptop/Arbeits-PC bedient im Browser – ohne Installation; oder als Docker-Container auf einem Server (wie MathPad) |
 | **Rechenkern** | Rust, direkter Löser (Cholesky) und iterativer Löser (PCG + algebraisches Mehrgitter) bis über 2 Mio. Unbekannte, 76 Lehrbuchprüfungen |
@@ -97,7 +97,7 @@ Aufbau wie in einem CAD-Simulationsmodul:
 - **Kopfleiste:** Logo → Startseite, Teilname, **Analyse** (Statik, Eigenfrequenzen, Knicken), **Modell | Ergebnis**,
   Menüs **Datei** und **Export**, Einstellungen, **Rechnen**. Der Knopf ist grün, sobald alles festgelegt ist; sonst grau
   und zeigt beim Anklicken die offenen Punkte – ein Klick springt zum passenden Eintrag.
-- **Werkzeugleiste links:** Modell, Geometrie anpassen, Leichtbau, Parameterstudie, Stabwerk.
+- **Werkzeugleiste links:** Modell, Konstruktion, Leichtbau, Parameterstudie, Stabwerk.
 - **Studienbaum:** Teil, Werkstoff, Netz, Lager, Lasten, Verbindungen – grüner Punkt = festgelegt, Kreis = offen.
   Darunter die Eigenschaften des gewählten Eintrags. Lager- und Lastarten als Symbole; eine Kraft hat Betrag und
   Richtung (Standard: **senkrecht auf die gewählte Fläche**, sonst X/Y/Z, umkehren, Pfeil im Bild ziehen oder Richtung
@@ -174,20 +174,41 @@ Gilt für Statik, Eigenfrequenzen, Knicken und Leichtbau. Beispiel: `examples/ge
   Farbskala, Annahmen und Grenzen.
 - **MathPad**: Export als `.mathpad`-Rechenblatt (Werkstoffwerte, Maximalwerte, Lagerkräfte, Masse und Nachweis als
   Formeln, z. B. `S_F = R_e / σ_v`).
-- **Parameterstudie** (Reiter „Studie“): Netzgröße (Konvergenz), Füllgrad, Maße aus „Geometrie anpassen“,
+- **Parameterstudie** (Reiter „Studie“): Netzgröße (Konvergenz), Füllgrad, Maße aus der Konstruktion (Skizzenmaße, Tiefen, Radien …),
   **Onshape-Variablen** (`#dicke` …) oder **SolidCraft-Parameter** über mehrere Werte – Tabelle, Diagramm, CSV-Export.
 - **Werkstoffe**: Vorlagen mit Dichte (Masse im Ergebnis), eigene Werkstoffe speichern
   (`~/.config/projekt-fem/werkstoffe.json`), Werte aus eigenem Zugversuch übernehmen.
 
-### Geometrie anpassen (grobe Abschätzung)
+### Konstruktion (kleines CAD)
 
-Reiter **„Geometrie“**: Radius oder Bohrung anklicken und neuen Wert eingeben (0 = scharfe Kante bzw. Bohrung zu),
-Material hinzufügen oder entfernen über eine Skizze (Rechteck/Kreis) auf einer Fläche mit Höhe bzw. Tiefe
-(„durch alles“). „Änderungen anwenden“ ändert die STEP-Datei, vernetzt neu und stellt Lager und Lasten auf die neuen
-Flächen um. Danach rechnen: Das Ergebnis wird mit dem vorherigen verglichen (Spannung, Verformung, Sicherheit,
-Volumen). Änderungen einzeln an/aus, Projekt speichert sie mit, geänderte STEP lässt sich exportieren.
-Braucht das Python-Modul von Gmsh (bei `uv tool install gmsh` dabei; sonst Pfad in `FEM_GMSH_PYTHON`).
-Die Änderungen gehen nicht zurück ins CAD-Modell.
+Reiter **„Konstruktion“** – oder auf der Startseite **„Neues Teil konstruieren“**. Abläufe wie in Onshape:
+
+1. **Skizze:** Hauptebene (XY, XZ, YZ) oder ebene Fläche des Bauteils anklicken. Zeichnen mit Linie (Linienzug),
+   Rechteck, Kreis, Bogen, Punkt; Punkte rasten an vorhandenen Punkten, Linienmitten, Bauteilecken und am Ursprung ein,
+   fast waagrechte/senkrechte Linien werden waagrecht/senkrecht. **Maß** (Taste D): Linie, Kreis, zwei Punkte,
+   Punkt + Linie oder zwei Linien (Winkel) anklicken, Maß ablegen, Wert eintippen; Doppelklick ändert es.
+   **Bedingungen** zur Auswahl (⇧ für mehrere): waagrecht, senkrecht, parallel, rechtwinklig, gleich, tangential,
+   deckungsgleich, Punkt auf, Mittelpunkt, symmetrisch, fixieren, Hilfslinie. Blau = noch frei, schwarz = bestimmt,
+   oben steht „Voll bestimmt“ bzw. die Zahl der Freiheitsgrade. „Kante übernehmen“ holt Bauteilkanten in die Skizze.
+   Strg+Z/Strg+Y, Entf löscht, Esc beendet das Werkzeug.
+2. **Extrudieren** (dazu / weg / neuer Körper, Tiefe, umkehren, symmetrisch, durch alles) – Bereiche der Skizze im Bild
+   an- und abwählen (überlappende Formen müssen nicht getrimmt werden). **Drehen** um eine Linie der Skizze
+   (gern als Hilfslinie).
+3. **Bohrung** an den Punkten einer Skizze: Größe M3–M20 (Durchgang mittel), Durchmesser, Tiefe mit Bohrspitze oder
+   durchgehend, Senkung für Zylinderkopf oder Senkkopf.
+4. **Verrunden / Fase:** Kanten anklicken (tangential anschließende Kanten kommen mit). **Muster** linear (auch zwei
+   Richtungen) oder im Kreis, **Spiegeln** an Hauptebene oder Fläche – jeweils für einzelne Features oder den ganzen
+   Körper. **Fläche verschieben** (Wand dicker/dünner), **Flächen entfernen** (Bohrung, Tasche, Radius weg).
+   Beim importierten Teil zusätzlich **Radius/Bohrung ändern**.
+5. **Verlauf** links: Feature anklicken = bearbeiten, Auge = unterdrücken, Papierkorb = löschen. Ein Feature, das
+   nicht geht, wird rot mit verständlicher Meldung; die Features danach werden übersprungen.
+6. **„In die Rechnung übernehmen“** baut das Teil als STEP, vernetzt es und stellt Lager, Lasten und Nähte auf die
+   neuen Flächen um (Ergebnis wird mit vorher verglichen). **„Als STEP speichern“** exportiert es.
+
+Das Projekt speichert den Verlauf mit (neues Teil wird beim Laden neu gebaut). Alte Projekte mit „Geometrie
+anpassen“ werden in Features umgewandelt. Skizzenmaße bekommen auf Wunsch einen Namen und stehen dann – wie Tiefen,
+Radien, Anzahl – in der **Parameterstudie** zur Wahl. Gebaut wird mit OpenCASCADE über das Python-Modul von Gmsh
+(bei `uv tool install gmsh` dabei; sonst Pfad in `FEM_GMSH_PYTHON`). Zurück ins Original-CAD geht nichts.
 
 ### Leichtbau
 
@@ -391,7 +412,7 @@ die Datei automatisch grob geladen.
 1. ✅ **Rechenkern:** lineare Statik 3D (TET4/TET10), direkter und iterativer Löser, Validierung an Lehrbuchfällen
 2. ✅ **Desktop-App:** STEP-Import, Vernetzung, Lager/Lasten per Klick, Wirkbereiche, Heimnetz-Bedienung im Browser
 3. ✅ **Nachweis & Bericht:** Werkstoffdatenbank, Festigkeitsnachweis, PDF-Bericht, Parameterstudien, MathPad
-4. ✅ **3D-Druck:** Schichtaufbau, Aufbaurichtung, Wände + Infill, Kalibrierung · **Leichtbau** · **Geometrie anpassen**
+4. ✅ **3D-Druck:** Schichtaufbau, Aufbaurichtung, Wände + Infill, Kalibrierung · **Leichtbau** · **Konstruktion (kleines CAD)**
 5. ✅ **Weitere Analysen:** Stabwerk, Eigenfrequenzen, Knicken, Schweißnähte
 6. ✅ **CAD-Anbindung:** Onshape, SolidWorks, Fusion, SolidCraft, NX, Solid Edge, Parameterstudien über CAD-Variablen
 7. ✅ **Neue Oberfläche:** Startseite, Studienbaum, Rechnen-Knopf mit offenen Punkten, Ergebnis-Urteil, Darstellungsleiste

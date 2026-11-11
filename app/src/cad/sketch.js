@@ -349,7 +349,6 @@ export function hvHint(a, b) {
 /// Maß aus der Auswahl ableiten. picks: [{pt}|{ent}] (1–2 Stück), at: Ablageort (2D) → con oder null
 export function dimFor(sk, picks, at) {
   const ent = (id) => sk.ents.find((e) => e.id === id)
-  const pts = picks.filter((p) => p.pt).map((p) => p.pt)
   const ents = picks.filter((p) => p.ent).map((p) => ent(p.ent))
   if (picks.length === 1 && ents[0]) {
     const e = ents[0]

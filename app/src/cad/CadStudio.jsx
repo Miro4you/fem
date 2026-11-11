@@ -200,6 +200,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     }
     const list = [...features.slice(0, edit.index), edit.draft]
     const isSk = edit.draft.type === 'sketch'
+    // unvollständig: Stand davor zeigen (der Kern bekommt nur fertige Features)
     const regionsOf = edit.draft.type === 'extrude' || edit.draft.type === 'revolve' ? edit.draft.sketch : null
     let stop = false
     const t = setTimeout(

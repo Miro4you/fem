@@ -140,8 +140,10 @@ export function problemOf(f, features) {
     case 'moveface':
       return !f.faces.length ? 'Ebene Flächen im Bild wählen' : num(f.distance) ? null : 'Abstand angeben'
     case 'refillet':
+      if (!f.surfaces?.length) return 'Radius- oder Bohrungsfläche im Bild wählen'
       return num(f.radius) >= 0 ? null : 'Radius angeben'
     case 'rehole':
+      if (!f.surfaces?.length) return 'Bohrungsfläche im Bild wählen'
       return num(f.diameter) >= 0 ? null : 'Durchmesser angeben'
     default:
       return null

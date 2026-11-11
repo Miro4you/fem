@@ -1046,7 +1046,7 @@ def tessellate():
     gmsh.option.setNumber("General.NumThreads", min(8, os.cpu_count() or 1))
     gmsh.option.setNumber("Mesh.MeshSizeMax", size / 8)
     gmsh.option.setNumber("Mesh.MeshSizeMin", size / 800)
-    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 24 * q)
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 36 * q)
     gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
     gmsh.option.setNumber("Mesh.Algorithm", 5)
     gmsh.option.setNumber("Mesh.ElementOrder", 1)
