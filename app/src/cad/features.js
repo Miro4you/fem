@@ -112,7 +112,7 @@ export function problemOf(f, features) {
   const pos = (v) => num(v) > 0
   switch (f.type) {
     case 'sketch':
-      return f.sketch.ents.length ? null : 'Skizze ist leer'
+      return f.sketch?.ents.length ? null : 'Skizze ist leer'
     case 'extrude':
       if (!has(f.sketch)) return 'Skizze wählen'
       return f.through || pos(f.depth) ? null : 'Tiefe > 0 angeben'

@@ -361,6 +361,14 @@ export default function CadView({
       g.setAttribute('color', new THREE.Float32BufferAttribute(ptCol, 3))
       add(new THREE.Points(g, front(new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, vertexColors: true }))), 24)
     }
+    // Ursprung der Welt, wenn er in der Skizzenebene liegt
+    {
+      const b = basis(skPlane)
+      if (Math.abs(b.o[0] * b.n[0] + b.o[1] * b.n[1] + b.o[2] * b.n[2]) < 1e-6 * s.size) {
+        const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0)])
+        add(new THREE.Points(g, front(new THREE.PointsMaterial({ size: 9, sizeAttenuation: false, color: 0xdc2626 }))), 23)
+      }
+    }
     // Maßlinien
     const segs = []
     for (const con of sk.cons) {
@@ -504,8 +512,9 @@ export default function CadView({
       if (best) return { edge: best.c }
     }
     if (hit && (want.faces || want.planar || want.cyl)) {
-      const tag = tess.tri_surface[hit.faceIndex]
-      const face = tess.surfaces.find((f) => f.tag === tag)
+      const t = cb.current.tess
+      const tag = t.tri_surface[hit.faceIndex]
+      const face = t.surfaces.find((f) => f.tag === tag)
       if (face && (want.faces || (want.planar && face.kind === 'plane') || (want.cyl && face.kind === 'cylinder'))) return { face }
     }
     if (want.std && s.stdPlanes?.length) {
@@ -545,7 +554,6 @@ export default function CadView({
     const refsOf = (plane) => {
       // Bauteilpunkte und Kreismitten, die in der Skizzenebene liegen (zum Fangen)
       const t = cb.current.tess
-      if (!t) return []
       const b = basis(plane)
       const tol = 1e-4 * ctx.current.size
       const out = []
@@ -554,6 +562,9 @@ export default function CadView({
         if (Math.abs(d[0] * b.n[0] + d[1] * b.n[1] + d[2] * b.n[2]) > tol) return
         out.push([d[0] * b.u[0] + d[1] * b.u[1] + d[2] * b.u[2], d[0] * b.v[0] + d[1] * b.v[1] + d[2] * b.v[2]])
       }
+      // Ursprung (in die Ebene projiziert, wenn er darin liegt)
+      addP([0, 0, 0])
+      if (!t) return out
       for (const v of t.vertices) addP(v)
       for (const c of t.curves) if (c.kind === 'circle' && c.center) addP(c.center)
       return out

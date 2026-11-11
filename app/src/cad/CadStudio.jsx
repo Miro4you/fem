@@ -91,6 +91,7 @@ const PART_TOOLS = [
 ]
 
 const emptySel = { pts: [], ents: [], cons: [] }
+const SHORT = { moveface: 'Verschieben', removefaces: 'Entfernen' }
 
 // Kanten/Flächen einer Auswahl in der aktuellen Darstellung wiederfinden (Nummern ändern sich bei jedem Aufbau)
 function matchEdges(tess, refs) {
@@ -277,12 +278,14 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (prob && d.type !== 'sketch') return note(prob)
     const next = edit.isNew ? [...features, d] : features.map((f) => (f.id === d.id ? d : f))
     commitFeatures(next)
+    if (d.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
     setEdit(null)
     setPickFor(null)
     setSel(emptySel)
     setSkInfo(null)
   }
   const cancel = () => {
+    if (edit?.draft.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
     setEdit(null)
     setPickFor(null)
     setSel(emptySel)
@@ -747,7 +750,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 return (
                   <button key={k} className="cad-tool labeled" title={title} disabled={!!edit} onClick={() => startNew(k)}>
                     <Icon size={17} />
-                    <span>{FEATURE_LABEL[k]}</span>
+                    <span>{SHORT[k] ?? FEATURE_LABEL[k]}</span>
                   </button>
                 )
               })}
@@ -791,7 +794,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           onPick={onPick}
           selected={selected}
           sketch={sketchProps}
-          showPlanes={!hasBody || pickFor === 'plane' || pickFor === 'mplane' || editingSketchEmpty}
+          showPlanes={!sketchEdit && (!hasBody || pickFor === 'plane' || pickFor === 'mplane' || editingSketchEmpty)}
           regions={regions}
           axisLine={axisLine}
           preview={!!edit && ['extrude', 'revolve', 'hole'].includes(edit.draft.type) && edit.draft.mode === 'cut'}
@@ -898,7 +901,7 @@ function FeatureDialog({ edit, features, setDraft, onOk, onCancel, pickFor, setP
           <label key={f.id} className="check">
             <input
               type="checkbox"
-              checked={d.features.includes(f.id)}
+              checked={(d.features ?? []).includes(f.id)}
               onChange={(e) => setDraft({ features: e.target.checked ? [...d.features, f.id] : d.features.filter((x) => x !== f.id) })}
             />{' '}
             {f.name}

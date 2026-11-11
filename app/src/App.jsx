@@ -2204,7 +2204,7 @@ export default function App() {
   }
   const fileName = stepPath?.split(/[\\/]/).pop()
   const modelView = view === 'setup' || view === 'result'
-  const showStart = home || (!mesh && view !== 'frame')
+  const showStart = home || (!mesh && view !== 'frame' && view !== 'cad')
   const isOnshape = !!partOrigin?.includes('/documents/')
   const canResultToCad = !!result && !resultStale && (isOnshape || partSource === 'SolidCraft')
   const meshPending = !!mesh && (Number(meshSize) !== Number(mesh.mesh_size.toPrecision(3)) || JSON.stringify(currentRefine(meshSize)) !== meshRefineKey)

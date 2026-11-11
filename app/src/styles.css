@@ -734,19 +734,21 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-side { width: 300px; }
 .cad-stage { display: flex; flex-direction: column; }
 .cad-stage .cad-view { flex: 1; position: relative; }
-.cad-toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 2px;
-  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 20px); flex-wrap: wrap; justify-content: center; }
+.cad-toolbar { position: absolute; top: 10px; left: 0; right: 0; margin: 0 auto; width: max-content; z-index: 5; display: flex; align-items: center; gap: 2px;
+  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 20px); flex-wrap: wrap; justify-content: center; row-gap: 2px; }
 .cad-tool { display: inline-flex; align-items: center; gap: 5px; height: 32px; min-width: 32px; padding: 0 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; cursor: pointer; color: var(--text); }
 .cad-tool:hover:not(:disabled) { background: var(--hover); }
 .cad-tool.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .cad-tool:disabled { opacity: 0.4; cursor: default; }
-.cad-tool.labeled span { font-size: 12px; }
+.cad-tool.labeled { flex-direction: column; justify-content: center; gap: 1px; height: 46px; min-width: 54px; padding: 0 4px; }
+.cad-tool.labeled span { font-size: 10px; line-height: 1.1; color: var(--muted); white-space: nowrap; }
+.cad-tool.labeled.on span, .cad-tool.labeled:hover span { color: inherit; }
 .cad-sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--line); }
 .cad-busy { margin: 0 6px; color: var(--muted); }
 .cad-status { font-size: 12px; color: #2563eb; padding: 0 8px; white-space: nowrap; }
 .cad-status.good { color: var(--good); }
 .cad-status.bad { color: var(--bad); }
-.cad-hint { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); z-index: 5; padding: 6px 12px; border-radius: 8px; font-size: 12px;
+.cad-hint { position: absolute; top: 72px; left: 0; right: 0; margin: 0 auto; width: max-content; z-index: 5; padding: 6px 12px; border-radius: 8px; font-size: 12px;
   background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); max-width: 80%; text-align: center; pointer-events: none; }
 .cad-feat { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 7px; font-size: 13px; }
 .cad-feat:hover { background: var(--hover); }
