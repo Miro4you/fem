@@ -33,6 +33,7 @@ import {
   Info,
   Diameter,
   Hash,
+  FileUp,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -50,6 +51,7 @@ import {
   num,
 } from './features.js'
 import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure } from './sketch.js'
+import { readDraftpad, defaultLayers, importDraftpad } from './draftpad.js'
 
 const FEATURE_ICON = {
   sketch: Pencil,
@@ -138,7 +140,7 @@ function coaxialFaces(tess, face) {
   })
 }
 
-export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied, busy, onError }) {
+export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied, busy, onError, incoming }) {
   const features = cad.features
   const [built, setBuilt] = useState(null) // Ergebnis aller Features
   const [building, setBuilding] = useState(false)
@@ -154,6 +156,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const skHist = useRef({ undo: [], redo: [] })
   const viewRef = useRef(null)
   const reqRef = useRef(0)
+  // Draftpad-Import: { doc, layers, name, opts }
+  const [dp, setDp] = useState(null)
+  const fileRef = useRef(null)
 
   const note = useCallback((m) => {
     setMsg(m)
@@ -240,7 +245,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     const lastSketch = [...features].reverse().find((f) => f.type === 'sketch' && !f.suppressed)
     if (['extrude', 'revolve', 'hole'].includes(type) && lastSketch) draft.sketch = lastSketch.id
     if (type === 'revolve' && lastSketch) {
-      const line = lastSketch.sketch.ents.find((e) => e.t === 'line' && e.cons) ?? null
+      const line = lastSketch.sketch.ents.find((e) => e.t === 'line' && e.axis) ?? lastSketch.sketch.ents.find((e) => e.t === 'line' && e.cons) ?? null
       draft.axis = line?.id ?? null
     }
     if (type === 'hole' && lastSketch) draft.flip = false
@@ -560,10 +565,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   // Bereiche zum Anklicken (Extrudieren/Drehen)
   const regionDraft = edit && (edit.draft.type === 'extrude' || edit.draft.type === 'revolve') ? edit.draft : null
   const regionSketch = regionDraft ? features.find((f) => f.id === regionDraft.sketch)?.sketch : null
+  const useFill = !!regionDraft && regionDraft.useFills !== false && (preview?.regions ?? []).some((r) => r.fill)
   const regionList = regionDraft && preview?.regions && regionSketch
     ? preview.regions.map((r) => ({
         loops: r.loops,
-        on: regionDraft.regions ? regionDraft.regions.some((q) => insidePoly(q, r.loops)) : r.evenodd,
+        on: regionDraft.regions ? regionDraft.regions.some((q) => insidePoly(q, r.loops)) : useFill ? r.fill : r.evenodd,
       }))
     : null
   const regions = regionList
@@ -597,6 +603,57 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         onMessage: note,
       }
     : null
+
+  // --- Draftpad ------------------------------------------------------------------------------
+  const takeDraftpad = (text, name) => {
+    try {
+      const { doc, layers } = readDraftpad(text)
+      const hasFills = layers.some((l) => l.hatches)
+      setDp({ doc, layers, name, opts: { layers: defaultLayers(layers), tol: '0.3', center: true, fixed: false, fills: hasFills } })
+      // ohne offene Skizze: neue Skizze anfangen, erst die Ebene wählen
+      if (!sketchEdit) {
+        if (edit) cancel()
+        setTimeout(() => startNew('sketch'), 0)
+      }
+    } catch (e) {
+      note(String(e.message ?? e))
+    }
+  }
+  const onDraftpadFile = async (e) => {
+    const f = e.target.files?.[0]
+    e.target.value = ''
+    if (f) takeDraftpad(await f.text(), f.name)
+  }
+  const lastIncoming = useRef(null)
+  useEffect(() => {
+    if (incoming && incoming.n !== lastIncoming.current) {
+      lastIncoming.current = incoming.n
+      takeDraftpad(incoming.text, incoming.name)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming?.n])
+  const runImport = () => {
+    if (!sketchEdit || !dp) return
+    try {
+      const o = dp.opts
+      const tol = num(o.tol)
+      const { sketch, stats } = importDraftpad(sketchEdit.sketch, dp.doc, { layers: o.layers, tol: tol > 0 ? tol : 0.3, center: o.center, fixed: o.fixed, fills: o.fills })
+      const r = solved(sketch)
+      changeSketch(r.info.ok ? r.sketch : sketch, r.info, false)
+      setDp(null)
+      setTool('select')
+      note(
+        `Übernommen: ${stats.lines} Linien, ${stats.arcs} Bögen, ${stats.circles} Kreise` +
+          (stats.merged ? `, ${stats.merged} Lücken geschlossen` : '') +
+          (stats.cons ? `, ${stats.cons} Bedingungen erkannt` : '') +
+          (stats.fills ? `, ${stats.fills} Schraffuren als Material vorgewählt` : '') +
+          (stats.solved ? '' : ' – Bedingungen ließen sich nicht alle einhalten und wurden weggelassen'),
+      )
+      setTimeout(() => viewRef.current?.lookAt(sketchEdit.sketch.plane, r.sketch ?? sketch), 0)
+    } catch (e) {
+      note(String(e.message ?? e))
+    }
+  }
 
   // --- Ausgabe ---------------------------------------------------------------------------------
   const hasBody = (built?.bodies ?? 0) > 0
@@ -679,6 +736,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             </section>
           </>
         )}
+        {dp && sketchEdit && <DraftpadPanel dp={dp} setDp={setDp} onImport={runImport} />}
+        {dp && edit && !sketchEdit && <p className="hint draw">Draftpad „{dp.name}“: erst die Ebene für die Skizze wählen (z. B. XZ für ein Drehteil).</p>}
         {edit && (
           <FeatureDialog
             edit={edit}
@@ -724,6 +783,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                   <Icon size={17} />
                 </button>
               ))}
+              <button className="cad-tool" title="Draftpad-Zeichnung in diese Skizze übernehmen" onClick={() => fileRef.current?.click()}>
+                <FileUp size={17} />
+              </button>
               <span className="cad-sep" />
               <button className={'cad-tool' + (construction ? ' on' : '')} title="Hilfslinie (geht nicht in den Körper ein; z. B. Drehachse). Mit Auswahl: umschalten" onClick={toggleConstruction}>
                 <SquareDashed size={17} />
@@ -755,6 +817,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                   </button>
                 )
               })}
+              <button className="cad-tool labeled" title="Zeichnung aus Draftpad (.draftpad.json) als Skizze übernehmen" disabled={!!edit} onClick={() => fileRef.current?.click()}>
+                <FileUp size={17} />
+                <span>Draftpad</span>
+              </button>
               {cad.base && (
                 <button className="cad-tool labeled" title="Radius oder Bohrung des Ausgangsteils ändern (Zylinderfläche anklicken)" disabled={!!edit} onClick={() => { startNew('refillet'); setPickFor('cyl') }}>
                   <SquareRoundCorner size={17} />
@@ -771,6 +837,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             </>
           )}
           {building && <Loader2 size={16} className="spin cad-busy" />}
+          <input ref={fileRef} type="file" accept=".json,.draftpad" style={{ display: 'none' }} onChange={onDraftpadFile} />
         </div>
         {(msg || pickFor) && (
           <div className="cad-hint">
@@ -954,7 +1021,10 @@ function FeatureDialog({ edit, features, setDraft, onOk, onCancel, pickFor, setP
               <input type="checkbox" checked={d.symmetric} onChange={(e) => setDraft({ symmetric: e.target.checked })} /> Symmetrisch
             </label>
           </div>
-          <p className="hint">Bereiche im Bild anklicken, um sie ein- oder auszuschließen (blau = dabei). {d.regions ? '' : 'Jetzt: alle Flächen der Skizze (Löcher bleiben frei).'}</p>
+          <p className="hint">
+            Bereiche im Bild anklicken, um sie ein- oder auszuschließen (blau = dabei).{' '}
+            {d.regions ? '' : features.find((f) => f.id === d.sketch)?.sketch.fills?.length && d.useFills !== false ? 'Jetzt: die schraffierten Flächen aus Draftpad.' : 'Jetzt: alle Flächen der Skizze (Löcher bleiben frei).'}
+          </p>
           {d.regions && (
             <button className="btn small" onClick={() => setDraft({ regions: null })}>
               Bereiche zurücksetzen
@@ -1261,5 +1331,64 @@ function DimValue({ c, sk, onDim }) {
       />
       <em>{c.t === 'ang' ? '°' : 'mm'}</em>
     </div>
+  )
+}
+
+function DraftpadPanel({ dp, setDp, onImport }) {
+  const o = dp.opts
+  const set = (patch) => setDp({ ...dp, opts: { ...o, ...patch } })
+  const hasFills = dp.layers.some((l) => l.hatches)
+  return (
+    <section className="section cad-dialog">
+      <h2>
+        <FileUp size={15} /> Draftpad: {dp.name}
+      </h2>
+      <span className="field-label">Ebenen übernehmen</span>
+      {dp.layers.map((l) => (
+        <label key={l.id} className="check" title={l.visible ? '' : 'in Draftpad ausgeblendet'}>
+          <input
+            type="checkbox"
+            disabled={!(l.lines + l.arcs)}
+            checked={o.layers.has(l.id)}
+            onChange={(e) => {
+              const n = new Set(o.layers)
+              if (e.target.checked) n.add(l.id)
+              else n.delete(l.id)
+              set({ layers: n })
+            }}
+          />
+          <span style={{ opacity: l.visible ? 1 : 0.6 }}>
+            {l.name} <small className="muted">({l.lines} Linien, {l.arcs} Bögen/Kreise{l.strokes ? `, ${l.strokes} Freihand – bleiben weg` : ''})</small>
+          </span>
+        </label>
+      ))}
+      <label className="field">
+        <span>Lücken schließen bis</span>
+        <div className="input-unit">
+          <input value={o.tol} inputMode="decimal" onChange={(e) => set({ tol: e.target.value })} />
+          <em>mm</em>
+        </div>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={o.center} onChange={(e) => set({ center: e.target.checked })} /> Mitte der Zeichnung auf den Ursprung
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={!o.fixed} onChange={(e) => set({ fixed: !e.target.checked })} /> Bedingungen erkennen (waagrecht, senkrecht, tangential) – danach bemaßbar
+      </label>
+      {hasFills && (
+        <label className="check">
+          <input type="checkbox" checked={o.fills} onChange={(e) => set({ fills: e.target.checked })} /> Schraffierte Flächen als Material vorwählen
+        </label>
+      )}
+      <p className="hint">Strich-Punkt-Linien und Achsen werden Hilfslinien (eine Achse ist dann gleich die Drehachse für „Drehen“). Freihand-Striche und Texte bleiben weg.</p>
+      <div className="row cad-ok">
+        <button className="btn primary" disabled={!o.layers.size} onClick={onImport}>
+          <Check size={15} /> Übernehmen
+        </button>
+        <button className="btn" onClick={() => setDp(null)}>
+          <X size={15} /> Abbrechen
+        </button>
+      </div>
+    </section>
   )
 }

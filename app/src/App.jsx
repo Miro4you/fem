@@ -244,6 +244,7 @@ export default function App() {
   const [cad, setCad] = useState({ base: null, features: [] })
   const [cadApplied, setCadApplied] = useState(null) // Stand (Schlüssel), der im Rechenmodell ist
   const keepCadRef = useRef(false)
+  const [cadDraftpad, setCadDraftpad] = useState(null) // Draftpad-Zeichnung, die als Skizze übernommen werden soll
   // Ergebnis zum Vergleichen (z. B. Original vor den Geometrieänderungen)
   const [reference, setReference] = useState(null)
   // eigene Werkstoffe und Festigkeitsnachweis
@@ -598,7 +599,7 @@ export default function App() {
         return openStepPath(p)
       }
       if (/\.json$/i.test(f.name)) return applyProject(await api.projectFromText(await f.text()))
-      setError('Bitte eine STEP-Datei (.step, .stp) oder ein Projekt (.fem.json) hierher ziehen')
+      setError('Bitte eine STEP-Datei (.step, .stp), ein Projekt (.fem.json) oder eine Draftpad-Zeichnung hierher ziehen')
     } catch (e) {
       setBusy(null)
       setError(String(e))
@@ -654,6 +655,12 @@ export default function App() {
 
   async function applyProject(d) {
     try {
+      // Draftpad-Zeichnung: als Skizze für ein neues Teil
+      if (d.format === 'skizzen-cad') {
+        newCadPart()
+        setCadDraftpad((o) => ({ text: JSON.stringify(d), name: d.file ? baseName(d.file) : 'Draftpad-Zeichnung', n: (o?.n ?? 0) + 1 }))
+        return
+      }
       if (d.format !== 'projekt-fem') throw new Error('Keine Projekt-FEM-Datei')
       // Schrauben-Einstellungen vor dem Vernetzen (Erkennung läuft dabei)
       boltPrefs.current = d.bolts ?? {}
@@ -3061,6 +3068,7 @@ export default function App() {
                 applied={cadApplied}
                 onApply={onCadApply}
                 onExport={onCadExport}
+    incoming={cadDraftpad}
                 busy={!!busy}
                 onError={(e) => setError(e)}
                 onNotice={setNotice}

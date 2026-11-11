@@ -68,7 +68,7 @@ export default function CadView({
 
   useImperativeHandle(ref, () => ({
     fit: () => fitAll(),
-    lookAt: (plane) => lookAtPlane(plane),
+    lookAt: (plane, sk) => lookAtPlane(plane, sk),
     snapshot: () => {
       const s = ctx.current
       s.renderer.render(s.scene, s.camera)
@@ -201,10 +201,13 @@ export default function CadView({
       s.center.set(0, 0, 0)
       s.controls.center = s.center.clone()
     }
-    if (!s.fitted) {
+    // einpassen beim ersten Körper oder wenn er viel größer/kleiner geworden ist
+    const hasBody = !!tess?.triangles?.length
+    if (!s.fitted || (hasBody && (!s.hadBody || s.size > 2.5 * (s.lastFit ?? 0) * 2 || s.size < 0.2 * (s.lastFit ?? 0) * 2))) {
       s.fitted = true
       fitAll()
     }
+    s.hadBody = hasBody
     s.dirty = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tess])
@@ -301,7 +304,9 @@ export default function CadView({
       const b = basis(regions.plane)
       const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...b.u), new THREE.Vector3(...b.v), new THREE.Vector3(...b.n)).setPosition(...b.o)
       regions.list.forEach((r) => {
-        const shapes = r.loops.map((lp) => new THREE.Shape(lp.map(([x, y]) => new THREE.Vector2(x, y))))
+        const loops = r.loops.filter((lp) => lp.length >= 3)
+        if (!loops.length) return
+        const shapes = loops.map((lp) => new THREE.Shape(lp.map(([x, y]) => new THREE.Vector2(x, y))))
         const [outer, ...holes] = shapes.sort((a, c) => Math.abs(THREE.ShapeUtils.area(c.getPoints())) - Math.abs(THREE.ShapeUtils.area(a.getPoints())))
         outer.holes = holes
         const mesh = new THREE.Mesh(
@@ -957,20 +962,36 @@ export default function CadView({
   // --- Kamera ---------------------------------------------------------------------------------------
   function fitAll(dir = [1, -1.25, 0.85], up = [0, 0, 1]) {
     const s = ctx.current
-    const radius = s.size / 2
+    // Körper und Skizze (auch ohne Körper, z. B. nach einem Import)
+    const box = new THREE.Box3()
+    for (const g of [s.body, s.sketch]) if (g.children.length) box.expandByObject(g)
+    const center = box.isEmpty() ? s.center.clone() : box.getCenter(new THREE.Vector3())
+    const radius = box.isEmpty() ? s.size / 2 : Math.max(box.getSize(new THREE.Vector3()).length() / 2, 5)
+    s.lastFit = radius
     const dist = (radius / Math.sin(THREE.MathUtils.degToRad(s.camera.fov / 2))) * 1.15
-    s.controls.setView(s.center.clone(), new THREE.Vector3(...dir).normalize(), dist, new THREE.Vector3(...up))
+    s.controls.setView(center, new THREE.Vector3(...dir).normalize(), dist, new THREE.Vector3(...up))
     s.dirty = true
   }
-  function lookAtPlane(plane) {
+  function lookAtPlane(plane, sk = null) {
     const s = ctx.current
     const b = basis(plane)
     const o = new THREE.Vector3(...b.o)
     const c = s.center.clone()
     // Mitte des Bauteils in die Ebene projizieren
     const n = new THREE.Vector3(...b.n)
-    const target = c.sub(n.clone().multiplyScalar(c.clone().sub(o).dot(n)))
-    const radius = Math.max(s.size / 2, 20)
+    let target = c.sub(n.clone().multiplyScalar(c.clone().sub(o).dot(n)))
+    let radius = Math.max(s.size / 2, 20)
+    const ps = sk ? Object.values(sk.pts) : []
+    if (ps.length) {
+      // auf die Skizze einpassen
+      const xs = ps.map((p) => p.x)
+      const ys = ps.map((p) => p.y)
+      const lo = [Math.min(...xs), Math.min(...ys)]
+      const hi = [Math.max(...xs), Math.max(...ys)]
+      target = new THREE.Vector3(...to3d(plane, [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2]))
+      const aspect = s.camera.aspect || 1
+      radius = Math.max(((hi[0] - lo[0]) / 2) / Math.min(aspect, 1.6), (hi[1] - lo[1]) / 2, 10)
+    }
     const dist = (radius / Math.sin(THREE.MathUtils.degToRad(s.camera.fov / 2))) * 1.15
     s.controls.setView(target, n, dist, new THREE.Vector3(...b.v))
     s.dirty = true

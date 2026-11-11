@@ -299,6 +299,18 @@ selbst starten.
 | 18d.13 | Drehteil: Profil zeichnen, Drehen um eine Linie | Rotationskörper, Achse rot gestrichelt | [ ] |
 | 18d.14 | Parameterstudie: Skizzenmaß mit Namen versehen, in der Studie wählen | Werte werden nacheinander gebaut und gerechnet | [ ] |
 
+## 18e. Draftpad-Zeichnung als Skizze (neu)
+
+| | Schritt | Erwartet | OK / Anmerkung |
+|---|---|---|---|
+| 18e.1 | Konstruktion › „Draftpad“ › Datei wählen | Hinweis „erst die Ebene wählen“ | [ ] |
+| 18e.2 | Ebene XZ anklicken | Liste der Draftpad-Ebenen mit Anzahl Linien/Bögen; „Reinzeichnung“ vorgewählt | [ ] |
+| 18e.3 | Übernehmen | Zeichnung erscheint maßstäblich (mm) in der Skizze, Meldung mit Zahl der geschlossenen Lücken und erkannten Bedingungen | [ ] |
+| 18e.4 | Ein Maß setzen, Punkt ziehen | Skizze bleibt zusammenhängend (Ecken, T-Stöße, Tangenten halten) | [ ] |
+| 18e.5 | Skizze fertig › Extrudieren | schraffierte Flächen sind vorgewählt (blau), Körper entsteht | [ ] |
+| 18e.6 | Schnittzeichnung mit Mittellinie › Drehen | Achse aus Draftpad vorgewählt; Hinweis „nur die Hälfte auf einer Seite“; Drehkörper | [ ] |
+| 18e.7 | `.draftpad.json` auf das Fenster ziehen | neues Teil mit Import-Dialog | [ ] |
+
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
 | | Schritt | Erwartet | OK / Anmerkung |

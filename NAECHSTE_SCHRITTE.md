@@ -132,6 +132,9 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
   → Felix: bitte ausprobieren (Testprotokoll 18d). Ideen für danach: Variablen/Formeln für Maße (#dicke),
   Rippe, Wandung (Shell), Langloch/Polygon/Spline in der Skizze, Trimmen, Skizzen-Muster, Fasen mit zwei Maßen,
   Gewindebohrung, Baugruppen aus mehreren konstruierten Teilen, Skizze aus DXF
+- ✅ Draftpad-Zeichnung als Skizze übernehmen (Ebenen wählen, Lücken schließen, Bedingungen erkennen, Schraffur =
+  Material, Achse = Drehachse). Ideen: direkt aus der Draftpad-Cloud holen statt Datei, Draftpad-Maße als Skizzenmaße
+  übernehmen, mehrere Ansichten einer Zeichnung als Vorder-/Seitenansicht kombinieren
 - ✅ Geometrie anpassen (grobe Abschätzung): Reiter „Geometrie“ – Radius/Bohrung ändern, Material hinzu/weg per
   Skizze, Vorher/Nachher-Vergleich. Später möglich: Linienzug-Skizze, Kanten neu verrunden, Fasen
 - Hinweis: Die „R3“-Radien am Hebel (Flächen 16/17) sind laut Geometrie R6

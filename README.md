@@ -205,6 +205,15 @@ Reiter **„Konstruktion“** – oder auf der Startseite **„Neues Teil konstr
 6. **„In die Rechnung übernehmen“** baut das Teil als STEP, vernetzt es und stellt Lager, Lasten und Nähte auf die
    neuen Flächen um (Ergebnis wird mit vorher verglichen). **„Als STEP speichern“** exportiert es.
 
+**Aus Draftpad:** Knopf „Draftpad“ (in der Werkzeugleiste oder in einer offenen Skizze) oder die `.draftpad.json`
+einfach auf Projekt-FEM ziehen bzw. über „Projekt öffnen“ wählen. Ebene für die Skizze wählen, dann Ebenen der
+Zeichnung ankreuzen (Vorschlag: die „Reinzeichnung“). Linien, Bögen und Kreise werden Skizzenelemente,
+Strich-Punkt-Linien und Achsen Hilfslinien (eine Achse ist gleich die Drehachse), Freihand-Notizen bleiben weg.
+Lücken bis 0,3 mm (einstellbar) werden geschlossen, T-Stöße angeheftet, waagrecht/senkrecht/tangential als
+Bedingungen erkannt – danach lässt sich weiter bemaßen. Schraffierte Flächen sind beim Extrudieren/Drehen als
+Material vorgewählt. Bei einer Schnittzeichnung (beide Hälften schraffiert) dreht „Drehen“ nur die Hälfte auf einer
+Seite der Achse.
+
 Das Projekt speichert den Verlauf mit (neues Teil wird beim Laden neu gebaut). Alte Projekte mit „Geometrie
 anpassen“ werden in Features umgewandelt. Skizzenmaße bekommen auf Wunsch einen Namen und stehen dann – wie Tiefen,
 Radien, Anzahl – in der **Parameterstudie** zur Wahl. Gebaut wird mit OpenCASCADE über das Python-Modul von Gmsh

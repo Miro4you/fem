@@ -260,7 +260,8 @@ def loop_polylines(face):
                 if min(math.dist(s[0], nxt[0]), math.dist(s[0], nxt[-1])) < min(math.dist(s[-1], nxt[0]), math.dist(s[-1], nxt[-1])):
                     s = s[::-1]
             chain.extend(s if not chain else s[1:])
-        loops.append(chain)
+        if len(chain) >= 3:
+            loops.append(chain)
     return loops
 
 
@@ -345,16 +346,24 @@ def sketch_regions(sk):
     return regions
 
 
-def sketch_faces(sk, picks=None, what="Skizze"):
-    """Gewählte Bereiche der Skizze als Flächen im Raum."""
+def in_fills(q, fills):
+    """Punkt in einer der Schraffurflächen (je Schraffur gerade/ungerade über ihre Ränder)?"""
+    return any(inside_poly(q, loops) for loops in fills or [])
+
+
+def sketch_faces(sk, picks=None, what="Skizze", fills=False):
+    """Gewählte Bereiche der Skizze als Flächen im Raum (Auswahl per Punkt, Schraffur oder gerade/ungerade)."""
     regions = sketch_regions(sk)
     if not regions:
         raise Problem(f"{what}: keine geschlossene Kontur – Linien müssen an den Enden zusammenhängen")
+    chosen = None
     if picks:
         chosen = [r for r in regions if any(inside_poly(p, r["loops"]) for p in picks)]
         if not chosen:
             raise Problem(f"{what}: die gewählten Bereiche gibt es nicht mehr – im Feature neu wählen")
-    else:
+    elif fills and sk.get("fills"):
+        chosen = [r for r in regions if in_fills(r["pt"], sk["fills"])] or None
+    if chosen is None:
         chosen = [r for r in regions if r["evenodd"]]
     drop = [(2, r["tag"]) for r in regions if r not in chosen]
     if drop:
@@ -449,7 +458,7 @@ def sketch_of(f, sketches, what):
 
 def tools_extrude(f, sketches):
     sk = sketch_of(f, sketches, "Extrudieren")
-    faces, n = sketch_faces(sk, f.get("regions"), "Extrudieren")
+    faces, n = sketch_faces(sk, f.get("regions"), "Extrudieren", f.get("fills"))
     d = (f.get("dir") or 1) * 1.0
     through = bool(f.get("through"))
     depth = float(f.get("depth") or 0)
@@ -470,12 +479,53 @@ def tools_extrude(f, sketches):
     return [x for x in out if x[0] == 3]
 
 
-def tools_revolve(f, sketches):
+def half_plane(faces, sk, ax, warn):
+    """Bereiche, die über die Drehachse reichen (Schnittzeichnung mit beiden Hälften), auf eine Seite
+    der Achse beschneiden – die Seite mit der größeren Fläche."""
+    a, b = ax["a"], ax["b"]
+    d = unit([b[0] - a[0], b[1] - a[1]])
+    nrm = [-d[1], d[0]]
+    big = 4 * max(diag(), max(abs(v) for v in a + b) + 1.0)
+    halves = []
+    for side in (1.0, -1.0):
+        cs = [[a[0] + d[0] * t + nrm[0] * side * h, a[1] + d[1] * t + nrm[1] * side * h] for t, h in ((-big, 0), (big, 0), (big, big), (-big, big))]
+        pts = [occ.addPoint(c[0], c[1], 0) for c in cs]
+        loop = occ.addCurveLoop([occ.addLine(pts[k], pts[(k + 1) % 4]) for k in range(4)])
+        rect = occ.addPlaneSurface([loop])
+        place([(2, rect)], sk["plane"])
+        copy = occ.copy(faces)
+        try:
+            out, _ = occ.intersect(copy, [(2, rect)], removeObject=True, removeTool=True)
+        except Exception:
+            out = []
+        occ.synchronize()
+        out = [x for x in out if x[0] == 2]
+        halves.append((sum(occ.getMass(2, t) for _, t in out), out))
+    total = sum(occ.getMass(2, t) for _, t in faces)
+    keep = max(halves, key=lambda h: h[0])
+    if keep[0] > total * (1 - 1e-9):
+        for _, out in halves:
+            if out:
+                occ.remove(out, recursive=True)
+        return faces
+    for h in halves:
+        if h is not keep and h[1]:
+            occ.remove(h[1], recursive=True)
+    occ.remove(faces, recursive=True)
+    occ.synchronize()
+    warn.append("Die Kontur reicht über die Drehachse – gedreht wird nur die Hälfte auf einer Seite (bei Schnittzeichnungen richtig)")
+    return keep[1]
+
+
+def tools_revolve(f, sketches, warn=None):
     sk = sketch_of(f, sketches, "Drehen")
     ax = f.get("axis")
     if not ax:
         raise Problem("Drehen: Drehachse fehlt – eine Linie der Skizze als Achse wählen")
-    faces, _ = sketch_faces(sk, f.get("regions"), "Drehen")
+    faces, _ = sketch_faces(sk, f.get("regions"), "Drehen", f.get("fills"))
+    faces = half_plane(faces, sk, ax, warn if warn is not None else [])
+    if not faces:
+        raise Problem("Drehen: Neben der Achse liegt keine Fläche")
     p = to3d(sk["plane"], ax["a"])
     q = to3d(sk["plane"], ax["b"])
     if norm(sub(q, p)) < 1e-9:
@@ -642,7 +692,8 @@ def per_volume(curves):
 
 
 def feat_tool(f, sketches, warn):
-    combine(mode_of(f), TOOLS[f["type"]](f, sketches), warn)
+    tools = TOOLS[f["type"]](f, sketches, warn) if f["type"] == "revolve" else TOOLS[f["type"]](f, sketches)
+    combine(mode_of(f), tools, warn)
 
 
 def feat_fillet(f, sketches, warn):
@@ -1041,6 +1092,16 @@ def classify_curve(c, size):
 
 def tessellate():
     occ.synchronize()
+    # über eine STEP-Datei neu laden: frisch gedrehte Flächen lassen sich sonst manchmal nicht vernetzen
+    # („Impossible to mesh periodic surface“); der STEP-Leser repariert sie
+    import tempfile
+
+    tmp = os.path.join(tempfile.gettempdir(), f"projekt-fem-tess-{os.getpid()}.step")
+    gmsh.write(tmp)
+    gmsh.clear()
+    occ.importShapes(tmp)
+    occ.synchronize()
+    os.remove(tmp)
     size = diag()
     q = float(job.get("quality") or 1.0)
     gmsh.option.setNumber("General.NumThreads", min(8, os.cpu_count() or 1))
@@ -1244,7 +1305,7 @@ if rid is not None:
         except Exception:
             regs = []
         cleanup()
-    result["regions"] = [{"pt": r["pt"], "area": r["area"], "loops": r["loops"], "evenodd": r["evenodd"]} for r in regs]
+    result["regions"] = [{"pt": r["pt"], "area": r["area"], "loops": r["loops"], "evenodd": r["evenodd"], "fill": in_fills(r["pt"], sk.get("fills"))} for r in regs]
 
 if job.get("output") and volumes() and not failed:
     cleanup()

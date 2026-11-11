@@ -486,7 +486,7 @@ export function kernelSketch(id, sk) {
     else if (e.t === 'circle') ents.push({ t: 'circle', c: P(sk, e.c), r: e.r })
     else ents.push({ t: 'arc', c: P(sk, e.c), a: P(sk, e.a), b: P(sk, e.b) })
   }
-  return { id, type: 'sketch', plane: sk.plane, ents, pts }
+  return { id, type: 'sketch', plane: sk.plane, ents, pts, ...(sk.fills?.length ? { fills: sk.fills } : {}) }
 }
 
 /// Maße und Werte mit Namen (für Parameterstudien): Skizzenmaße und Zahlen der Features

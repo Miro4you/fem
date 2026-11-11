@@ -55,9 +55,9 @@ export function defaults(type) {
     case 'sketch':
       return { sketch: newSketch(STD_PLANES.XY, { std: 'XY' }) }
     case 'extrude':
-      return { sketch: null, regions: null, mode: 'add', depth: '10', flip: false, symmetric: false, through: false }
+      return { sketch: null, regions: null, useFills: true, mode: 'add', depth: '10', flip: false, symmetric: false, through: false }
     case 'revolve':
-      return { sketch: null, regions: null, axis: null, angle: '360', mode: 'add', symmetric: false }
+      return { sketch: null, regions: null, useFills: true, axis: null, angle: '360', mode: 'add', symmetric: false }
     case 'hole':
       return { sketch: null, size: 'M6', diameter: '6.6', through: true, depth: '10', tip: true, flip: false, sink: { kind: 'none', d: '11', depth: '6.4', angle: '90' } }
     case 'fillet':
@@ -157,12 +157,12 @@ export function kernelFeature(f, features) {
     case 'sketch':
       return kernelSketch(f.id, f.sketch)
     case 'extrude':
-      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through }
+      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: !f.regions && f.useFills !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through }
     case 'revolve': {
       const s = sk(f.sketch)?.sketch
       const line = s?.ents.find((e) => e.id === f.axis)
       const axis = line ? { a: [s.pts[line.a].x, s.pts[line.a].y], b: [s.pts[line.b].x, s.pts[line.b].y] } : null
-      return { id: f.id, type: 'revolve', sketch: f.sketch, regions: f.regions, axis, angle: num(f.angle), mode: f.mode, symmetric: !!f.symmetric }
+      return { id: f.id, type: 'revolve', sketch: f.sketch, regions: f.regions, fills: !f.regions && f.useFills !== false, axis, angle: num(f.angle), mode: f.mode, symmetric: !!f.symmetric }
     }
     case 'hole':
       return {
