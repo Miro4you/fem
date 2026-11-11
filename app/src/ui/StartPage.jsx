@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { TriangleAlert, X } from 'lucide-react'
-import { IcFileUp, IcCloud, IcFolder, IcTruss, IcPart } from './icons.jsx'
+import { IcFileUp, IcCloud, IcFolder, IcTruss, IcPart, IcWrench } from './icons.jsx'
 import { usePref, savePref } from '../prefs.js'
 
 const KIND_TEXT = { step: 'STEP-Datei', project: 'Projekt', onshape: 'Onshape' }
@@ -16,7 +16,7 @@ function ago(t) {
 }
 
 // Startseite: Teil öffnen (Datei, Onshape, Projekt) oder Stabwerk; zuletzt geöffnet
-export default function StartPage({ gmsh, onOpenStep, onOnshape, onProject, onFrame, onRecent, onDropFile, current, onBack }) {
+export default function StartPage({ gmsh, onOpenStep, onOnshape, onProject, onFrame, onNewPart, onRecent, onDropFile, current, onBack }) {
   const [recent] = usePref('recent', [])
   const [drag, setDrag] = useState(false)
   return (
@@ -70,6 +70,11 @@ export default function StartPage({ gmsh, onOpenStep, onOnshape, onProject, onFr
             <IcFolder size={26} />
             <b>Projekt öffnen</b>
             <span>Gespeicherte Rechnung (.fem.json) weiterbearbeiten.</span>
+          </button>
+          <button className="tile cad-new" onClick={onNewPart} disabled={gmsh === null}>
+            <IcWrench size={26} />
+            <b>Neues Teil konstruieren</b>
+            <span>Skizzieren, bemaßen, extrudieren – direkt hier, ohne anderes CAD.</span>
           </button>
           <button className="tile" onClick={onFrame}>
             <IcTruss size={26} />

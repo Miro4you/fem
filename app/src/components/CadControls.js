@@ -119,7 +119,8 @@ export class CadControls extends EventTarget {
         if (b === 1) return e.shiftKey ? 'rotate' : 'pan'
         return null
       default:
-        if (b === 0) return e.shiftKey ? 'pan' : 'rotate'
+        // beim Skizzieren gehört die linke Taste dem Zeichnen (⇧ + links verschiebt weiter)
+        if (b === 0) return e.shiftKey ? 'pan' : this.reserveLeft ? null : 'rotate'
         if (b === 1 || b === 2) return 'pan'
         return null
     }

@@ -612,6 +612,54 @@ async fn modify_geometry(
         .map_err(|e| e.to_string())?
 }
 
+// --- Konstruktion (kleines CAD) ---------------------------------------------
+
+#[derive(Deserialize)]
+pub struct CadArgs {
+    /// Ausgangsteil (STEP), an dem weiterkonstruiert wird; ohne = neues Teil
+    #[serde(default)]
+    pub base: Option<String>,
+    pub features: serde_json::Value,
+    #[serde(default)]
+    pub upto: Option<usize>,
+    #[serde(default)]
+    pub regions_of: Option<serde_json::Value>,
+    /// STEP-Datei schreiben (zum Rechnen übernehmen / exportieren)
+    #[serde(default)]
+    pub step: Option<String>,
+    #[serde(default = "yes")]
+    pub tess: bool,
+}
+
+/// Features aufbauen; mit `step` (Dateiname) entsteht eine STEP-Datei im Temp-Ordner.
+pub fn cad_build_impl(a: CadArgs) -> Result<serde_json::Value, String> {
+    let output = a.step.as_ref().map(|name| {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let stem: String = PathBuf::from(name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("konstruktion")
+            .chars()
+            .map(|c| if c.is_alphanumeric() || "-_ ".contains(c) { c } else { '_' })
+            .collect();
+        fem_core::cad::work_dir().join("teile").join(format!("{stamp}")).join(format!("{stem}.step"))
+    });
+    fem_core::cad::build(&fem_core::cad::CadJob {
+        base: a.base.map(PathBuf::from),
+        features: a.features,
+        upto: a.upto,
+        output,
+        regions_of: a.regions_of,
+        tess: a.tess,
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cad_build(args: CadArgs) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || cad_build_impl(args)).await.map_err(|e| e.to_string())?
+}
+
 /// Geänderte STEP-Datei speichern (Kopie)
 #[tauri::command]
 fn copy_step(from: String, to: String) -> Result<(), String> {
@@ -1399,6 +1447,7 @@ pub fn run() {
             save_user_materials,
             open_step,
             modify_geometry,
+            cad_build,
             copy_step,
             solve,
             section,

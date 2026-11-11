@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::{
-    modify_geometry_impl, orientation_scan_impl, progress_impl, section_impl, solve_impl, topo_stl_impl, topo_surface_impl,
+    cad_build_impl, modify_geometry_impl, orientation_scan_impl, progress_impl, section_impl, solve_impl, topo_stl_impl, topo_surface_impl,
     topopt_impl, write_vtu_impl, AppState, Setup, TopoArgs, modes_impl,
 };
 use fem_core::gmsh::Refine;
@@ -190,6 +190,7 @@ fn router(shared: Shared) -> Router {
         .route("/file", get(api_file))
         .route("/open_step", post(api_open_step))
         .route("/modify_geometry", post(api_modify_geometry))
+        .route("/cad_build", post(api_cad_build))
         .route("/solve", post(api_solve))
         .route("/section", post(api_section))
         .route("/find_gaps", post(api_find_gaps))
@@ -396,6 +397,16 @@ async fn api_modify_geometry(State(s): State<Shared>, headers: HeaderMap, Json(a
         .map_err(bad)?
         .map_err(bad)?;
     Ok(Json(view).into_response())
+}
+
+async fn api_cad_build(Json(a): Json<crate::CadArgs>) -> ApiResult<Response> {
+    if let Some(b) = &a.base {
+        if !is_step(Path::new(b)) || !path_allowed(b) {
+            return Err(bad("Nur STEP-Dateien (.step, .stp)"));
+        }
+    }
+    let v = tokio::task::spawn_blocking(move || cad_build_impl(a)).await.map_err(bad)?.map_err(bad)?;
+    Ok(Json(v).into_response())
 }
 
 #[derive(Deserialize)]

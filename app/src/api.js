@@ -111,6 +111,9 @@ export const modifyGeometry = (base, ops, size, refine = []) =>
     ? invoke('modify_geometry', { base, ops, size, refine })
     : http('/modify_geometry', { method: 'POST', json: { base, ops, size, refine } })
 
+/// Konstruktion: Features aufbauen → { status, volume, bodies, tess, regions?, step? }
+export const cadBuild = (args) => (isDesktop ? invoke('cad_build', { args }) : http('/cad_build', { method: 'POST', json: args }))
+
 /// geänderte STEP-Datei speichern
 export async function exportStep(path, name) {
   if (isDesktop) {

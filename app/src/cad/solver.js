@@ -35,7 +35,7 @@ function build(sk) {
     add(`p:${id}:y`, p.y)
   }
   const ent = new Map(sk.ents.map((e) => [e.id, e]))
-  for (const e of sk.ents) if (e.t === 'circle') add(`r:${e.id}`, e.r)
+  for (const e of sk.ents) if (e.t === 'circle' && !e.fix) add(`r:${e.id}`, e.r)
 
   // Zugriff auf einen Punkt bzw. Radius: liefert [Nummern …] und eine Lesefunktion
   const P = (id) => {
@@ -47,7 +47,7 @@ function build(sk) {
   const R = (e) => {
     if (e.t === 'circle') {
       const i = index.get(`r:${e.id}`)
-      return { idx: [i], get: (v) => v[i] }
+      return i == null ? { idx: [], get: () => e.r } : { idx: [i], get: (v) => v[i] }
     }
     const c = P(e.c)
     const a = P(e.a)
@@ -440,7 +440,10 @@ export function solve(sk, { drag = null, analyse: wantAnalyse = true, maxIter = 
     p.x = v[i]
     p.y = v[i + 1]
   }
-  for (const e of sk.ents) if (e.t === 'circle') e.r = Math.max(v[sys.index.get(`r:${e.id}`)], 1e-9)
+  for (const e of sk.ents) {
+    const i = e.t === 'circle' ? sys.index.get(`r:${e.id}`) : null
+    if (i != null) e.r = Math.max(v[i], 1e-9)
+  }
 
   const out = { ok: true, dof: null, free: new Set(), redundant: 0 }
   if (wantAnalyse) {

@@ -23,6 +23,8 @@ import { buildReport } from './report.js'
 import { FrameSidebar, FrameView, newFrame, framePayload } from './FrameStudio.jsx'
 import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES, regionRefine } from './region.js'
 import { GEO_OPS, opFromSurface, newSketchOp, opPayload, opProblem, remapSurfaces, axisLabel } from './geoops.js'
+import CadStudio from './cad/CadStudio.jsx'
+import { kernelFeatures, featuresFromGeoOps, cadParams } from './cad/features.js'
 
 const SUPPORT_COLOR = '#5b8def'
 const SUPPORT_ACTIVE = '#1f5fd6'
@@ -238,6 +240,10 @@ export default function App() {
   const [geoInfo, setGeoInfo] = useState(null) // Volumen vorher/nachher
   const [geoPick, setGeoPick] = useState(false)
   const [geoWarnings, setGeoWarnings] = useState([])
+  // Konstruktion (kleines CAD): Ausgangsteil (STEP, null = neues Teil) und Feature-Verlauf
+  const [cad, setCad] = useState({ base: null, features: [] })
+  const [cadApplied, setCadApplied] = useState(null) // Stand (Schlüssel), der im Rechenmodell ist
+  const keepCadRef = useRef(false)
   // Ergebnis zum Vergleichen (z. B. Original vor den Geometrieänderungen)
   const [reference, setReference] = useState(null)
   // eigene Werkstoffe und Festigkeitsnachweis
@@ -504,6 +510,11 @@ export default function App() {
         setStepPath(path)
         setView('setup')
         if (!keepSetup) setSel('teil')
+        if (keepCadRef.current) keepCadRef.current = false
+        else {
+          setCad({ base: path, features: [] })
+          setCadApplied(null)
+        }
         setGeoStep(null)
         setGeoApplied('[]')
         setGeoInfo(null)
@@ -603,11 +614,26 @@ export default function App() {
 
   // --- Projekt speichern / laden -------------------------------------------------
   async function onSaveProject() {
-    if (!stepPath) return
+    let path = stepPath
+    // neues Teil, noch nicht übernommen: STEP aus der Konstruktion bauen
+    if (!cad.base && cad.features.length && (!path || cadApplied == null)) {
+      try {
+        const r = await api.cadBuild({ base: null, features: kernelFeatures(cad.features), step: 'Konstruktion', tess: false })
+        if (!r.step) throw new Error('Die Konstruktion hat noch keinen Körper')
+        path = r.step
+      } catch (e) {
+        return setError(String(e))
+      }
+    }
+    if (!path) return
+    const stepPath_ = path
     const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies,
-      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }])), openJoints, jointFriction: jointFric, tighten: tight, contacts: contactPairs, handBolts, keepFasteners }
+      bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }])), openJoints, jointFriction: jointFric, tighten: tight, contacts: contactPairs, handBolts, keepFasteners,
+      cad: { features: cad.features, newPart: !cad.base, applied: cadApplied != null } }
+    data.step = cad.base ?? stepPath_
+    data.geoOps = []
     try {
-      const p = await api.saveProject(stepPath, data)
+      const p = await api.saveProject(stepPath_, data)
       if (p) addRecent({ kind: 'project', path: p, name: baseName(p), info: result ? `${material.name} · σv ${fmt(result.max_von_mises.value)} MPa` : material.name })
       if (p) setNotice(`Projekt gespeichert: ${baseName(p)}`)
       else if (!api.isDesktop) setNotice('Projekt heruntergeladen (mit eingebetteter STEP-Datei)')
@@ -638,21 +664,42 @@ export default function App() {
       setHandBolts(d.handBolts ?? [])
       setKeepFasteners(!!d.keepFasteners)
       keepFastenersRef.current = !!d.keepFasteners
-      const m = await loadGeometry(d.step, d.meshSize, true, true, [])
+      // Konstruktion: neues Teil aus den Features neu bauen; Importteil + Änderungen (auch alte „Geometrie anpassen“)
+      const feats = d.cad?.features ?? featuresFromGeoOps(d.geoOps)
+      const newPart = !!d.cad?.newPart
+      let step = d.step
+      if (newPart && feats.length) {
+        setBusy('Baue Konstruktion …')
+        try {
+          const r = await api.cadBuild({ base: null, features: kernelFeatures(feats), step: 'Konstruktion', tess: false })
+          if (r.step) step = r.step
+        } catch (e) {
+          setNotice('Konstruktion ließ sich nicht neu bauen – gespeicherte Geometrie geladen: ' + String(e))
+        } finally {
+          setBusy(null)
+        }
+      }
+      keepCadRef.current = true
+      const m = await loadGeometry(step, d.meshSize, true, true, [])
+      keepCadRef.current = false
       if (!m) return
-      const ops = d.geoOps ?? []
-      setGeoOps(ops)
+      const cadNext = { base: newPart ? null : d.step, features: feats }
+      setCad(cadNext)
+      setCadApplied(newPart ? JSON.stringify(kernelFeatures(feats)) : null)
       setReference(null)
       // gespeicherte Lager/Lasten beziehen sich auf die geänderte Geometrie → Änderungen gleich anwenden
-      const active = ops.filter((o) => o.enabled && !opProblem(o))
-      if (active.length) {
+      if (!newPart && kernelFeatures(feats).length) {
         setBusy('Passe Geometrie an …')
         try {
-          const g = await api.modifyGeometry(d.step, active.map(opPayload), d.meshSize ? Number(d.meshSize) : null)
-          setMesh(g.mesh)
-          setGeoStep(g.step)
-          setGeoInfo(g)
-          setGeoApplied(JSON.stringify(active.map(opPayload)))
+          const r = await api.cadBuild({ base: d.step, features: kernelFeatures(feats), step: stemOf(d.step) + '_geaendert', tess: false })
+          const bad = r.status.find((x) => !x.ok && !x.skipped)
+          if (bad) throw new Error(bad.error)
+          const g = await api.openStep(r.step, d.meshSize ? Number(d.meshSize) : null, false, [])
+          setMesh(g)
+          setGeoStep(r.step)
+          setCadApplied(JSON.stringify(kernelFeatures(feats)) + d.step)
+        } catch (e) {
+          setError('Änderungen der Konstruktion ließen sich nicht anwenden: ' + String(e))
         } finally {
           setBusy(null)
         }
@@ -1007,6 +1054,87 @@ export default function App() {
     }
   }
 
+  // --- Konstruktion übernehmen ---------------------------------------------------------------
+  // neue Geometrie vernetzen; Lager, Lasten und Nähte auf die neuen Flächennummern umstellen
+  async function swapGeometry(path, newGeoStep) {
+    const ref = currentRefine(meshSize)
+    const m = await api.openStep(path, Number(meshSize) || null, false, ref, keepFastenersRef.current)
+    setMeshRefineKey(JSON.stringify(ref))
+    const map = remapSurfaces(mesh.surfaces, m.surfaces)
+    const warn = []
+    const mapTags = (ts) => [...new Set(ts.map((t) => map.get(t)).filter((t) => t != null))]
+    const remap = (items, what) =>
+      items.map((x, i) => {
+        const lost = x.surfaces.filter((t) => map.get(t) == null)
+        if (lost.length) warn.push(`${what} ${i + 1}: ${lost.length === 1 ? 'eine Fläche' : lost.length + ' Flächen'} nicht wiedergefunden – im Reiter Modell prüfen`)
+        return { ...x, surfaces: mapTags(x.surfaces) }
+      })
+    setSupports((ss) => remap(ss, 'Lager'))
+    setLoads((ls) => remap(ls, 'Last'))
+    setWelds((ws) => ws.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) })))
+    setGeoWarnings(warn)
+    setMesh(m)
+    setGeoStep(newGeoStep)
+    setTopo(null)
+    setProbe(null)
+    if (result) setResultStale(true)
+    return warn
+  }
+
+  async function onCadApply(key) {
+    if (result && !reference) setReference(summary(result, mesh, 'Vorher'))
+    setBusy('Baue das Teil und vernetze …')
+    setError(null)
+    try {
+      const kf = kernelFeatures(cad.features)
+      let warn = []
+      if (cad.base && !kf.length) {
+        warn = await swapGeometry(cad.base, null)
+      } else {
+        const r = await api.cadBuild({ base: cad.base, features: kf, step: cad.base ? stemOf(cad.base) + '_geaendert' : 'Konstruktion', tess: false })
+        const bad = r.status.find((x) => !x.ok && !x.skipped)
+        if (bad) throw new Error(bad.error)
+        if (!r.step) throw new Error('Die Konstruktion hat noch keinen Körper')
+        if (cad.base) warn = await swapGeometry(r.step, r.step)
+        else if (cadApplied == null || !mesh) {
+          // erstes Mal: wie ein neu geöffnetes Teil
+          keepCadRef.current = true
+          const m = await loadGeometry(r.step, null, false, true)
+          keepCadRef.current = false
+          if (!m) return
+          setPartSource('Konstruktion')
+        } else {
+          warn = await swapGeometry(r.step, null)
+          setStepPath(r.step)
+        }
+      }
+      setCadApplied(key)
+      setNotice(warn.length ? warn.join(' · ') : 'Konstruktion übernommen – Lager und Lasten im Reiter Modell festlegen bzw. prüfen')
+    } catch (e) {
+      keepCadRef.current = false
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onCadExport() {
+    try {
+      const r = await api.cadBuild({ base: cad.base, features: kernelFeatures(cad.features), step: cad.base ? stemOf(cad.base) + '_geaendert' : 'Konstruktion', tess: false })
+      if (!r.step) throw new Error('Die Konstruktion hat noch keinen Körper')
+      await api.exportStep(r.step, (cad.base ? stemOf(cad.base) + '_geaendert' : 'Konstruktion') + '.step')
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  function newCadPart() {
+    setCad({ base: null, features: [] })
+    setCadApplied(null)
+    setHome(false)
+    setView('cad')
+  }
+
   // --- Parameterstudie -------------------------------------------------------------------
   const [study, setStudy] = useState({ param: 'mesh', values: '4; 3; 2; 1.5' })
   const [studyRows, setStudyRows] = useState(null)
@@ -1076,6 +1204,12 @@ export default function App() {
       out.push({ key: `os:${v.name}`, label: `Onshape: #${v.name}`, unit: v.unit || '', values })
     }
     if (material.layered && material.infill?.on) out.push({ key: 'infill', label: 'Füllgrad', unit: '%' })
+    if (cadApplied != null)
+      for (const p of cadParams(cad.features)) {
+        const x = p.value
+        const values = Number.isFinite(x) && x !== 0 ? [0.6, 0.8, 1, 1.2, 1.4].map((f) => Number((f * x).toPrecision(3))).join('; ').replace(/\./g, ',') : ''
+        out.push({ key: p.key, label: `Konstruktion: ${p.label}`, unit: p.unit, values })
+      }
     geoOps.forEach((o, i) => {
       if (!o.enabled) return
       const n = `${i + 1}. ${GEO_OPS[o.op]}`
@@ -1087,7 +1221,7 @@ export default function App() {
       if ((o.op === 'add' || o.op === 'cut') && o.sketch?.shape === 'rect') out.push({ key: `geo:${o.id}:width`, label: `${n}: Skizze Breite`, unit: 'mm' })
     })
     return out
-  }, [material, geoOps, scStudyInfo, osVars])
+  }, [material, geoOps, scStudyInfo, osVars, cad, cadApplied])
 
   async function runStudy() {
     const values = study.values.split(/[;\s]+/).map((v) => Number(v.replace(',', '.'))).filter((v) => Number.isFinite(v))
@@ -1118,7 +1252,7 @@ export default function App() {
         if (param === 'mesh') {
           m = active.length
             ? (await api.modifyGeometry(stepPath, active.map(opPayload), v, currentRefine(v))).mesh
-            : await api.openStep(stepPath, v, false, currentRefine(v))
+            : await api.openStep(geoStep ?? stepPath, v, false, currentRefine(v))
         } else if (param === 'infill') {
           mat = { ...material, infill: { ...material.infill, percent: v } }
         } else if (osVar) {
@@ -1142,6 +1276,30 @@ export default function App() {
           const mapTags = (ts) => [...new Set(ts.map((t) => map.get(t)).filter((t) => t != null))]
           const lost = [...supports, ...loads].some((x) => x.surfaces.some((t) => map.get(t) == null))
           if (lost) throw new Error(`Bei ${scParam.name} = ${fmt(v)} ${scParam.unit} sind Lager- oder Lastflächen nicht mehr wiederzufinden – Studie abgebrochen`)
+          sups = supports.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
+          lds = loads.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
+          wls = welds.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) }))
+        } else if (param.startsWith('cad:')) {
+          // Maß der Konstruktion ändern, Teil neu bauen, Lager/Lasten/Nähte übertragen
+          const [, fid, field, cid] = param.split(':')
+          const feats = cad.features.map((f) => {
+            if (String(f.id) !== fid) return f
+            if (field === 'con') return { ...f, sketch: { ...f.sketch, cons: f.sketch.cons.map((c) => (c.id === cid ? { ...c, v } : c)) } }
+            return { ...f, [field]: String(v) }
+          })
+          // Skizze mit dem neuen Maß lösen
+          const { solved } = await import('./cad/sketch.js')
+          const solvedFeats = feats.map((f) => (f.type === 'sketch' && String(f.id) === fid ? { ...f, sketch: solved(f.sketch).sketch } : f))
+          if (field === 'con' && solvedFeats.find((f) => String(f.id) === fid).sketch === feats.find((f) => String(f.id) === fid).sketch)
+            throw new Error(`${meta.label} = ${fmt(v)}: Skizze nicht lösbar – Studie abgebrochen`)
+          const r = await api.cadBuild({ base: cad.base, features: kernelFeatures(solvedFeats), step: 'Studie', tess: false })
+          const bad = r.status.find((x) => !x.ok && !x.skipped)
+          if (bad) throw new Error(`${meta.label} = ${fmt(v)}: ${bad.error}`)
+          m = await api.openStep(r.step, Number(meshSize) || null, false, refine)
+          const map = remapSurfaces(origSurfaces, m.surfaces)
+          const mapTags = (ts) => [...new Set(ts.map((t) => map.get(t)).filter((t) => t != null))]
+          if ([...supports, ...loads].some((x) => x.surfaces.some((t) => map.get(t) == null)))
+            throw new Error(`Bei ${meta.label} = ${fmt(v)} sind Lager- oder Lastflächen nicht mehr wiederzufinden – Studie abgebrochen`)
           sups = supports.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
           lds = loads.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
           wls = welds.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) }))
@@ -1182,11 +1340,11 @@ export default function App() {
         setBusy(`SolidCraft: ${scParam.name} zurück auf ${scParam.expression} …`)
         await api.scStudy(scParam.name, scParam.expression)
       }
-      if (param === 'mesh' || param.startsWith('geo:') || scParam || osVar) {
+      if (param === 'mesh' || param.startsWith('geo:') || param.startsWith('cad:') || scParam || osVar) {
         setBusy('Ausgangszustand wiederherstellen …')
         const m = active.length
           ? (await api.modifyGeometry(stepPath, active.map(opPayload), Number(meshSize) || null, refine)).mesh
-          : await api.openStep(stepPath, Number(meshSize) || null, false, refine)
+          : await api.openStep(geoStep ?? stepPath, Number(meshSize) || null, false, refine)
         setMesh(m)
       }
       if (result) {
@@ -1948,8 +2106,8 @@ export default function App() {
       ['Netz', `${mesh.elements.toLocaleString('de-DE')} Elemente TET10, ${mesh.nodes.toLocaleString('de-DE')} Knoten, Elementgröße ${fmt(mesh.mesh_size)} mm`],
       ['Gleichungen', `${result.equations.toLocaleString('de-DE')} Unbekannte, ${result.iterations != null ? `iterativ (${result.iterations} Iterationen)` : 'direkt'}, ${fmt(result.seconds)} s`],
     ]
-    const act = geoOps.filter((o) => o.enabled)
-    if (act.length && geoStep) meshLines.push(['Geometrie geändert', act.map((o) => GEO_OPS[o.op]).join(', ')])
+    const act = cad.features.filter((f) => !f.suppressed && f.type !== 'sketch')
+    if (act.length && cadApplied != null) meshLines.push([cad.base ? 'Geometrie geändert' : 'Konstruktion', act.map((f) => f.name).join(', ')])
     const res = [
       ['max. Vergleichsspannung (von Mises)', `${fmt(result.max_von_mises.value)} MPa bei (${fmtVec(result.max_von_mises.at)}) mm`],
       ['max. Verschiebung', `${fmt(result.max_displacement.value)} mm bei (${fmtVec(result.max_displacement.at)}) mm`],
@@ -2065,7 +2223,7 @@ export default function App() {
     setView(v)
   }
 
-  const exportGeo = () => api.exportStep(geoStep, stemOf(stepPath || 'geometrie') + '_geaendert.step').catch((e) => setError(String(e)))
+  const exportGeo = () => onCadExport()
   const exportTopo = () => api.exportTopoStl(topo.threshold, stemOf(stepPath || 'bauteil') + '_leichtbau.stl').catch((e) => setError(String(e)))
   async function videoFromMenu() {
     if (view !== 'result') {
@@ -2846,7 +3004,7 @@ export default function App() {
             </div>
           </>
         )}
-        {!showStart && !modelView && <span className="file">{{ geometry: 'Geometrie anpassen', topo: 'Leichtbau', study: 'Parameterstudie', frame: 'Stabwerk' }[view]}</span>}
+        {!showStart && !modelView && <span className="file">{{ cad: cad.base ? 'Konstruktion – ' + stemOf(cad.base) : 'Konstruktion – neues Teil', geometry: 'Geometrie anpassen', topo: 'Leichtbau', study: 'Parameterstudie', frame: 'Stabwerk' }[view]}</span>}
         <span className="spacer" />
         {!api.isDesktop && (
           <span className="remote-badge" title="Die Rechnung läuft auf dem Rechner, auf dem Projekt-FEM die Heimnetz-Freigabe hat">
@@ -2917,6 +3075,7 @@ export default function App() {
             onOnshape={() => setDlg('onshape')}
             onProject={() => onLoadProject()}
             onFrame={() => switchView('frame')}
+            onNewPart={newCadPart}
             onRecent={openRecent}
             onDropFile={onDropFile}
             current={mesh ? stemOf(fileName) : null}
@@ -2927,7 +3086,7 @@ export default function App() {
             <nav className="rail" aria-label="Werkzeuge">
               {[
                 ['Modell', 'Modell und Ergebnis', I.IcPart, modelView, () => switchView(modelView ? view : 'setup'), false],
-                ['Geometrie', 'Geometrie anpassen (Radien, Bohrungen, Material hinzu/weg)', I.IcWrench, view === 'geometry', () => switchView('geometry'), !mesh],
+                ['Konstruktion', 'Konstruktion: Teil zeichnen oder ändern (Skizze, Extrudieren, Bohrung, Verrunden …)', I.IcWrench, view === 'cad', () => switchView('cad'), false],
                 ['Leichtbau', 'Leichtbau-Vorschlag (Topologieoptimierung)', I.IcFeather, view === 'topo', () => switchView('topo'), !mesh],
                 ['Studie', 'Parameterstudie', I.IcChart, view === 'study', () => switchView('study'), !mesh],
                 ['Stabwerk', 'Stabwerk: Balken, Rahmen, Fachwerke', I.IcTruss, view === 'frame', () => switchView('frame'), false],
@@ -2939,6 +3098,20 @@ export default function App() {
               ))}
             </nav>
 
+            {view === 'cad' ? (
+              <CadStudio
+                cad={cad}
+                setCad={setCad}
+                nav={nav}
+                applied={cadApplied}
+                onApply={onCadApply}
+                onExport={onCadExport}
+                busy={!!busy}
+                onError={(e) => setError(e)}
+                onNotice={setNotice}
+              />
+            ) : (
+            <>
             <aside className={'sidebar' + (view === 'setup' ? ' flush' : '')} ref={sidebar}>
               {view === 'setup' && modelPanel}
               {view === 'result' &&
@@ -3301,6 +3474,8 @@ export default function App() {
                 </div>
               )}
             </section>
+            </>
+            )}
           </>
         )}
 

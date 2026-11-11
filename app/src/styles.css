@@ -728,3 +728,56 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .hand-tools { display: flex; align-items: center; gap: 2px; }
 .hand-tools select { width: auto; height: 26px; font-size: 12px; }
 .busy-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+
+/* --- Konstruktion (CAD) --------------------------------------------------------------------- */
+.cad-studio { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.cad-side { width: 300px; }
+.cad-stage { display: flex; flex-direction: column; }
+.cad-stage .cad-view { flex: 1; position: relative; }
+.cad-toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 2px;
+  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 20px); flex-wrap: wrap; justify-content: center; }
+.cad-tool { display: inline-flex; align-items: center; gap: 5px; height: 32px; min-width: 32px; padding: 0 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; cursor: pointer; color: var(--text); }
+.cad-tool:hover:not(:disabled) { background: var(--hover); }
+.cad-tool.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.cad-tool:disabled { opacity: 0.4; cursor: default; }
+.cad-tool.labeled span { font-size: 12px; }
+.cad-sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--line); }
+.cad-busy { margin: 0 6px; color: var(--muted); }
+.cad-status { font-size: 12px; color: #2563eb; padding: 0 8px; white-space: nowrap; }
+.cad-status.good { color: var(--good); }
+.cad-status.bad { color: var(--bad); }
+.cad-hint { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); z-index: 5; padding: 6px 12px; border-radius: 8px; font-size: 12px;
+  background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); max-width: 80%; text-align: center; pointer-events: none; }
+.cad-feat { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 7px; font-size: 13px; }
+.cad-feat:hover { background: var(--hover); }
+.cad-feat.base { color: var(--muted); }
+.cad-feat.off { opacity: 0.5; }
+.cad-feat.off .cad-feat-name { text-decoration: line-through; }
+.cad-feat.bad .cad-feat-name { color: var(--bad); }
+.cad-feat.skipped { opacity: 0.6; }
+.cad-feat-name { border: none; background: none; padding: 0; cursor: pointer; text-align: left; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cad-feat .icon-btn { opacity: 0; }
+.cad-feat:hover .icon-btn, .cad-feat.off .icon-btn { opacity: 1; }
+.bad-icon { color: var(--bad); flex-shrink: 0; }
+.warn-icon { color: var(--warn-text); flex-shrink: 0; }
+.notice.small { padding: 6px 8px; }
+.cad-dialog .cad-name { flex: 1; min-width: 0; height: 28px; font-weight: 600; font-size: 13px; }
+.cad-dialog .row { align-items: center; flex-wrap: wrap; }
+.cad-ok { margin-top: 6px; }
+.hint.bad { color: var(--bad); }
+.field-label { font-size: 11px; color: var(--muted); }
+.cad-cons, .cad-dims { display: flex; flex-direction: column; gap: 6px; }
+.cad-cons-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.cad-dim-row { display: flex; gap: 6px; align-items: center; padding: 2px; border-radius: 6px; }
+.cad-dim-row.on { background: var(--accent-soft); }
+.cad-dim-row .cad-dim-name { flex: 1; min-width: 0; height: 28px; }
+.cad-dim-row .input-unit { width: 110px; }
+.cad-feat-pick { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow: auto; }
+.cad-dim, .cad-glyph { position: absolute; transform: translate(-50%, -50%); z-index: 4; border: 1px solid transparent; cursor: pointer; font: inherit; }
+.cad-dim { padding: 1px 6px; font-size: 12px; border-radius: 5px; background: var(--panel); color: var(--text); border-color: var(--line); white-space: nowrap; }
+.cad-dim:hover, .cad-dim.on { border-color: var(--accent); color: var(--accent); }
+.cad-glyph { width: 16px; height: 16px; padding: 0; font-size: 11px; line-height: 14px; border-radius: 4px; background: rgba(100, 116, 139, 0.18); color: var(--muted); }
+.cad-glyph:hover, .cad-glyph.on { background: var(--accent); color: #fff; }
+.cad-dim-edit { position: absolute; transform: translate(-50%, -50%); z-index: 6; }
+.cad-dim-edit input { width: 90px; height: 28px; text-align: center; border: 2px solid var(--accent); border-radius: 6px; background: var(--panel); }
+.tile.cad-new svg { color: var(--accent); }
