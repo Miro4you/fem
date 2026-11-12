@@ -152,6 +152,12 @@ export function problemOf(f, features) {
   }
 }
 
+// gewählte Kante für den Kern: Mitte, Richtung, Art (Linie/Kreis), Länge bzw. Radius
+const edgeHint = ({ mid, dir, kind, radius, length }) => ({ mid, dir, kind, radius, length })
+
+// gewählte Fläche für den Kern: Schwerpunkt und Art (damit sie nach Änderungen davor wiedergefunden wird)
+const faceHint = (x) => ({ center: x.center, kind: x.kind, normal: x.normal, axis: x.axis, radius: x.radius })
+
 // Auswahl über Schraffuren: eine Gruppe (Teil aus Draftpad) oder alle schraffierten Flächen
 const fillsArg = (f) => (f.regions != null ? false : f.fillGroup ? { group: f.fillGroup } : f.useFills !== false)
 
@@ -182,9 +188,9 @@ export function kernelFeature(f, features) {
         sink: { kind: f.sink.kind, d: num(f.sink.d), depth: num(f.sink.depth), angle: num(f.sink.angle) },
       }
     case 'fillet':
-      return { id: f.id, type: 'fillet', edges: f.edges.map(({ mid, dir }) => ({ mid, dir })), radius: num(f.radius) }
+      return { id: f.id, type: 'fillet', edges: f.edges.map(edgeHint), radius: num(f.radius) }
     case 'chamfer':
-      return { id: f.id, type: 'chamfer', edges: f.edges.map(({ mid, dir }) => ({ mid, dir })), distance: num(f.distance) }
+      return { id: f.id, type: 'chamfer', edges: f.edges.map(edgeHint), distance: num(f.distance) }
     case 'pattern': {
       const out = { id: f.id, type: 'pattern', kind: f.kind, features: f.features, count: num(f.count) }
       if (f.kind === 'linear') {
@@ -206,9 +212,9 @@ export function kernelFeature(f, features) {
     case 'mirror':
       return { id: f.id, type: 'mirror', features: f.features, plane: planeOf(f.plane) }
     case 'removefaces':
-      return { id: f.id, type: 'removefaces', faces: f.faces.map((x) => ({ center: x.center })) }
+      return { id: f.id, type: 'removefaces', faces: f.faces.map(faceHint) }
     case 'moveface':
-      return { id: f.id, type: 'moveface', faces: f.faces.map((x) => ({ center: x.center })), distance: num(f.distance) }
+      return { id: f.id, type: 'moveface', faces: f.faces.map(faceHint), distance: num(f.distance) }
     case 'refillet':
       return { id: f.id, type: 'refillet', surfaces: f.surfaces, axis: f.axis, radius: num(f.radius) }
     case 'rehole':

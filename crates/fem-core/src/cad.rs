@@ -280,6 +280,47 @@ mod tests {
         assert_eq!(mn, vec!["Buchse", "Deckel", "Welle"]);
     }
 
+    /// Flächen entfernen: Bohrung wieder zu; eine Außenfläche lässt sich nicht entfernen (Hinweis statt Fehler)
+    #[test]
+    fn flaechen_entfernen() {
+        let xy = json!({"origin": [0, 0, 0], "normal": [0, 0, 1], "u": [1, 0, 0]});
+        let top = json!({"origin": [0, 0, 10], "normal": [0, 0, 1], "u": [1, 0, 0]});
+        let features = json!([
+            {"id": 1, "type": "sketch", "plane": xy, "ents": rect(0.0, 0.0, 60.0, 40.0)},
+            {"id": 2, "type": "extrude", "sketch": 1, "mode": "add", "depth": 10, "dir": 1},
+            {"id": 3, "type": "sketch", "plane": top, "ents": [], "pts": [[20, 20]]},
+            {"id": 4, "type": "hole", "sketch": 3, "diameter": 8, "through": true},
+            {"id": 5, "type": "removefaces", "faces": [{"center": [20, 20, 5]}]},
+            {"id": 6, "type": "removefaces", "faces": [{"center": [30, 20, 10]}]},
+        ]);
+        let Some(r) = run(features, None, None) else { return };
+        let st = r["status"].as_array().unwrap();
+        assert!(st.iter().all(|s| s["ok"] == true), "{}", r["status"]);
+        assert!((r["volume"].as_f64().unwrap() - 24000.0).abs() < 1e-6, "{}", r["volume"]);
+        assert!(st[5]["warn"][0].as_str().unwrap().contains("nichts geändert"), "{}", st[5]);
+    }
+
+    /// Fläche verschieben überlebt eine Änderung davor: Deckfläche +5, dann Platte 10 → 14 dick
+    #[test]
+    fn flaeche_verschieben_nach_aenderung() {
+        let xy = json!({"origin": [0, 0, 0], "normal": [0, 0, 1], "u": [1, 0, 0]});
+        let mk = |depth: f64| {
+            json!([
+                {"id": 1, "type": "sketch", "plane": xy, "ents": rect(0.0, 0.0, 60.0, 40.0)},
+                {"id": 2, "type": "extrude", "sketch": 1, "mode": "add", "depth": depth, "dir": 1},
+                // Fläche beim Auswählen (Dicke 10) bei z = 10
+                {"id": 3, "type": "moveface", "faces": [{"center": [30, 20, 10], "kind": "plane", "normal": [0, 0, 1]}], "distance": 5},
+                // Fase an der oberen Kante (beim Auswählen bei z = 15)
+                {"id": 4, "type": "chamfer", "edges": [{"mid": [30, 0, 15], "dir": [1, 0, 0], "kind": "line", "length": 60}], "distance": 1},
+            ])
+        };
+        let Some(r) = run(mk(10.0), None, None) else { return };
+        assert!((r["volume"].as_f64().unwrap() - (2400.0 * 15.0 - 30.0)).abs() < 1e-6, "{}", r["volume"]);
+        let r = run(mk(14.0), None, None).unwrap();
+        assert!(r["status"].as_array().unwrap().iter().all(|s| s["ok"] == true), "{}", r["status"]);
+        assert!((r["volume"].as_f64().unwrap() - (2400.0 * 19.0 - 30.0)).abs() < 1e-6, "{}", r["volume"]);
+    }
+
     /// Drehteil und überlappende Formen ohne Trimmen (Bereiche einzeln wählbar)
     #[test]
     fn drehteil_und_bereiche() {

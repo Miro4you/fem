@@ -431,7 +431,7 @@ in Projekt-FEM erscheint „geändert“, „Aktualisieren“ baut den Körper m
 
 ---
 
-## E. Aufräumen und Lücken aus dem letzten Test
+## E. Aufräumen und Lücken aus dem letzten Test ✅ (erledigt bis auf E.4)
 
 1. **Noch nicht im Browser geprüft** (nur Kern-Tests bzw. gar nicht): Fase, Spiegeln, Fläche verschieben,
    Flächen entfernen, ein fertig gebautes Muster, Parameterstudie über Konstruktionsmaße, erneutes Übernehmen
@@ -448,6 +448,16 @@ in Projekt-FEM erscheint „geändert“, „Aktualisieren“ baut den Körper m
    mit Aufträgen über stdin/stdout (in `cad.rs`), Zwischenstände gibt es schon (`zwischenstand/*.brep`).
 
 ---
+
+### Stand E (12.11.2026)
+
+Im Browser durchgespielt (`e1`-Durchlauf): Platte → Fase → Fläche verschieben → Bohrung → Muster → Spiegeln →
+übernehmen → Lager/Last → rechnen → Dicke ändern → erneut übernehmen (Lager/Last bleiben) → rechnen →
+Parameterstudie über die Extrusionstiefe. „Flächen entfernen“ im Kern getestet (`flaechen_entfernen`).
+Dabei verbessert: Flächen und Kanten werden nach Änderungen davor über Art und Ausrichtung wiedergefunden
+(`find_surface`/`find_curve` mit Hinweis; Test `flaeche_verschieben_nach_aenderung`), „Flächen entfernen“
+ohne Wirkung meldet sich. Alter Reiter „Geometrie anpassen“ samt `geometry.rs/.py` und `modify_geometry` entfernt.
+Offen: E.4 (dauerhafter Python-Prozess), nur wenn der Neuaufbau stört.
 
 ## Stolpersteine (aus der bisherigen Arbeit – unbedingt beachten)
 

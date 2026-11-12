@@ -703,32 +703,85 @@ def curve_mid(c):
 
 
 def find_curve(ref, what):
-    best, best_s = None, float("inf")
-    tol = max(1e-3, 0.05 * diag())
+    """Kante wiederfinden: nächste Mitte mit passender Richtung. Mit Art (Linie/Kreis, Radius) auch weiter weg,
+    wenn sich davor etwas geändert hat (z. B. Platte dicker → obere Kante höher)."""
+    size = diag()
+    cand = []
     for _, c in gmsh.model.getEntities(1):
-        b = gmsh.model.getBoundingBox(1, c)
-        if any(ref["mid"][i] < b[i] - tol or ref["mid"][i] > b[i + 3] + tol for i in range(3)):
-            continue
         mid, d = curve_mid(c)
-        s = math.dist(mid, ref["mid"])
-        if ref.get("dir") and abs(dot(d, ref["dir"])) < 0.9:
-            s += tol
-        if s < best_s:
-            best, best_s = c, s
-    if best is None or best_s > tol:
-        raise Problem(f"{what}: eine gewählte Kante gibt es nicht mehr – im Feature neu wählen")
-    return best
+        cand.append((math.dist(mid, ref["mid"]), c, d))
+    cand.sort(key=lambda x: x[0])
+    tol = max(1e-3, 0.05 * size)
+    parallel = lambda d: not ref.get("dir") or abs(dot(d, ref["dir"])) > 0.9
+    for dist, c, d in cand:
+        if dist > tol:
+            break
+        if parallel(d):
+            return c
+    if ref.get("kind"):
+        for dist, c, d in cand:
+            if dist > 0.25 * size:
+                break
+            if ref.get("dir") and abs(dot(d, ref["dir"])) < 0.999:
+                continue
+            kind, _, ci = classify_curve(c, size)
+            if kind != ref["kind"]:
+                continue
+            if kind == "circle" and ref.get("radius") and ci and abs(ci["radius"] - ref["radius"]) > 1e-3 * max(1.0, ref["radius"]):
+                continue
+            if kind == "line" and ref.get("length") and abs(occ.getMass(1, c) - ref["length"]) > 0.02 * ref["length"] + 1e-6 * size:
+                continue
+            return c
+    raise Problem(f"{what}: eine gewählte Kante gibt es nicht mehr – im Feature neu wählen")
 
 
-def find_surface(center, what):
-    best, best_d = None, float("inf")
+def surface_kind(t):
+    """Art einer Fläche geometrisch: ("plane", Normale) bzw. ("cylinder", Achse, Radius) bzw. ("other",)."""
+    lo, hi = gmsh.model.getParametrizationBounds(2, t)
+    uv = [x for fu, fv in ((0.3, 0.3), (0.5, 0.5), (0.7, 0.6), (0.4, 0.8)) for x in (lo[0] + fu * (hi[0] - lo[0]), lo[1] + fv * (hi[1] - lo[1]))]
+    ns = gmsh.model.getNormal(t, uv)
+    n = [list(ns[3 * k : 3 * k + 3]) for k in range(4)]
+    if all(abs(abs(dot(n[0], m)) - 1) < 1e-7 for m in n[1:]):
+        return ("plane", unit(n[0]))
+    pts = gmsh.model.getValue(2, t, uv)
+    cy = fit_cylinder(n, [list(pts[3 * k : 3 * k + 3]) for k in range(4)], diag())
+    return ("cylinder", cy["axis"], cy["radius"]) if cy else ("other",)
+
+
+def find_surface(center, what, hint=None):
+    """Fläche wiederfinden: nächster Schwerpunkt. Mit Hinweis (Art, Normale/Achse, Radius) auch weiter weg, wenn
+    nur eine Fläche gleicher Art und Ausrichtung passt – z. B. wenn eine Extrusion davor dicker geworden ist."""
+    cand = []
     for _, t in gmsh.model.getEntities(2):
-        d = math.dist(occ.getCenterOfMass(2, t), center)
-        if d < best_d:
-            best, best_d = t, d
-    if best is None or best_d > max(1.0, 0.02 * diag()):
+        cand.append((math.dist(occ.getCenterOfMass(2, t), center), t))
+    if not cand:
         raise Problem(f"{what}: eine gewählte Fläche gibt es nicht mehr – im Feature neu wählen")
-    return best
+    cand.sort()
+    d0, t0 = cand[0]
+    near = max(1.0, 0.02 * diag())
+    if not hint or not hint.get("kind"):
+        if d0 > near:
+            raise Problem(f"{what}: eine gewählte Fläche gibt es nicht mehr – im Feature neu wählen")
+        return t0
+
+    def same(t):
+        k = surface_kind(t)
+        if hint["kind"] == "plane" and k[0] == "plane" and hint.get("normal"):
+            return abs(dot(k[1], unit(hint["normal"]))) > 0.9995
+        if hint["kind"] == "cylinder" and k[0] == "cylinder" and hint.get("radius"):
+            ok_axis = not hint.get("axis") or abs(dot(k[1], unit(hint["axis"]))) > 0.9995
+            return ok_axis and abs(k[2] - hint["radius"]) <= 1e-3 * max(1.0, hint["radius"])
+        return hint["kind"] == "other" and k[0] == "other"
+
+    far = 0.25 * diag()
+    for d, t in cand:
+        if d > far:
+            break
+        if same(t):
+            return t
+    if d0 <= near:
+        return t0
+    raise Problem(f"{what}: eine gewählte Fläche gibt es nicht mehr – im Feature neu wählen")
 
 
 def owners(dim, tag):
@@ -939,7 +992,8 @@ def feat_mirror(f, sketches, warn, by_id):
 def feat_removefaces(f, sketches, warn):
     if not f.get("faces"):
         raise Problem("Flächen entfernen: keine Fläche gewählt")
-    tags = sorted({find_surface(x["center"], "Flächen entfernen") for x in f["faces"]})
+    tags = sorted({find_surface(x["center"], "Flächen entfernen", x) for x in f["faces"]})
+    vol0, nsurf0 = total_volume(), len(gmsh.model.getEntities(2))
     groups = {}
     for t in tags:
         for v in owners(2, t):
@@ -950,6 +1004,8 @@ def feat_removefaces(f, sketches, warn):
         except Exception:
             raise Problem("Flächen entfernen: Die Lücke lässt sich nicht schließen – zusammengehörige Flächen gemeinsam wählen (z. B. die ganze Bohrung)")
         occ.synchronize()
+    if abs(total_volume() - vol0) < 1e-9 * max(vol0, 1.0) and len(gmsh.model.getEntities(2)) == nsurf0:
+        warn.append("Es hat sich nichts geändert – Flächen einer Bohrung, Tasche oder Verrundung wählen (eine Außenfläche lässt sich nicht entfernen)")
 
 
 def feat_moveface(f, sketches, warn):
@@ -959,7 +1015,7 @@ def feat_moveface(f, sketches, warn):
     if not f.get("faces"):
         raise Problem("Fläche verschieben: keine Fläche gewählt")
     for x in f["faces"]:
-        t = find_surface(x["center"], "Fläche verschieben")
+        t = find_surface(x["center"], "Fläche verschieben", x)
         if not is_planar(t):
             raise Problem("Fläche verschieben: geht nur für ebene Flächen")
         n = outward_normal(t)

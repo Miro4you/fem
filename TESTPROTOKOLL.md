@@ -307,6 +307,8 @@ selbst starten.
 | 18d.21 | Maus über die Platte, dann linken Kreis anklicken, 25 › „OK und weiter“ › rechten Kreis, 4 › OK | Hinweis „benutzt schon Extrudieren 1“, Platte grau; Zapfen und Scheibe im Loch entstehen | [ ] |
 | 18d.22 | Alt + Klick auf eine Fläche mit Löchern; Knöpfe Alle/Keine/Noch freie/Schraffierte/Automatisch | Fläche samt Inhalt an/aus; Schnellwahl wirkt | [ ] |
 | 18d.23 | Drehen mit Draftpad-Skizze › „Drehachse“ › Linie im Bild anklicken | Achse aus Draftpad vorgewählt, Linie unter dem Zeiger orange, nach Klick gewählt; Liste: Achsen, Hilfslinien, Linien mit Länge | [ ] |
+| 18d.24 | Konstruiertes Teil übernehmen, Lager/Last, rechnen; dann in der Konstruktion die Plattendicke ändern und erneut übernehmen | Lager und Lasten bleiben auf ihren Flächen; Fase/verschobene Fläche werden wiedergefunden; Ergebnis wird mit vorher verglichen | [ ] |
+| 18d.25 | Studie › Parameter „Konstruktion: Extrudieren 1: Tiefe“, Werte „10; 18“ | beide Werte werden gebaut und gerechnet, Tabelle mit S und Masse | [ ] |
 
 ## 18e. Draftpad-Zeichnung als Skizze (neu)
 
