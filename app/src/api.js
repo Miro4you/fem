@@ -108,12 +108,6 @@ export const cancel = () => (isDesktop ? invoke('cancel') : http('/cancel', { me
 /// Fortschritt der laufenden Rechnung ({ text, fraction } oder null)
 export const progress = () => (isDesktop ? invoke('progress') : http('/progress'))
 
-/// Geometrie ändern: Änderungen auf die Original-STEP anwenden, neu vernetzen
-export const modifyGeometry = (base, ops, size, refine = []) =>
-  isDesktop
-    ? invoke('modify_geometry', { base, ops, size, refine })
-    : http('/modify_geometry', { method: 'POST', json: { base, ops, size, refine } })
-
 // --- Draftpad (Online-Ablage) – über den Rechenkern, das Passwort bleibt dort -----------------------
 export const draftpadStatus = () => (isDesktop ? invoke('draftpad_status') : http('/draftpad/status'))
 /// token: undefined = Passwort behalten, '' = löschen

@@ -10,11 +10,40 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{json, Value};
 
-use crate::geometry::find_python;
 use crate::{FemError, Result};
 
 const SCRIPT: &str = include_str!("cad.py");
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Python mit Gmsh-Modul suchen: `FEM_GMSH_PYTHON`, Interpreter aus dem Gmsh-Startskript (uv), sonst `python3`.
+pub fn find_python() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("FEM_GMSH_PYTHON") {
+        return Some(PathBuf::from(p));
+    }
+    let mut candidates = Vec::new();
+    if let Some(gmsh) = crate::gmsh::find_gmsh() {
+        // uv: ~/.local/bin/gmsh → …/tools/gmsh/bin/gmsh (Python-Skript, Interpreter daneben)
+        let real = std::fs::canonicalize(&gmsh).unwrap_or(gmsh);
+        if let Ok(text) = std::fs::read(&real) {
+            if let Some(line) = text.split(|&b| b == b'\n').next().and_then(|l| std::str::from_utf8(l).ok()) {
+                if let Some(interp) = line.strip_prefix("#!") {
+                    let interp = interp.trim();
+                    if !interp.starts_with("/usr/bin/env") {
+                        candidates.push(PathBuf::from(interp));
+                    }
+                }
+            }
+        }
+        if let Some(dir) = real.parent() {
+            candidates.push(dir.join("python"));
+            candidates.push(dir.join("python3"));
+        }
+    }
+    candidates.push(PathBuf::from("python3"));
+    candidates.into_iter().find(|p| {
+        Command::new(p).args(["-c", "import gmsh"]).output().map(|o| o.status.success()).unwrap_or(false)
+    })
+}
 
 /// Ein Aufbau-Auftrag.
 #[derive(Debug, Default, Clone)]

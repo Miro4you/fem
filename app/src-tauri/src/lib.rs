@@ -594,50 +594,6 @@ pub fn open_step_full(
     }
 }
 
-// --- Geometrie anpassen -------------------------------------------------------
-
-#[derive(Serialize)]
-pub struct GeometryView {
-    mesh: MeshView,
-    /// geänderte STEP-Datei (für Neuvernetzen und Export)
-    step: String,
-    volume_before: f64,
-    volume_after: f64,
-}
-
-/// Änderungen auf die Original-STEP anwenden, Ergebnis vernetzen.
-pub fn modify_geometry_impl(
-    state: &AppState,
-    base: &str,
-    ops: &[fem_core::geometry::GeoOp],
-    size: Option<f64>,
-    refine: &[Refine],
-) -> Result<GeometryView, String> {
-    progress_for(state).0.report("Geometrie anpassen (OpenCASCADE)", None);
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let stem = PathBuf::from(base).file_stem().and_then(|s| s.to_str()).unwrap_or("geometrie").to_string();
-    let out = std::env::temp_dir().join("projekt-fem-geo").join(format!("{stamp}")).join(format!("{stem}_geaendert.step"));
-    let r = fem_core::geometry::modify_step(&PathBuf::from(base), ops, &out).map_err(|e| e.to_string())?;
-    let step = out.display().to_string();
-    let mesh = open_step_impl(state, &step, size, false, refine)?;
-    Ok(GeometryView { mesh, step, volume_before: r.volume_before, volume_after: r.volume_after })
-}
-
-#[tauri::command]
-async fn modify_geometry(
-    state: tauri::State<'_, AppState>,
-    base: String,
-    ops: Vec<fem_core::geometry::GeoOp>,
-    size: Option<f64>,
-    refine: Option<Vec<Refine>>,
-) -> Result<GeometryView, String> {
-    let state = state.inner().clone();
-    let refine = refine.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || modify_geometry_impl(&state, &base, &ops, size, &refine))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 // --- Konstruktion (kleines CAD) ---------------------------------------------
 
 #[derive(Deserialize)]
@@ -1477,7 +1433,6 @@ pub fn run() {
             load_user_materials,
             save_user_materials,
             open_step,
-            modify_geometry,
             cad_build,
             copy_step,
             solve,

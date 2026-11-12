@@ -9,7 +9,6 @@ pub mod element;
 pub mod frame;
 pub mod generate;
 pub mod infill;
-pub mod geometry;
 pub mod gmsh;
 pub mod material;
 pub mod mesh;

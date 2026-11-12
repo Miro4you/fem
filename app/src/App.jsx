@@ -22,7 +22,7 @@ import { fmt, fmtVec } from './format.js'
 import { buildReport } from './report.js'
 import { FrameSidebar, FrameView, newFrame, framePayload } from './FrameStudio.jsx'
 import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES, regionRefine } from './region.js'
-import { GEO_OPS, opFromSurface, opPayload, opProblem, remapSurfaces } from './geoops.js'
+import { remapSurfaces } from './remap.js'
 import CadStudio from './cad/CadStudio.jsx'
 import { kernelFeatures, featuresFromGeoOps, cadParams } from './cad/features.js'
 
@@ -233,13 +233,8 @@ export default function App() {
   const [dirPick, setDirPick] = useState(null)
   // Lastpfeil im Bild ausrichten: { id, field: 'force' | 'moment', plane: 'free' | 'xy' | 'yz' | 'xz' }
   const [aim, setAim] = useState(null)
-  // Geometrie anpassen
-  const [geoOps, setGeoOps] = useState([])
-  const [geoStep, setGeoStep] = useState(null) // geänderte STEP (null = Original)
-  const [geoApplied, setGeoApplied] = useState('[]') // zuletzt angewendete Änderungen (JSON)
-  const [geoInfo, setGeoInfo] = useState(null) // Volumen vorher/nachher
-  const [geoPick, setGeoPick] = useState(false)
-  const [geoWarnings, setGeoWarnings] = useState([])
+  // geänderte STEP aus der Konstruktion (Ausgangsteil + Features; null = Original)
+  const [geoStep, setGeoStep] = useState(null)
   // Konstruktion (kleines CAD): Ausgangsteil (STEP, null = neues Teil) und Feature-Verlauf
   const [cad, setCad] = useState({ base: null, features: [] })
   const [cadApplied, setCadApplied] = useState(null) // Stand (Schlüssel), der im Rechenmodell ist
@@ -538,9 +533,6 @@ export default function App() {
           setCadApplied(null)
         }
         setGeoStep(null)
-        setGeoApplied('[]')
-        setGeoInfo(null)
-        setGeoWarnings([])
       }
       setTopo(null)
       if (!keepSetup) {
@@ -553,7 +545,6 @@ export default function App() {
         setGaps((g) => ({ ...g, list: null }))
         setActive(null)
         setDrawing(null)
-        setGeoOps([])
         setReference(null)
       }
       return m
@@ -649,11 +640,10 @@ export default function App() {
     }
     if (!path) return
     const stepPath_ = path
-    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, geoOps, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies,
+    const data = { format: 'projekt-fem', version: 1, step: stepPath, meshSize: Number(meshSize) || null, material, supports, loads, welds, proof, origin: partOrigin, bodyMaterials: bodyMats, hiddenBodies,
       bolts: Object.fromEntries(bolts.map((b) => [b.name, { cls: b.cls, on: b.on, ma: b.ma, fv: b.fv }])), openJoints, jointFriction: jointFric, tighten: tight, contacts: contactPairs, handBolts, keepFasteners,
       cad: { features: cad.features, newPart: !cad.base, applied: cadApplied != null } }
     data.step = cad.base ?? stepPath_
-    data.geoOps = []
     try {
       const p = await api.saveProject(stepPath_, data)
       if (p) addRecent({ kind: 'project', path: p, name: baseName(p), info: result ? `${material.name} · σv ${fmt(result.max_von_mises.value)} MPa` : material.name })
@@ -785,13 +775,6 @@ export default function App() {
           .catch((e) => setError(String(e)))
         return
       }
-      if (geoPick) {
-        const op = opFromSurface(tag, surfaceInfo)
-        if (op.error) return setError(op.error)
-        setGeoOps((ops) => [...ops, { ...op, mesh: mesh?.positions?.length }])
-        setGeoPick(false)
-        return
-      }
       if (dirPick) {
         const info = surfaceInfo.get(tag)
         // ebene Fläche: Last drückt senkrecht auf die Fläche; Zylinder: entlang der Achse
@@ -844,15 +827,11 @@ export default function App() {
       if (active.type === 'support') setSupports(toggle)
       else setLoads(toggle)
     },
-    [active, dirPick, geoPick, bedPick, boltPick, surfaceInfo, mesh, supports, loads, welds],
+    [active, dirPick, bedPick, boltPick, surfaceInfo, mesh, supports, loads, welds],
   )
 
   const surfaceTint = useCallback(
     (tag) => {
-      if (view === 'geometry') {
-        // Radien/Bohrungen, die geändert werden (Flächennummern vom Zeitpunkt der Auswahl)
-        return geoOps.some((o) => o.enabled && o.tags?.includes(tag) && o.mesh === mesh?.positions?.length) ? '#c9a227' : null
-      }
       const hot = (id) => active?.id === id || sel === 's:' + id || sel === 'l:' + id
       for (const l of loads)
         if (l.surfaces.includes(tag)) return l.region ? LOAD_PALE : hot(l.id) ? LOAD_ACTIVE : LOAD_COLOR
@@ -864,7 +843,7 @@ export default function App() {
       }
       return null
     },
-    [supports, loads, welds, active, view, geoOps, mesh, sel],
+    [supports, loads, welds, active, sel],
   )
 
   // --- Schweißnähte -----------------------------------------------------------------
@@ -897,12 +876,6 @@ export default function App() {
     (ev) => {
       if (!drawing) return
       const info = surfaceInfo.get(ev.tag)
-      if (drawing.type === 'geo') {
-        const sketch = regionFromDrag(drawing.shape, ev)
-        setGeoOps((ops) => ops.map((o) => (o.id === drawing.id ? { ...o, sketch } : o)))
-        if (ev.final) setDrawing(null)
-        return
-      }
       if (drawing.shape === 'band' && !info?.cylinder) {
         if (ev.final) setError('Ein Wellen-/Bohrungsabschnitt lässt sich nur auf einer zylindrischen Fläche zeichnen.')
         return
@@ -928,18 +901,10 @@ export default function App() {
       const isActive = active?.id === item.id || drawing?.id === item.id
       out.push({ region, cyl: selectionCylinder(item.surfaces, surfaceInfo), color: isActive ? activeColor : color, active: isActive })
     }
-    if (view === 'geometry') {
-      for (const o of geoOps) {
-        if (!o.sketch || !o.enabled) continue
-        const isActive = drawing?.id === o.id
-        out.push({ region: regionNumbers(o.sketch), cyl: null, color: o.op === 'add' ? '#2e9e5b' : '#d64545', active: isActive })
-      }
-      return out
-    }
     for (const s of supports) push(s, SUPPORT_COLOR, SUPPORT_ACTIVE)
     for (const l of loads) push(l, LOAD_COLOR, LOAD_ACTIVE)
     return out
-  }, [supports, loads, surfaceInfo, active, drawing, view, geoOps])
+  }, [supports, loads, surfaceInfo, active, drawing])
 
   function supportFix(s) {
     if (s.kind === 'fixed') return { fix: { x: 0, y: 0, z: 0 } }
@@ -1055,7 +1020,6 @@ export default function App() {
     setSupports((ss) => remap(ss, 'Lager'))
     setLoads((ls) => remap(ls, 'Last'))
     setWelds((ws) => ws.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) })))
-    setGeoWarnings(warn)
     setMesh(m)
     setGeoStep(newGeoStep)
     setTopo(null)
@@ -1197,18 +1161,8 @@ export default function App() {
         const values = Number.isFinite(x) && x !== 0 ? [0.6, 0.8, 1, 1.2, 1.4].map((f) => Number((f * x).toPrecision(3))).join('; ').replace(/\./g, ',') : ''
         out.push({ key: p.key, label: `Konstruktion: ${p.label}`, unit: p.unit, values })
       }
-    geoOps.forEach((o, i) => {
-      if (!o.enabled) return
-      const n = `${i + 1}. ${GEO_OPS[o.op]}`
-      if (o.op === 'fillet') out.push({ key: `geo:${o.id}:radius`, label: `${n}: Radius`, unit: 'mm' })
-      if (o.op === 'hole') out.push({ key: `geo:${o.id}:diameter`, label: `${n}: Durchmesser`, unit: 'mm' })
-      if (o.op === 'add') out.push({ key: `geo:${o.id}:height`, label: `${n}: Höhe`, unit: 'mm' })
-      if (o.op === 'cut') out.push({ key: `geo:${o.id}:depth`, label: `${n}: Tiefe`, unit: 'mm' })
-      if ((o.op === 'add' || o.op === 'cut') && o.sketch?.shape === 'circle') out.push({ key: `geo:${o.id}:dia`, label: `${n}: Skizze Ø`, unit: 'mm' })
-      if ((o.op === 'add' || o.op === 'cut') && o.sketch?.shape === 'rect') out.push({ key: `geo:${o.id}:width`, label: `${n}: Skizze Breite`, unit: 'mm' })
-    })
     return out
-  }, [material, geoOps, scStudyInfo, osVars, cad, cadApplied])
+  }, [material, scStudyInfo, osVars, cad, cadApplied])
 
   async function runStudy() {
     const values = study.values.split(/[;\s]+/).map((v) => Number(v.replace(',', '.'))).filter((v) => Number.isFinite(v))
@@ -1218,7 +1172,6 @@ export default function App() {
     const rows = []
     const origSurfaces = mesh.surfaces
     const refine = currentRefine(meshSize)
-    const active = geoOps.filter((o) => o.enabled && !opProblem(o))
     const scParam = param.startsWith('sc:') ? scStudyInfo?.params.find((p) => p.name === param.slice(3)) : null
     let scTouched = false
     const osVar = param.startsWith('os:') && Array.isArray(osVars) ? osVars.find((v) => v.name === param.slice(3)) : null
@@ -1237,9 +1190,7 @@ export default function App() {
         let wls = welds
         let m = mesh
         if (param === 'mesh') {
-          m = active.length
-            ? (await api.modifyGeometry(stepPath, active.map(opPayload), v, currentRefine(v))).mesh
-            : await api.openStep(geoStep ?? stepPath, v, false, currentRefine(v))
+          m = await api.openStep(geoStep ?? stepPath, v, false, currentRefine(v))
         } else if (param === 'infill') {
           mat = { ...material, infill: { ...material.infill, percent: v } }
         } else if (osVar) {
@@ -1290,23 +1241,6 @@ export default function App() {
           sups = supports.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
           lds = loads.map((x) => ({ ...x, surfaces: mapTags(x.surfaces) }))
           wls = welds.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) }))
-        } else if (param.startsWith('geo:')) {
-          const [, id, field] = param.split(':')
-          const ops = active.map((o) => {
-            if (String(o.id) !== id) return o
-            if (field === 'dia') return { ...o, sketch: { ...o.sketch, radius: v / 2 } }
-            if (field === 'width') return { ...o, sketch: { ...o.sketch, width: v } }
-            if (field === 'depth') return { ...o, depth: v, through: false }
-            return { ...o, [field]: v }
-          })
-          const g = await api.modifyGeometry(stepPath, ops.map(opPayload), Number(meshSize) || null, refine)
-          m = g.mesh
-          const map = remapSurfaces(origSurfaces, m.surfaces)
-          const re = (items) => items.map((x) => ({ ...x, surfaces: [...new Set(x.surfaces.map((t) => map.get(t)).filter((t) => t != null))] }))
-          const mapTags = (ts) => [...new Set(ts.map((t) => map.get(t)).filter((t) => t != null))]
-          sups = re(supports)
-          lds = re(loads)
-          wls = welds.map((w) => ({ ...w, a: mapTags(w.a), b: mapTags(w.b) }))
         }
         const r = await api.solve(buildSetup(mat, sups, lds, wls))
         const rho = Number(material.rho)
@@ -1327,11 +1261,9 @@ export default function App() {
         setBusy(`SolidCraft: ${scParam.name} zurück auf ${scParam.expression} …`)
         await api.scStudy(scParam.name, scParam.expression)
       }
-      if (param === 'mesh' || param.startsWith('geo:') || param.startsWith('cad:') || scParam || osVar) {
+      if (param === 'mesh' || param.startsWith('cad:') || scParam || osVar) {
         setBusy('Ausgangszustand wiederherstellen …')
-        const m = active.length
-          ? (await api.modifyGeometry(stepPath, active.map(opPayload), Number(meshSize) || null, refine)).mesh
-          : await api.openStep(geoStep ?? stepPath, Number(meshSize) || null, false, refine)
+        const m = await api.openStep(geoStep ?? stepPath, Number(meshSize) || null, false, refine)
         setMesh(m)
       }
       if (result) {
@@ -1367,7 +1299,6 @@ export default function App() {
     setBusy('Leichtbau-Vorschlag berechnen …')
     setError(null)
     setDrawing(null)
-    setGeoPick(false)
     try {
       const v = await api.topopt(buildSetup(material), args)
       setTopo({ view: v, threshold: 0.5, show: true, surface: v.surface })
@@ -1653,9 +1584,7 @@ export default function App() {
       setStepPath(inc.path)
       setPartOrigin(inc.origin ?? null)
       setMeshRefineKey(JSON.stringify(ref))
-      setGeoOps([])
       setGeoStep(null)
-      setGeoApplied('[]')
       setTopo(null)
       setProbe(null)
       if (result && cadAuto && !lost) {
@@ -1780,7 +1709,6 @@ export default function App() {
       setAim(null)
       setDirPick(null)
       setBedPick(false)
-      setGeoPick(false)
       setTodoOpen(null)
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault()
@@ -2204,7 +2132,6 @@ export default function App() {
     setDirPick(null)
     setDrawing(null)
     setBedPick(false)
-    setGeoPick(false)
     setTodoOpen(null)
     setHome(false)
     setView(v)
@@ -2459,7 +2386,6 @@ export default function App() {
               onPick={() => {
                 setActive(null)
                 setDrawing(null)
-                setGeoPick(false)
                 setBedPick(!bedPick)
               }}
               canCompare={problems.length === 0 && !busy}
@@ -3197,7 +3123,7 @@ export default function App() {
                 mesh={mesh}
                 mode={mode}
                 surfaceTint={surfaceTint}
-                pickable={view === 'setup' || (geoPick && view === 'geometry')}
+                pickable={view === 'setup'}
                 layers={material.layered && mode !== 'result' ? { dir: material.buildDir ?? [0, 0, 1] } : null}
                 onPick={onPick}
                 result={display}
@@ -3205,11 +3131,11 @@ export default function App() {
                 arrows={view === 'setup' ? arrows : []}
                 markers={mode === 'result' ? markers : []}
                 onProbe={probeOn ? setProbe : null}
-                drawing={view === 'setup' || view === 'geometry' ? drawing?.shape : null}
+                drawing={view === 'setup' ? drawing?.shape : null}
                 planeNormal={planeNormal}
                 onDraw={onDraw}
                 overlays={overlays}
-                topoShape={(view === 'geometry' || view === 'topo') && topo?.show ? topo.surface : null}
+                topoShape={view === 'topo' && topo?.show ? topo.surface : null}
                 aim={view === 'setup' ? aimView : null}
                 onAim={onAim}
                 nav={nav}
@@ -3253,16 +3179,7 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {geoPick && view === 'geometry' && (
-                <div className="pick-hint">
-                  <MousePointerClick size={15} />
-                  Radius- oder Bohrungsfläche anklicken
-                  <button className="btn small" onClick={() => setGeoPick(false)}>
-                    <X size={14} /> Abbrechen
-                  </button>
-                </div>
-              )}
-              {drawing && (view === 'setup' || view === 'geometry') && (
+              {drawing && view === 'setup' && (
                 <div className="pick-hint">
                   <PenLine size={15} />
                   {drawing.shape === 'band'
