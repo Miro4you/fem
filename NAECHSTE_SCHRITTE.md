@@ -132,6 +132,9 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
   → Felix: bitte ausprobieren (Testprotokoll 18d). Ideen für danach: Variablen/Formeln für Maße (#dicke),
   Rippe, Wandung (Shell), Langloch/Polygon/Spline in der Skizze, Trimmen, Skizzen-Muster, Fasen mit zwei Maßen,
   Gewindebohrung, Baugruppen aus mehreren konstruierten Teilen, Skizze aus DXF
+- **Als Nächstes: [KONSTRUKTION_TODO.md](KONSTRUKTION_TODO.md)** – ausführlicher Arbeitsplan: Koordinatensystem und
+  Ansichtswürfel im CAD, Skizzen bleiben sichtbar, eine Skizze für mehrere Extrusionen (Bereichswahl wie Onshape),
+  Verbindung zum Draftpad-Server (Bibliothek, verknüpfte Skizze, Aktualisieren)
 - ✅ Draftpad-Zeichnung als Skizze übernehmen (Ebenen wählen, Lücken schließen, Bedingungen erkennen, Schraffur =
   Material, Achse = Drehachse). Ideen: direkt aus der Draftpad-Cloud holen statt Datei, Draftpad-Maße als Skizzenmaße
   übernehmen, mehrere Ansichten einer Zeichnung als Vorder-/Seitenansicht kombinieren
