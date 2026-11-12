@@ -216,6 +216,13 @@ Bedingungen erkannt – danach lässt sich weiter bemaßen. Schraffierte Fläche
 Material vorgewählt. Bei einer Schnittzeichnung (beide Hälften schraffiert) dreht „Drehen“ nur die Hälfte auf einer
 Seite der Achse.
 
+**Baugruppe aus einer Draftpad-Skizze:** Nach „Skizze fertig“ schlägt Projekt-FEM die Teile vor – je Schraffur-Art
+(gleiche Richtung, gleicher Abstand) ein Teil. Teile, die symmetrisch zu einer Achse liegen, werden gedreht, die
+anderen extrudiert; Namen vergeben, „Anlegen“. Jedes Teil wird ein eigener, benannter Körper (Überschneidungen
+werden vom neuen Teil abgezogen), die Namen erscheinen im Reiter Modell. Berührflächen sind verklebt und lassen
+sich unter Verbindungen auf Kontakt umstellen. Nicht schraffierte Flächen (Lager, Schrauben) mit
+Extrudieren/Drehen und „Neuer Körper“ selbst anlegen.
+
 Das Projekt speichert den Verlauf mit (neues Teil wird beim Laden neu gebaut). Alte Projekte mit „Geometrie
 anpassen“ werden in Features umgewandelt. Skizzenmaße bekommen auf Wunsch einen Namen und stehen dann – wie Tiefen,
 Radien, Anzahl – in der **Parameterstudie** zur Wahl. Gebaut wird mit OpenCASCADE über das Python-Modul von Gmsh

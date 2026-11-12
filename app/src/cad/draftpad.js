@@ -55,23 +55,89 @@ function primitives(doc, layerIds) {
       else out.push({ t: 'arc', c, r: e.r, a: [c[0] + e.r * Math.cos(a0), c[1] + e.r * Math.sin(a0)], b: [c[0] + e.r * Math.cos(a1), c[1] + e.r * Math.sin(a1)], cons })
     }
   }
+  // Freihand-Striche, die an beiden Enden an Konturen anschließen (z. B. Bruchlinien), schließen eine Kontur:
+  // als Linienzug übernehmen. Freie Notizen und Pfeile bleiben weg.
+  const ends = out.flatMap((p) => (p.t === 'line' || p.t === 'arc' ? (p.cons ? [] : [p.a, p.b]) : []))
+  const lines = out.filter((p) => p.t === 'line' && !p.cons)
+  const near = (q) => {
+    const tol = 1.0
+    if (ends.some((e) => Math.hypot(e[0] - q[0], e[1] - q[1]) <= tol)) return true
+    return lines.some((l) => {
+      const dx = l.b[0] - l.a[0]
+      const dy = l.b[1] - l.a[1]
+      const L2 = dx * dx + dy * dy || 1
+      const t = Math.max(0, Math.min(1, ((q[0] - l.a[0]) * dx + (q[1] - l.a[1]) * dy) / L2))
+      return Math.hypot(l.a[0] + t * dx - q[0], l.a[1] + t * dy - q[1]) <= tol
+    })
+  }
+  for (const e of doc.entities) {
+    if (e.kind !== 'stroke' || !layerIds.has(e.layerId) || (e.pts?.length ?? 0) < 4) continue
+    const pts = []
+    for (let i = 0; i + 1 < e.pts.length; i += 2) pts.push([e.pts[i], -e.pts[i + 1]])
+    if (!near(pts[0]) || !near(pts[pts.length - 1])) continue
+    const simple = simplify(pts, 0.15)
+    for (let i = 0; i + 1 < simple.length; i++) out.push({ t: 'line', a: simple[i], b: simple[i + 1], cons: false, stroke: true })
+  }
   return out
 }
 
-/// Schraffurflächen (geschlossene Linienzüge je Schraffur) in Skizzenkoordinaten
-function fillsOf(doc, layerIds) {
-  const out = []
-  for (const e of doc.entities) {
-    if (e.kind !== 'hatch' || (layerIds && !layerIds.has(e.layerId))) continue
-    const loops = (e.loops ?? []).map((lp) => {
-      const pts = []
-      for (let i = 0; i + 1 < lp.length; i += 2) pts.push([lp[i], -lp[i + 1]])
-      if (pts.length && (pts[0][0] !== pts[pts.length - 1][0] || pts[0][1] !== pts[pts.length - 1][1])) pts.push([...pts[0]])
-      return pts
-    })
-    if (loops.length) out.push(loops)
+// Linienzug vereinfachen (Douglas–Peucker)
+function simplify(pts, tol) {
+  if (pts.length < 3) return pts
+  const [a, b] = [pts[0], pts[pts.length - 1]]
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const L = Math.hypot(dx, dy) || 1
+  let worst = 0
+  let k = 0
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = Math.abs(dy * (pts[i][0] - a[0]) - dx * (pts[i][1] - a[1])) / L
+    if (d > worst) {
+      worst = d
+      k = i
+    }
   }
-  return out
+  if (worst <= tol) return [a, b]
+  const left = simplify(pts.slice(0, k + 1), tol)
+  return [...left.slice(0, -1), ...simplify(pts.slice(k), tol)]
+}
+
+const PATTERN_NAME = { diag: 'Schraffur 45°', diag2: 'Schraffur −45°', cross: 'Kreuzschraffur', steel: 'Stahl', plastic: 'Kunststoff', dots: 'Punkte' }
+
+function polyArea(lp) {
+  let a = 0
+  for (let i = 0; i + 1 < lp.length; i++) a += lp[i][0] * lp[i + 1][1] - lp[i + 1][0] * lp[i][1]
+  return Math.abs(a) / 2
+}
+
+/// Schraffurflächen in Skizzenkoordinaten, je Schraffur { loops, group, label }.
+/// Gruppe = gleiches Muster, gleicher Winkel, gleicher Abstand, gleiche Farbe – in technischen Zeichnungen ist das
+/// ein Teil. Schraffuren auf ausgeblendeten Ebenen, die genauso auf einer sichtbaren liegen, zählen nur einmal.
+function fillsOf(doc) {
+  const vis = new Map(doc.layers.map((l) => [l.id, l.visible !== false]))
+  const lname = new Map(doc.layers.map((l) => [l.id, l.name || 'Ebene']))
+  const all = []
+  for (const e of doc.entities) {
+    if (e.kind !== 'hatch') continue
+    const loops = (e.loops ?? [])
+      .map((lp) => {
+        const pts = []
+        for (let i = 0; i + 1 < lp.length; i += 2) pts.push([lp[i], -lp[i + 1]])
+        if (pts.length && (pts[0][0] !== pts[pts.length - 1][0] || pts[0][1] !== pts[pts.length - 1][1])) pts.push([...pts[0]])
+        return pts
+      })
+      .filter((lp) => lp.length >= 4)
+    if (!loops.length) continue
+    const xs = loops[0].map((p) => p[0])
+    const ys = loops[0].map((p) => p[1])
+    const key = `${e.pattern ?? 'diag'}|${e.angle ?? 0}|${e.spacing ?? 0}|${e.style?.color ?? ''}`
+    const label = `${PATTERN_NAME[e.pattern] ?? e.pattern ?? 'Schraffur'}${e.angle ? ` (+${e.angle}°)` : ''}, Abstand ${String(e.spacing ?? '–').replace('.', ',')} mm`
+    all.push({ loops, key, label, layer: lname.get(e.layerId), visible: vis.get(e.layerId), area: polyArea(loops[0]), box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] })
+  }
+  // Doppel weglassen: ausgeblendete Schraffur mit (fast) gleicher Lage und Fläche wie eine sichtbare
+  const same = (a, b) => Math.abs(a.area - b.area) <= 0.03 * Math.max(a.area, b.area) && a.box.every((v, i) => Math.abs(v - b.box[i]) <= 0.5)
+  const keep = all.filter((h) => h.visible || !all.some((o) => o !== h && o.visible && same(h, o)))
+  return keep.map((h) => ({ loops: h.loops, group: h.key, label: h.label, layer: h.layer }))
 }
 
 const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1])
@@ -212,7 +278,7 @@ export function importDraftpad(sk0, doc, opts) {
     }
   }
   if (opts.fills) {
-    const fl = fillsOf(doc, null).map((loops) => loops.map((lp) => lp.map(tr)))
+    const fl = fillsOf(doc).map((f) => ({ ...f, loops: f.loops.map((lp) => lp.map(tr)) }))
     if (fl.length) s.fills = [...(s.fills ?? []), ...fl]
   }
   // lösen; klappt es nicht (z. B. widersprüchliche Bedingungen aus ungenauer Zeichnung), Bedingungen weglassen
@@ -245,11 +311,15 @@ export function importDraftpad(sk0, doc, opts) {
   }
 }
 
+/// Schleifen einer Schraffur (neue Form { loops } oder alte Form: Liste von Schleifen)
+export const fillLoops = (f) => (Array.isArray(f) ? f : f.loops)
+
 /// Ist ein Punkt in einer der Schraffurflächen? (gerade/ungerade je Schraffur)
-export function inFills(q, fills) {
-  for (const loops of fills ?? []) {
+export function inFills(q, fills, group = null) {
+  for (const f of fills ?? []) {
+    if (group != null && f.group !== group) continue
     let n = 0
-    for (const lp of loops)
+    for (const lp of fillLoops(f))
       for (let i = 0; i < lp.length - 1; i++) {
         const [x0, y0] = lp[i]
         const [x1, y1] = lp[i + 1]

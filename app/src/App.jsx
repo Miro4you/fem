@@ -1065,6 +1065,10 @@ export default function App() {
           keepCadRef.current = false
           if (!m) return
           setPartSource('Konstruktion')
+          if ((m.bodies?.length ?? 0) > 1)
+            warn = [
+              `Baugruppe übernommen: ${m.bodies.length} Körper (${m.bodies.map((b) => b.name || 'ohne Namen').join(', ')}), ${m.touching?.length ?? 0} Berührflächen – verklebt; unter Verbindungen auf Kontakt umstellbar`,
+            ]
         } else {
           warn = await swapGeometry(r.step, null)
           setStepPath(r.step)

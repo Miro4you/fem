@@ -152,6 +152,9 @@ export function problemOf(f, features) {
   }
 }
 
+// Auswahl über Schraffuren: eine Gruppe (Teil aus Draftpad) oder alle schraffierten Flächen
+const fillsArg = (f) => (f.regions != null ? false : f.fillGroup ? { group: f.fillGroup } : f.useFills !== false)
+
 /// Feature für den Kern (nur Zahlen)
 export function kernelFeature(f, features) {
   const sk = (id) => features.find((g) => g.id === id)
@@ -159,12 +162,12 @@ export function kernelFeature(f, features) {
     case 'sketch':
       return kernelSketch(f.id, f.sketch)
     case 'extrude':
-      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: !f.regions && f.useFills !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through }
+      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through }
     case 'revolve': {
       const s = sk(f.sketch)?.sketch
       const line = s?.ents.find((e) => e.id === f.axis)
       const axis = line ? { a: [s.pts[line.a].x, s.pts[line.a].y], b: [s.pts[line.b].x, s.pts[line.b].y] } : null
-      return { id: f.id, type: 'revolve', sketch: f.sketch, regions: f.regions, fills: !f.regions && f.useFills !== false, axis, angle: num(f.angle), mode: f.mode, symmetric: !!f.symmetric }
+      return { id: f.id, type: 'revolve', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false, axis, angle: num(f.angle), mode: f.mode, symmetric: !!f.symmetric }
     }
     case 'hole':
       return {

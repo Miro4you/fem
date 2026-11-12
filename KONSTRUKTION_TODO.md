@@ -179,7 +179,7 @@ ohne die Skizze zu verlassen; unter der Maus wird der Bereich hell; schon benutz
 
 ---
 
-## F. Baugruppe aus einer Skizze (der eigentliche Zweck)
+## F. Baugruppe aus einer Skizze (der eigentliche Zweck) ✅ (erledigt)
 
 **Wozu:** Felix skizziert in Draftpad eine Baugruppe (meist eine Schnittzeichnung). Wenn er etwas nachweisen
 will, schiebt er die Skizze nach Projekt-FEM, macht daraus „quick and dirty“ Körper, gibt Lasten an und rechnet.
@@ -440,6 +440,14 @@ in Projekt-FEM erscheint „geändert“, „Aktualisieren“ baut den Körper m
 ---
 
 ## Stolpersteine (aus der bisherigen Arbeit – unbedingt beachten)
+
+- **Baugruppen aus Skizzen** haben oft fast deckungsgleiche Flächen zwischen Körpern (Skizze nur auf 0,3 mm genau
+  zusammengeführt). Gmsh meldet dann beim Vernetzen „overlapping facets“; `gmsh.rs` versucht es in dem Fall ein
+  zweites Mal mit `Geometry.ToleranceBoolean = 1,5e-4 · Diagonale`.
+- **Freihand-Bruchlinien** schließen in Draftpad oft eine Kontur (Platte „abgebrochen“). `draftpad.js` übernimmt
+  Freihand-Striche, deren beide Enden an Konturen anschließen, als Linienzug.
+- **Zwischenstände** (`zwischenstand/*.brep`) speichern jetzt auch Körpernamen (`.namen.json`) und Meldungen
+  (`.status.json`); bei Änderungen daran `CACHE_VERSION` in `cad.py` erhöhen.
 
 - **Gmsh/OpenCASCADE:** `occ.affineTransform`, `occ.mirror` und `occ.dilate` machen aus Ebenen und Zylindern
   Freiformflächen. Deshalb legt `place()` Skizzen nur mit `rotate` + `translate` in den Raum, und „Spiegeln“

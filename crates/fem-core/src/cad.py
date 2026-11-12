@@ -133,8 +133,14 @@ def cleanup():
     occ.synchronize()
 
 
+# Körpernamen: (Name, Punkt im Körper) – über Punkte statt Nummern, weil sich die Nummern bei jeder Operation ändern
+NAMES = []
+
+
 def save_state(path):
     occ.synchronize()
+    with open(path + ".namen.json", "w", encoding="utf-8") as fh:
+        json.dump(NAMES, fh)
     if not volumes():
         open(path, "w").write("leer")
         return
@@ -146,6 +152,68 @@ def load_state(path):
     if os.path.getsize(path) > 10:
         occ.importShapes(path, format="brep" if path.endswith(".brep") else "")
     occ.synchronize()
+    NAMES.clear()
+    try:
+        NAMES.extend(json.load(open(path + ".namen.json", encoding="utf-8")))
+    except Exception:
+        pass
+
+
+def point_in_body(vol):
+    """Ein Punkt sicher im Körper (Schwerpunkt reicht bei Ringen nicht)."""
+    e = 1e-3 * diag()
+    for _, srf in gmsh.model.getBoundary([(3, vol)], oriented=False):
+        srf = abs(srf)
+        lo, hi = gmsh.model.getParametrizationBounds(2, srf)
+        for fu, fv in ((0.5, 0.5), (0.3, 0.4), (0.7, 0.6)):
+            uv = [lo[0] + fu * (hi[0] - lo[0]), lo[1] + fv * (hi[1] - lo[1])]
+            p = list(gmsh.model.getValue(2, srf, uv))
+            if not gmsh.model.isInside(2, srf, p):
+                continue
+            n = outward_normal(srf, [vol])
+            for k in (1.0, 0.1, 0.01):
+                q = sub(p, mul(n, e * k))
+                if gmsh.model.isInside(3, vol, q):
+                    return q
+    return list(occ.getCenterOfMass(3, vol))
+
+
+def body_names():
+    """Name je Körper (Reihenfolge wie volumes()), leer wenn keiner vergeben."""
+    out = []
+    for _, v in volumes():
+        name = ""
+        for n, pt in reversed(NAMES):
+            if gmsh.model.isInside(3, v, pt):
+                name = n
+                break
+        out.append(name)
+    return out
+
+
+def step_with_names(path):
+    """Körpernamen in die STEP-Datei schreiben (Gmsh schreibt „Open CASCADE STEP translator … 1.<k>“)."""
+    import re
+
+    names = body_names()
+    if not any(names):
+        return
+    text = open(path, encoding="utf-8", errors="replace").read()
+    pat = re.compile(r"'Open CASCADE STEP translator [0-9.]+ 1\.(\d+)'")
+
+    def enc(n):
+        out = ""
+        for ch in n:
+            if ch in "'\\":
+                continue
+            out += ch if ord(ch) < 128 else "\\X2\\%04X\\X0\\" % ord(ch)
+        return out
+
+    def repl(m):
+        k = int(m.group(1)) - 1
+        return "'" + enc(names[k]) + "'" if 0 <= k < len(names) and names[k] else m.group(0)
+
+    open(path, "w", encoding="utf-8").write(pat.sub(repl, text))
 
 
 # --- Skizzen → Flächen ------------------------------------------------------------------------
@@ -346,9 +414,14 @@ def sketch_regions(sk):
     return regions
 
 
-def in_fills(q, fills):
+def fill_loops(x):
+    """Schraffur: neue Form { loops, group } oder alte Form (Liste von Schleifen)."""
+    return x["loops"] if isinstance(x, dict) else x
+
+
+def in_fills(q, fills, group=None):
     """Punkt in einer der Schraffurflächen (je Schraffur gerade/ungerade über ihre Ränder)?"""
-    return any(inside_poly(q, loops) for loops in fills or [])
+    return any(inside_poly(q, fill_loops(x)) for x in fills or [] if group is None or (isinstance(x, dict) and x.get("group") == group))
 
 
 def sketch_faces(sk, picks=None, what="Skizze", fills=False):
@@ -371,7 +444,11 @@ def sketch_faces(sk, picks=None, what="Skizze", fills=False):
         if lost:
             raise Problem(f"{what}: {lost} von {len(pts)} gewählten Flächen gibt es nicht mehr (Skizze geändert?) – im Feature neu wählen")
     elif fills and sk.get("fills"):
-        chosen = [r for r in regions if in_fills(r["pt"], sk["fills"])] or None
+        group = fills.get("group") if isinstance(fills, dict) else None
+        chosen = [r for r in regions if in_fills(r["pt"], sk["fills"], group)] or None
+        if chosen is None and group is not None:
+            occ.remove([(2, r["tag"]) for r in regions], recursive=True)
+            raise Problem(f"{what}: Diese Schraffur gibt es in der Skizze nicht mehr – Flächen im Bild wählen")
     if chosen is None:
         chosen = [r for r in regions if r["evenodd"]]
     drop = [(2, r["tag"]) for r in regions if r not in chosen]
@@ -1202,6 +1279,37 @@ def tessellate():
     return {"positions": positions, "triangles": triangles, "tri_surface": tri_surface, "surfaces": surfaces, "curves": curves, "vertices": vertices, "bbox": [lo, hi], "bodies": len(vols)}
 
 
+def new_bodies(f, before, warn):
+    """Neuer Körper eines Features: Überschneidung mit vorhandenen Teilen abziehen, Namen merken."""
+    new = [t for _, t in volumes() if t not in before]
+    old = [t for _, t in volumes() if t in before]
+    if new and old and f.get("subtract", True):
+        tol = 1e-6 * min(occ.getMass(3, t) for t in new + old)
+        a = occ.copy([(3, t) for t in new])
+        b = occ.copy([(3, t) for t in old])
+        try:
+            out, _ = occ.intersect(a, b, removeObject=True, removeTool=True)
+        except Exception:
+            out = []
+        occ.synchronize()
+        overlap = sum(occ.getMass(3, t) for d, t in out if d == 3)
+        if out:
+            occ.remove(out, recursive=True)
+            occ.synchronize()
+        if overlap > tol:
+            occ.cut([(3, t) for t in new], [(3, t) for t in old], removeObject=True, removeTool=False)
+            occ.synchronize()
+            cleanup()
+            new = [t for _, t in volumes() if t not in set(old)]
+            warn.append(f"überschneidet ein anderes Teil um {overlap:.0f} mm³ – die Überschneidung wurde vom neuen Teil abgezogen")
+    if len(new) > 1:
+        warn.append(f"besteht aus {len(new)} losen Stücken (Flächen der Skizze hängen nicht zusammen)")
+    name = (f.get("bodyName") or "").strip()
+    if name:
+        for t in new:
+            NAMES.append([name, point_in_body(t)])
+
+
 # --- Ablauf -----------------------------------------------------------------------------------
 
 features = [f for f in job.get("features") or []]
@@ -1220,8 +1328,12 @@ if base:
     seed = f"{os.path.abspath(base)}|{st.st_mtime_ns}|{st.st_size}"
 
 
+# Fassung der Zwischenstände: erhöhen, wenn sich ändert, was zu einem Zwischenstand gespeichert wird
+CACHE_VERSION = "2"
+
+
 def key_of(k):
-    h = hashlib.sha1((seed + "\n" + json.dumps(features[: k + 1], sort_keys=True)).encode()).hexdigest()
+    h = hashlib.sha1((CACHE_VERSION + "\n" + seed + "\n" + json.dumps(features[: k + 1], sort_keys=True)).encode()).hexdigest()
     return os.path.join(cache, h + ".brep")
 
 
@@ -1249,6 +1361,14 @@ if not loaded and base:
 
 sketches = {f["id"]: f for f in features[:start] if f["type"] == "sketch"}
 status = [{"id": f["id"], "ok": True} for f in features[:start]]
+if loaded and start:
+    # Meldungen (z. B. Warnungen) der zwischengespeicherten Features wieder mitgeben
+    try:
+        saved = json.load(open(key_of(start - 1) + ".status.json", encoding="utf-8"))
+        if [x["id"] for x in saved] == [x["id"] for x in status]:
+            status = saved
+    except Exception:
+        pass
 failed = False
 for k in range(start, len(features)):
     f = features[k]
@@ -1267,6 +1387,7 @@ for k in range(start, len(features)):
         if not os.path.exists(good):
             save_state(good)
     try:
+        before = set(t for _, t in volumes())
         fn = FEATURES.get(f["type"])
         if f["type"] == "pattern":
             feat_pattern(f, sketches, warn, by_id)
@@ -1279,12 +1400,16 @@ for k in range(start, len(features)):
         cleanup()
         if not volumes():
             raise Problem("Es ist kein Körper entstanden")
+        if f.get("mode") == "new" and f["type"] in ("extrude", "revolve"):
+            new_bodies(f, before, warn)
         s = {"id": f["id"], "ok": True}
         if warn:
             s["warn"] = warn
         status.append(s)
         if cache:
             save_state(key_of(k))
+            with open(key_of(k) + ".status.json", "w", encoding="utf-8") as fh:
+                json.dump(status, fh)
     except Exception as ex:
         msg = str(ex) if isinstance(ex, Problem) else f"{f['type']}: Die Geometrie lässt sich so nicht erzeugen ({str(ex).strip().splitlines()[-1] if str(ex).strip() else type(ex).__name__})"
         status.append({"id": f["id"], "ok": False, "error": msg})
@@ -1314,11 +1439,26 @@ if rid is not None:
         except Exception:
             regs = []
         cleanup()
-    result["regions"] = [{"pt": r["pt"], "area": r["area"], "loops": r["loops"], "evenodd": r["evenodd"], "fill": in_fills(r["pt"], sk.get("fills"))} for r in regs]
+    result["regions"] = [
+        {
+            "pt": r["pt"],
+            "area": r["area"],
+            "loops": r["loops"],
+            "evenodd": r["evenodd"],
+            "fill": in_fills(r["pt"], sk.get("fills")),
+            "groups": sorted({x["group"] for x in sk.get("fills") or [] if isinstance(x, dict) and inside_poly(r["pt"], x["loops"])}),
+        }
+        for r in regs
+    ]
+
+if volumes():
+    names = body_names()
+    result["bodies_info"] = [{"name": names[i], "volume": occ.getMass(3, t), "center": list(occ.getCenterOfMass(3, t))} for i, (_, t) in enumerate(volumes())]
 
 if job.get("output") and volumes() and not failed:
     cleanup()
     gmsh.write(job["output"])
+    step_with_names(job["output"])
     result["step"] = job["output"]
 
 if job.get("tess", True):

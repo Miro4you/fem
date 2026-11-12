@@ -213,6 +213,17 @@ pub fn mesh_step(step: &Path, opts: &MeshOptions) -> Result<Mesh> {
 
 /// Wie `mesh_step`, mit Fortschritt und Abbrechen
 pub fn mesh_step_with(step: &Path, opts: &MeshOptions, progress: &crate::Progress) -> Result<Mesh> {
+    match mesh_step_once(step, opts, progress, false) {
+        // fast deckungsgleiche Flächen zweier Körper (Spalt weit unter der Elementgröße, z. B. aus einer ungenauen
+        // Skizze): nochmal mit Verschmelz-Toleranz beim Zusammenfügen der Körper
+        Err(FemError::Gmsh(m)) if m.contains("overlapping facets") || m.contains("Invalid boundary mesh") => {
+            mesh_step_once(step, opts, progress, true)
+        }
+        r => r,
+    }
+}
+
+fn mesh_step_once(step: &Path, opts: &MeshOptions, progress: &crate::Progress, fuzzy: bool) -> Result<Mesh> {
     let gmsh = find_gmsh().ok_or_else(|| {
         FemError::Gmsh("Gmsh nicht gefunden – installieren (z. B. `uv tool install gmsh`) oder FEM_GMSH setzen".into())
     })?;
@@ -235,7 +246,7 @@ pub fn mesh_step_with(step: &Path, opts: &MeshOptions, progress: &crate::Progres
         r#"SetFactory("OpenCASCADE");
 Geometry.OCCTargetUnit = "MM";
 Merge "{step}";
-{exclude}Coherence;
+{exclude}{fuzzy}Coherence;
 Save "{xao}";
 {size}
 // kleinste Elementgröße begrenzen: an Kegelspitzen (Bohrspitzen 118°) läuft die Krümmung gegen unendlich und die
@@ -273,6 +284,12 @@ Save "{msh}";
             format!("Recursive Delete {{ Volume{{{}}}; }}\n", opts.exclude.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", "))
         },
         curv = opts.curvature_points,
+        fuzzy = if fuzzy {
+            "vf() = Volume \"*\";\nbf() = BoundingBox Volume{vf()};\n\
+             Geometry.ToleranceBoolean = 1.5e-4 * Sqrt((bf(3)-bf(0))^2 + (bf(4)-bf(1))^2 + (bf(5)-bf(2))^2);\n"
+        } else {
+            ""
+        },
         fields = refine_fields(&opts.refine),
         order = if opts.order == Order::Quadratic { 2 } else { 1 },
     );

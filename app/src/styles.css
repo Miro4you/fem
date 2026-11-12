@@ -792,3 +792,7 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-planelabel { font-size: 11px; color: var(--muted); white-space: nowrap; transform: translate(-100%, -100%); }
 .cad-normal-btn { font-size: 16px; font-weight: 700; }
 .cad-regions { display: flex; flex-direction: column; gap: 6px; }
+.cad-part { gap: 4px; padding: 8px; }
+.cad-part .row { align-items: center; }
+.cad-part select { flex: 1; min-width: 0; height: 28px; }
+.input-unit.mini { width: 90px; }

@@ -402,8 +402,8 @@ export default function CadView({
       const st = regionState?.[i] ?? {}
       const hov = i === regionHover
       const col = st.on ? 0x2563eb : st.used ? 0x64748b : 0x94a3b8
-      mesh.material.color.set(hov ? (st.on ? 0x1d4ed8 : 0x60a5fa) : col)
-      mesh.material.opacity = st.on ? (hov ? 0.5 : 0.36) : st.used ? (hov ? 0.4 : 0.28) : hov ? 0.3 : 0.1
+      mesh.material.color.set(st.hl ? 0xf59e0b : hov ? (st.on ? 0x1d4ed8 : 0x60a5fa) : col)
+      mesh.material.opacity = st.hl ? 0.55 : st.on ? (hov ? 0.5 : 0.36) : st.used ? (hov ? 0.4 : 0.28) : hov ? 0.3 : 0.1
     }
     s.dirty = true
   }, [regionState, regionHover, regions?.list])

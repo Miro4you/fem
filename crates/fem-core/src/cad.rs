@@ -204,6 +204,53 @@ mod tests {
         assert!(r["status"][1]["error"].as_str().unwrap().contains("keine Fläche gewählt"), "{}", r["status"]);
     }
 
+    /// Baugruppe aus einer Schnittzeichnung: zwei Schraffur-Gruppen → zwei benannte Drehkörper, die sich berühren;
+    /// ein dritter, überschneidender Körper bekommt die Überschneidung abgezogen; Namen kommen bis ins Netz
+    #[test]
+    fn baugruppe_aus_schraffuren() {
+        let xz = json!({"origin": [0, 0, 0], "normal": [0, -1, 0], "u": [1, 0, 0]});
+        // Welle r = 10 (beide Hälften gezeichnet), Buchse r = 10…16 darüber; Achse ist die z-Achse (u = 0)
+        let mut ents = rect(-10.0, 0.0, 10.0, 60.0);
+        ents.extend(rect(10.0, 20.0, 16.0, 40.0));
+        ents.extend(rect(-16.0, 20.0, -10.0, 40.0));
+        ents.push(json!({"t": "line", "a": [0, -5], "b": [0, 65]}));
+        let sq = |x0: f64, y0: f64, x1: f64, y1: f64| json!([[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]);
+        let fills = json!([
+            {"loops": [sq(-10.0, 0.0, 10.0, 60.0)], "group": "welle"},
+            {"loops": [sq(10.0, 20.0, 16.0, 40.0)], "group": "buchse"},
+            {"loops": [sq(-16.0, 20.0, -10.0, 40.0)], "group": "buchse"},
+        ]);
+        let axis = json!({"a": [0, -5], "b": [0, 65]});
+        let features = json!([
+            {"id": 1, "type": "sketch", "plane": xz, "ents": ents, "fills": fills},
+            {"id": 2, "type": "revolve", "sketch": 1, "axis": axis, "angle": 360, "mode": "new", "fills": {"group": "welle"}, "bodyName": "Welle"},
+            {"id": 3, "type": "revolve", "sketch": 1, "axis": axis, "angle": 360, "mode": "new", "fills": {"group": "buchse"}, "bodyName": "Buchse"},
+            // Scheibe, die in die Buchse hineinragt (r 0…20, z 35…45): Überschneidung wird abgezogen
+            {"id": 4, "type": "sketch", "plane": {"origin": [0, 0, 35], "normal": [0, 0, 1], "u": [1, 0, 0]}, "ents": [{"t": "circle", "c": [0, 0], "r": 20}]},
+            {"id": 5, "type": "extrude", "sketch": 4, "mode": "new", "depth": 10, "dir": 1, "bodyName": "Deckel"},
+        ]);
+        let out = work_dir().join(format!("test-{}", std::process::id())).join("baugruppe.step");
+        let Some(r) = run(features, None, Some(out.clone())) else { return };
+        let st = r["status"].as_array().unwrap();
+        assert!(st.iter().all(|s| s["ok"] == true), "{}", r["status"]);
+        assert!(st[4]["warn"][0].as_str().unwrap().contains("überschneidet"), "{}", st[4]);
+        let pi = std::f64::consts::PI;
+        let welle = pi * 100.0 * 60.0;
+        let buchse = pi * (256.0 - 100.0) * 20.0;
+        // Deckel: Zylinder r 20, z 35…45, ohne Welle (z 35…45) und ohne Buchse (z 35…40)
+        let deckel = pi * 400.0 * 10.0 - pi * 100.0 * 10.0 - pi * (256.0 - 100.0) * 5.0;
+        let v = r["volume"].as_f64().unwrap();
+        assert!((v - (welle + buchse + deckel)).abs() < 1e-4 * v, "{v} statt {}", welle + buchse + deckel);
+        let mut names: Vec<String> = r["bodies_info"].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap().to_string()).collect();
+        names.sort();
+        assert_eq!(names, vec!["Buchse", "Deckel", "Welle"]);
+        // Namen in der STEP-Datei → im Netz
+        let mesh = crate::gmsh::mesh_step(&out, &crate::gmsh::MeshOptions { size: Some(4.0), ..Default::default() }).unwrap();
+        let mut mn: Vec<String> = mesh.bodies().iter().map(|&b| mesh.body_name(b)).collect();
+        mn.sort();
+        assert_eq!(mn, vec!["Buchse", "Deckel", "Welle"]);
+    }
+
     /// Drehteil und überlappende Formen ohne Trimmen (Bereiche einzeln wählbar)
     #[test]
     fn drehteil_und_bereiche() {

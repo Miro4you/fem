@@ -39,6 +39,7 @@ import {
   PowerOff,
   PenOff,
   Tags,
+  Boxes,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -56,7 +57,8 @@ import {
   num,
 } from './features.js'
 import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure, kernelSketch } from './sketch.js'
-import { readDraftpad, defaultLayers, importDraftpad } from './draftpad.js'
+import { readDraftpad, defaultLayers, importDraftpad, fillLoops } from './draftpad.js'
+import { suggestParts, partFeatures } from './parts.js'
 
 const FEATURE_ICON = {
   sketch: Pencil,
@@ -161,6 +163,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const [showSketches, setShowSketches] = useState(true) // fertige Skizzen im Hintergrund zeigen
   const [selSketch, setSelSketch] = useState(null) // im Bild angeklickte Skizze (im Verlauf markiert)
   const [showGlyphs, setShowGlyphs] = useState(null) // Bedingungszeichen: null = automatisch (bis 40)
+  const [parts, setParts] = useState(null) // Teile aus Schraffuren: { sketchId, rows, subtract, hover }
   const [history, setHistory] = useState({ undo: [], redo: [] })
   const skHist = useRef({ undo: [], redo: [] })
   const viewRef = useRef(null)
@@ -298,6 +301,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     const list = edit.isNew ? [...features, d] : features.map((f) => (f.id === d.id ? d : f))
     commitFeatures(list)
     if (d.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
+    // Skizze mit Schraffuren (Draftpad), noch nicht benutzt: Teile vorschlagen
+    if (d.type === 'sketch' && d.sketch?.fills?.length && !list.some((f) => f.sketch === d.id && f.type !== 'sketch')) openParts(d)
     if (next) {
       // gleich das nächste Feature mit derselben Skizze, nichts gewählt
       const id = featureId(list)
@@ -312,6 +317,19 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     setSel(emptySel)
     setSkInfo(null)
   }
+  const openParts = (f) => {
+    const rows = suggestParts(f.sketch)
+    if (!rows.length) return note('In dieser Skizze sind keine Schraffuren')
+    setParts({ sketchId: f.id, rows, subtract: true, hover: null })
+  }
+  const createParts = () => {
+    const made = partFeatures(features, parts.sketchId, parts.rows, parts.subtract)
+    if (!made.length) return note('Kein Teil gewählt')
+    commitFeatures([...features, ...made])
+    setParts(null)
+    note(`${made.length} Teil${made.length > 1 ? 'e' : ''} angelegt: ${made.map((f) => f.name).join(', ')}`)
+  }
+
   const cancel = () => {
     if (edit?.draft.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
     setEdit(null)
@@ -610,7 +628,14 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const regionInfo = regionKey ? (regionCache.get(regionKey) ?? null) : null
   const anyFill = !!regionInfo?.some((r) => r.fill)
   const pickPt = (p) => (Array.isArray(p) ? p : p.pt)
-  const onOf = (d, r) => (d.regions == null ? (d.useFills !== false && anyFill ? r.fill : r.evenodd) : d.regions.some((p) => insidePoly(pickPt(p), r.loops)))
+  const onOf = (d, r) =>
+    d.regions == null
+      ? d.fillGroup
+        ? (r.groups ?? []).includes(d.fillGroup)
+        : d.useFills !== false && anyFill
+          ? r.fill
+          : r.evenodd
+      : d.regions.some((p) => insidePoly(pickPt(p), r.loops))
   // andere Features derselben Skizze: welche Flächen sie schon benutzen
   const regionState = useMemo(() => {
     if (!regionInfo || !regionDraft) return null
@@ -630,8 +655,24 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   }, [regionInfo, regionDraft?.sketch, edit?.id])
   const setPicks = (on) => setDraft({ regions: regionInfo.filter((_, k) => on[k]).map((r) => ({ pt: r.pt, area: r.area })) })
   const loopArea = (lp) => Math.abs(lp.reduce((a, p, k) => (k ? a + (lp[k - 1][0] * p[1] - p[0] * lp[k - 1][1]) : a), 0) / 2)
+  const partsSketch = parts ? features.find((f) => f.id === parts.sketchId)?.sketch : null
+  const partsFills = useMemo(() => (partsSketch?.fills ?? []).map((f) => ({ loops: fillLoops(f), group: f.group, area: 0 })), [partsSketch])
+  const partsRegions = partsSketch
+    ? {
+        plane: partsSketch.plane,
+        list: partsFills,
+        state: partsFills.map((f) => {
+          const row = parts.rows.find((r) => r.group === f.group)
+          return { on: !!row?.on, hl: parts.hover === f.group }
+        }),
+        hover: -1,
+        onHover: (i) => setParts((p) => (p ? { ...p, hover: partsFills[i]?.group ?? null } : p)),
+        onToggle: (i) => setParts((p) => ({ ...p, rows: p.rows.map((r) => (r.group === partsFills[i].group ? { ...r, on: !r.on } : r)) })),
+      }
+    : null
   const regions =
-    regionInfo && regionState && regionSketch && pickFor !== 'skaxis'
+    partsRegions ??
+    (regionInfo && regionState && regionSketch && pickFor !== 'skaxis'
       ? {
           plane: regionSketch.plane,
           list: regionInfo,
@@ -651,7 +692,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             setPicks(on)
           },
         }
-      : null
+      : null)
   const regionTools = regionInfo
     ? {
         count: regionInfo.length,
@@ -662,6 +703,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         fills: () => setPicks(regionInfo.map((r) => r.fill)),
         free: () => setPicks(regionInfo.map((_, k) => !regionState?.[k]?.used)),
         auto: () => setDraft({ regions: null }),
+        groupLabel: regionDraft?.fillGroup ? (regionSketch?.fills ?? []).find((f) => f.group === regionDraft.fillGroup)?.label ?? 'Schraffur' : null,
       }
     : null
   const regionHint = regionHover >= 0 && regionState?.[regionHover]?.used && !regionState[regionHover].on ? `Diese Fläche benutzt schon „${regionState[regionHover].used}“` : null
@@ -777,7 +819,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   return (
     <div className="cad-studio">
       <aside className="sidebar cad-side">
-        {!edit && (
+        {parts && !edit && <PartsDialog parts={parts} setParts={setParts} sketch={partsSketch} onCreate={createParts} />}
+        {!edit && !parts && (
           <>
             <section className="section">
               <h2>
@@ -807,6 +850,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     {(st?.error || prob) && !f.suppressed && <TriangleAlert size={13} className="bad-icon" />}
                     {st?.warn && <Info size={13} className="warn-icon" />}
                     <span className="spacer" />
+                    {f.type === 'sketch' && !f.suppressed && f.sketch?.fills?.length > 0 && (
+                      <button className="icon-btn keep" title="Teile aus den Schraffuren anlegen (je Schraffur-Art ein Körper)" onClick={() => openParts(f)}>
+                        <Boxes size={13} />
+                      </button>
+                    )}
                     {f.type === 'sketch' && !f.suppressed && (
                       <button
                         className={'icon-btn' + (f.hidden ? ' keep' : '')}
@@ -1090,15 +1138,28 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
     </label>
   )
   const modeSel = (
-    <Seg
-      value={d.mode}
-      onChange={(mode) => setDraft({ mode })}
-      options={[
-        ['add', 'Dazu'],
-        ['cut', 'Weg'],
-        ['new', 'Neuer Körper'],
-      ]}
-    />
+    <>
+      <Seg
+        value={d.mode}
+        onChange={(mode) => setDraft({ mode })}
+        options={[
+          ['add', 'Dazu'],
+          ['cut', 'Weg'],
+          ['new', 'Neuer Körper'],
+        ]}
+      />
+      {d.mode === 'new' && (
+        <>
+          <label className="field">
+            <span>Körpername (erscheint in der Rechnung)</span>
+            <input value={d.bodyName ?? ''} placeholder="z. B. Welle" onChange={(e) => setDraft({ bodyName: e.target.value })} />
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={d.subtract !== false} onChange={(e) => setDraft({ subtract: e.target.checked })} /> Überschneidung mit anderen Körpern abziehen
+          </label>
+        </>
+      )}
+    </>
   )
   const featurePick = (
     <div className="cad-feat-pick">
@@ -1501,7 +1562,7 @@ function DraftpadPanel({ dp, setDp, onImport }) {
             }}
           />
           <span style={{ opacity: l.visible ? 1 : 0.6 }}>
-            {l.name} <small className="muted">({l.lines} Linien, {l.arcs} Bögen/Kreise{l.strokes ? `, ${l.strokes} Freihand – bleiben weg` : ''})</small>
+            {l.name} <small className="muted">({l.lines} Linien, {l.arcs} Bögen/Kreise{l.strokes ? `, ${l.strokes} Freihand – nur Bruchlinien, die Konturen schließen` : ''})</small>
           </span>
         </label>
       ))}
@@ -1523,7 +1584,7 @@ function DraftpadPanel({ dp, setDp, onImport }) {
           <input type="checkbox" checked={o.fills} onChange={(e) => set({ fills: e.target.checked })} /> Schraffierte Flächen als Material vorwählen
         </label>
       )}
-      <p className="hint">Strich-Punkt-Linien und Achsen werden Hilfslinien (eine Achse ist dann gleich die Drehachse für „Drehen“). Freihand-Striche und Texte bleiben weg.</p>
+      <p className="hint">Strich-Punkt-Linien und Achsen werden Hilfslinien (eine Achse ist dann gleich die Drehachse für „Drehen“). Freihand-Striche bleiben weg – außer Bruchlinien, die an beiden Enden an Konturen anschließen.</p>
       <div className="row cad-ok">
         <button className="btn primary" disabled={!o.layers.size} onClick={onImport}>
           <Check size={15} /> Übernehmen
@@ -1539,7 +1600,14 @@ function DraftpadPanel({ dp, setDp, onImport }) {
 // Bereichswahl im Extrudieren/Drehen-Dialog
 function RegionTools({ d, t }) {
   if (!t) return <p className="hint">Flächen der Skizze werden geladen …</p>
-  const mode = d.regions == null ? (d.useFills !== false && t.anyFill ? 'schraffierte Flächen (automatisch)' : 'alle Flächen, Löcher frei (automatisch)') : `${t.chosen} von ${t.count} Flächen`
+  const mode =
+    d.regions == null
+      ? t.groupLabel
+        ? `${t.groupLabel} (${t.chosen} Flächen)`
+        : d.useFills !== false && t.anyFill
+          ? 'schraffierte Flächen (automatisch)'
+          : 'alle Flächen, Löcher frei (automatisch)'
+      : `${t.chosen} von ${t.count} Flächen`
   return (
     <div className="cad-regions">
       <span className="field-label">
@@ -1584,4 +1652,74 @@ function axisOptions(sk) {
 }
 function axisName(sk, id) {
   return axisOptions(sk).find((o) => o.id === id)?.label ?? null
+}
+
+// Teile aus den Schraffuren einer Draftpad-Skizze: je Schraffur-Art ein Körper
+function PartsDialog({ parts, setParts, sketch, onCreate }) {
+  const upd = (i, patch) => setParts({ ...parts, rows: parts.rows.map((r, k) => (k === i ? { ...r, ...patch } : r)) })
+  const axes = (sketch?.ents ?? []).filter((e) => e.t === 'line' && (e.axis || e.cons))
+  const len = (e) => Math.hypot(sketch.pts[e.b].x - sketch.pts[e.a].x, sketch.pts[e.b].y - sketch.pts[e.a].y)
+  return (
+    <section className="section cad-dialog">
+      <h2>
+        <Boxes size={15} /> Teile aus den Schraffuren
+      </h2>
+      <p className="hint">
+        Gleiche Schraffur (Richtung, Abstand) = ein Teil. Liegt ein Teil symmetrisch zu einer Achse, wird es gedreht, sonst extrudiert. Im Bild
+        anklicken = Teil an/aus; nicht schraffierte Flächen (Lager, Schrauben) danach mit Extrudieren/Drehen selbst anlegen.
+      </p>
+      {parts.rows.map((r, i) => (
+        <div
+          key={r.group}
+          className={'item cad-part' + (r.on ? '' : ' disabled') + (parts.hover === r.group ? ' active load' : '')}
+          onMouseEnter={() => setParts({ ...parts, hover: r.group })}
+          onMouseLeave={() => setParts({ ...parts, hover: null })}
+        >
+          <div className="item-head">
+            <input type="checkbox" checked={r.on} onChange={(e) => upd(i, { on: e.target.checked })} />
+            <input className="cad-name" value={r.name} onChange={(e) => upd(i, { name: e.target.value })} />
+          </div>
+          <small className="muted">
+            {r.count} Fläche{r.count === 1 ? '' : 'n'} · {r.label}
+          </small>
+          <div className="row">
+            <Seg
+              value={r.kind}
+              onChange={(kind) => upd(i, { kind, axis: kind === 'revolve' ? (r.axis ?? axes.find((e) => e.axis)?.id ?? axes[0]?.id ?? null) : r.axis })}
+              options={[
+                ['revolve', 'Drehen'],
+                ['extrude', 'Extrudieren'],
+              ]}
+            />
+            {r.kind === 'extrude' ? (
+              <div className="input-unit mini">
+                <input value={r.depth} inputMode="decimal" title="Tiefe (symmetrisch zur Skizze)" onChange={(e) => upd(i, { depth: e.target.value })} />
+                <em>mm</em>
+              </div>
+            ) : (
+              <select value={r.axis ?? ''} title="Drehachse" onChange={(e) => upd(i, { axis: e.target.value || null })}>
+                <option value="">– Achse –</option>
+                {axes.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.axis ? 'Achse' : 'Hilfslinie'} · {fmtN(len(e))} mm
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+      ))}
+      <label className="check">
+        <input type="checkbox" checked={parts.subtract} onChange={(e) => setParts({ ...parts, subtract: e.target.checked })} /> Überschneidungen vom jeweils neuen Teil abziehen
+      </label>
+      <div className="row cad-ok">
+        <button className="btn primary" disabled={!parts.rows.some((r) => r.on && (r.kind === 'extrude' || r.axis))} onClick={onCreate}>
+          <Check size={15} /> Anlegen
+        </button>
+        <button className="btn" onClick={() => setParts(null)}>
+          <X size={15} /> Später
+        </button>
+      </div>
+    </section>
+  )
 }

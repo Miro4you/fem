@@ -319,6 +319,10 @@ selbst starten.
 | 18e.5 | Skizze fertig › Extrudieren | schraffierte Flächen sind vorgewählt (blau), Körper entsteht | [ ] |
 | 18e.6 | Schnittzeichnung mit Mittellinie › Drehen | Achse aus Draftpad vorgewählt; Hinweis „nur die Hälfte auf einer Seite“; Drehkörper | [ ] |
 | 18e.7 | `.draftpad.json` auf das Fenster ziehen | neues Teil mit Import-Dialog | [ ] |
+| 18e.8 | `examples/draftpad/wellenschnitt.draftpad.json` importieren (Ebene XZ) › Skizze fertig | Dialog „Teile aus den Schraffuren“: 4 Teile; Platte = Extrudieren, die anderen = Drehen um die Achse (98 mm); Zeile überfahren = Flächen im Bild orange | [ ] |
+| 18e.9 | Namen vergeben (Grundplatte, Deckel, Flansch, Lagerringe) › Anlegen | je Teil ein Feature „Neuer Körper“ mit Namen; Hinweise zu losen Stücken/Überschneidungen am Feature | [ ] |
+| 18e.10 | In die Rechnung übernehmen | Hinweis „Baugruppe übernommen: n Körper (Namen), m Berührflächen – verklebt“; im Modell die Körper mit Namen | [ ] |
+| 18e.11 | Bruchlinie (Freihand) am Plattenende | wird als Kontur übernommen, die Platte ist eine geschlossene Fläche; freie Notizen bleiben weg | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
