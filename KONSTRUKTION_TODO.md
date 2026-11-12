@@ -117,7 +117,7 @@ liegt; Auge im Verlauf blendet sie aus; Drehen/Zoomen bleibt mit der Wellen-Zeic
 
 ---
 
-## C. Eine Skizze – viele Extrusionen (Bereichswahl wie in Onshape)
+## C. Eine Skizze – viele Extrusionen (Bereichswahl wie in Onshape) ✅ (erledigt)
 
 **Ist:** Technisch geht es schon (`regions` je Feature), aber: die Skizze ist nicht sichtbar, die Vorauswahl ist
 immer „automatisch“, es gibt kein Hervorheben unter der Maus, und beim Drehen ist die Achse nur über eine Liste

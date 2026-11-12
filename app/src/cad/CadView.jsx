@@ -121,6 +121,7 @@ export default function CadView({
       axes: new THREE.Group(),
       bgGroup: new THREE.Group(),
       regionGroup: new THREE.Group(),
+      axisGroup: new THREE.Group(),
       previewGroup: new THREE.Group(),
       labelPts: [],
       sketch: new THREE.Group(),
@@ -130,7 +131,7 @@ export default function CadView({
       size: 100,
       center: new THREE.Vector3(),
     }
-    scene.add(s.body, s.planes, s.axes, s.bgGroup, s.regionGroup, s.sketch, s.previewGroup, s.extra)
+    scene.add(s.body, s.planes, s.axes, s.bgGroup, s.regionGroup, s.axisGroup, s.sketch, s.previewGroup, s.extra)
     const pickPoint = (cx, cy) => {
       if (!s.surf) return null
       setRay(cx, cy)
@@ -241,8 +242,13 @@ export default function CadView({
     // einpassen beim ersten Körper oder wenn er viel größer/kleiner geworden ist
     const hasBody = !!tess?.triangles?.length
     if (!s.fitted || (hasBody && (!s.hadBody || s.size > 2.5 * (s.lastFit ?? 0) * 2 || s.size < 0.2 * (s.lastFit ?? 0) * 2))) {
+      // beim ersten Mal isometrisch, danach die Blickrichtung behalten (nur Abstand/Mitte anpassen)
+      if (!s.fitted) fitAll()
+      else {
+        const q = s.camera.quaternion
+        fitAll(new THREE.Vector3(0, 0, 1).applyQuaternion(q).toArray(), new THREE.Vector3(0, 1, 0).applyQuaternion(q).toArray())
+      }
       s.fitted = true
-      fitAll()
     }
     s.hadBody = hasBody
     s.dirty = true
@@ -357,31 +363,55 @@ export default function CadView({
   // --- Skizze, Bereiche, Achse, Hintergrund-Skizzen ------------------------------------------------
   const skData = sketch?.data
   const skPlane = sketch?.plane
-  const hoverSk = hover?.pt ? 'p:' + hover.pt : hover?.ent ? 'e:' + hover.ent : ''
+  const hoverSk = hover?.pt ? 'p:' + hover.pt : hover?.ent && !hover.bgEnt ? 'e:' + hover.ent : ''
   const hoverBg = hover?.bg ?? null
+  const hoverBgEnt = hover?.bgEnt ? hover.ent : null
 
-  // Bereiche (Extrudieren/Drehen) und Drehachse
+  // Bereiche (Extrudieren/Drehen): Flächen einmal bauen, Farben getrennt nachführen
   useEffect(() => {
     const s = ctx.current
     clearGroup(s.regionGroup)
+    s.regionMeshes = []
     if (regions?.list?.length) {
       const b = basis(regions.plane)
       const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...b.u), new THREE.Vector3(...b.v), new THREE.Vector3(...b.n)).setPosition(...b.o)
-      regions.list.forEach((r) => {
+      regions.list.forEach((r, i) => {
         const loops = r.loops.filter((lp) => lp.length >= 3)
         if (!loops.length) return
         const shapes = loops.map((lp) => new THREE.Shape(lp.map(([x, y]) => new THREE.Vector2(x, y))))
         const [outer, ...holes] = shapes.sort((a, c) => Math.abs(THREE.ShapeUtils.area(c.getPoints())) - Math.abs(THREE.ShapeUtils.area(a.getPoints())))
         outer.holes = holes
-        const mesh = new THREE.Mesh(
-          new THREE.ShapeGeometry(outer),
-          front(new THREE.MeshBasicMaterial({ color: r.on ? 0x2563eb : 0x94a3b8, opacity: r.on ? 0.35 : 0.12, side: THREE.DoubleSide, depthWrite: false })),
-        )
+        const mesh = new THREE.Mesh(new THREE.ShapeGeometry(outer), front(new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, depthWrite: false })))
         mesh.applyMatrix4(m)
         mesh.renderOrder = 12
+        mesh.userData.index = i
         s.regionGroup.add(mesh)
+        s.regionMeshes[i] = mesh
       })
     }
+    s.regionStamp = (s.regionStamp ?? 0) + 1
+    s.dirty = true
+  }, [regions?.list, regions?.plane])
+
+  const regionState = regions?.state
+  const regionHover = regions?.hover ?? -1
+  useEffect(() => {
+    const s = ctx.current
+    for (const [i, mesh] of (s.regionMeshes ?? []).entries()) {
+      if (!mesh) continue
+      const st = regionState?.[i] ?? {}
+      const hov = i === regionHover
+      const col = st.on ? 0x2563eb : st.used ? 0x64748b : 0x94a3b8
+      mesh.material.color.set(hov ? (st.on ? 0x1d4ed8 : 0x60a5fa) : col)
+      mesh.material.opacity = st.on ? (hov ? 0.5 : 0.36) : st.used ? (hov ? 0.4 : 0.28) : hov ? 0.3 : 0.1
+    }
+    s.dirty = true
+  }, [regionState, regionHover, regions?.list])
+
+  // Drehachse
+  useEffect(() => {
+    const s = ctx.current
+    clearGroup(s.axisGroup)
     if (axisLine) {
       const a = to3d(axisLine.plane, axisLine.a)
       const c = to3d(axisLine.plane, axisLine.b)
@@ -390,10 +420,10 @@ export default function CadView({
       const l = new THREE.Line(g, front(new THREE.LineDashedMaterial({ color: 0xdc2626, dashSize: s.size / 60, gapSize: s.size / 90 })))
       l.computeLineDistances()
       l.renderOrder = 25
-      s.regionGroup.add(l)
+      s.axisGroup.add(l)
     }
     s.dirty = true
-  }, [regions, axisLine])
+  }, [axisLine])
 
   // Hintergrund-Skizzen (fertige Skizzen bleiben sichtbar)
   useEffect(() => {
@@ -408,6 +438,14 @@ export default function CadView({
         const pts = polyline(k.data, e, 48).map((q) => to3d(k.plane, q))
         const out = e.cons ? dashed : solid
         for (let i = 0; i + 1 < pts.length; i++) out.push(...pts[i], ...pts[i + 1])
+      }
+      // Element unter dem Zeiger (z. B. beim Wählen der Drehachse) hervorheben
+      const he = hoverBg === k.id && hoverBgEnt && k.data.ents.find((e) => e.id === hoverBgEnt)
+      if (he && k.highlightEnts) {
+        const pts = polyline(k.data, he, 48).map((q) => new THREE.Vector3(...to3d(k.plane, q)))
+        const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), front(new THREE.LineBasicMaterial({ color: 0xf59e0b })))
+        l.renderOrder = 13
+        s.bgGroup.add(l)
       }
       const color = strong ? 0x2563eb : 0x64748b
       const opacity = strong ? 0.9 : 0.55
@@ -428,7 +466,7 @@ export default function CadView({
       }
     }
     s.dirty = true
-  }, [sketches, hoverBg])
+  }, [sketches, hoverBg, hoverBgEnt])
 
   // bearbeitete Skizze: Linien (zu wenigen Objekten zusammengefasst), Punkte, Ursprung, Maßlinien
   useEffect(() => {
@@ -709,10 +747,10 @@ export default function CadView({
         for (const e of k.data.ents) {
           if (e.t === 'point') continue
           const d = distTo(k.data, e, q)
-          if (d < tol && (!best || d / tol < best.d)) best = { id: k.id, d: d / tol }
+          if (d < tol && (!best || d / tol < best.d)) best = { id: k.id, ent: e.id, d: d / tol }
         }
       }
-      return best?.id ?? null
+      return best
     }
 
     const refsOf = (plane) => {
@@ -803,8 +841,8 @@ export default function CadView({
       }
       const want = cb.current.pick
       if (!want) {
-        const id = bgHit(ev)
-        const nh = id != null ? { bg: id } : null
+        const h = bgHit(ev)
+        const nh = h ? { bg: h.id, ent: h.ent, bgEnt: true } : null
         return setHover((o) => (JSON.stringify(o) === JSON.stringify(nh) ? o : nh))
       }
       const h = pick3d(ev, want)
@@ -890,7 +928,8 @@ export default function CadView({
       if (sk) return sketchClick(ev, sk)
       const want = cb.current.pick
       if (!want) {
-        cb.current.onSketchPick?.(bgHit(ev), false)
+        const h = bgHit(ev)
+        cb.current.onSketchPick?.(h?.id ?? null, false, h?.ent ?? null)
         return
       }
       const h = pick3d(ev, want)
@@ -1089,8 +1128,8 @@ export default function CadView({
       }
       // Doppelklick auf eine Hintergrund-Skizze: bearbeiten
       if (!cb.current.pick) {
-        const id = bgHit(ev)
-        if (id != null) return cb.current.onSketchPick?.(id, true)
+        const h = bgHit(ev)
+        if (h) return cb.current.onSketchPick?.(h.id, true, h.ent)
       }
       // Doppelklick auf ebene Fläche: Blick senkrecht darauf
       const h = pick3d(ev, { planar: true })
@@ -1284,24 +1323,56 @@ export default function CadView({
 
 // Klicks auf Bereiche (Extrudieren/Drehen) abfangen, ohne den Skizzierer zu stören
 function RegionClicks({ regions, ctx, onPlane }) {
+  // nur die Teile, die sich selten ändern, als Abhängigkeit (sonst bei jedem Hover neu anmelden)
+  const ref = useRef(regions)
+  ref.current = regions
   useEffect(() => {
     const canvas = ctx.current.renderer.domElement
     let down = null
+    let pending = false
+    const find = (e) => {
+      const r = ref.current
+      const q = onPlane(e, r.plane)
+      if (!q) return -1
+      // innere Bereiche (kleinere Fläche) vor äußeren – die Ränder liegen genau aufeinander
+      let best = -1
+      let bestArea = Infinity
+      r.list.forEach((x, i) => {
+        if (insideLoops(q, x.loops) && (x.area ?? 0) < bestArea) {
+          best = i
+          bestArea = x.area ?? 0
+        }
+      })
+      return best
+    }
     const d = (e) => (down = [e.clientX, e.clientY, e.button])
     const u = (e) => {
       if (!down || down[2] !== 0 || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return
-      const q = onPlane(e, regions.plane)
-      if (!q) return
-      const i = regions.list.findIndex((r) => insideLoops(q, r.loops))
-      if (i >= 0) regions.onToggle(i, q)
+      const i = find(e)
+      if (i >= 0) ref.current.onToggle(i, e.altKey)
     }
+    const m = (e) => {
+      if (pending) return
+      pending = true
+      requestAnimationFrame(() => {
+        pending = false
+        const i = find(e)
+        if (i !== (ref.current.hover ?? -1)) ref.current.onHover?.(i)
+      })
+    }
+    const leave = () => ref.current.onHover?.(-1)
     canvas.addEventListener('pointerdown', d)
     canvas.addEventListener('pointerup', u)
+    canvas.addEventListener('pointermove', m)
+    canvas.addEventListener('pointerleave', leave)
     return () => {
       canvas.removeEventListener('pointerdown', d)
       canvas.removeEventListener('pointerup', u)
+      canvas.removeEventListener('pointermove', m)
+      canvas.removeEventListener('pointerleave', leave)
     }
-  }, [regions, ctx, onPlane])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx])
   return null
 }
 

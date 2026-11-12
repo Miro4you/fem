@@ -303,6 +303,10 @@ selbst starten.
 | 18d.17 | Skizze fertig, dann extrudieren/drehen | Skizze bleibt als dünne Linien im Raum (auch vor dem Körper); vom offenen Feature benutzte Skizze blau | [ ] |
 | 18d.18 | Skizzenlinie im Bild anklicken / doppelklicken; Auge an der Skizze im Verlauf; Knopf „Skizzen“ in der Leiste | Skizze im Verlauf markiert / zum Bearbeiten geöffnet; einzeln bzw. alle aus- und einblenden; Ein/Aus-Knopf = unterdrücken | [ ] |
 | 18d.19 | Große Draftpad-Skizze bearbeiten | Bedingungszeichen automatisch aus (Knopf „Bedingungen“ zeigt sie), Ziehen/Hover flüssig | [ ] |
+| 18d.20 | Skizze: Rechteck mit zwei Kreisen › Extrudieren › „Keine“ › Platte anklicken › Tiefe 10 › „OK und weiter“ | OK gesperrt, solange nichts gewählt; „1 von 3 Flächen“; neues Extrudieren mit derselben Skizze, nichts gewählt | [ ] |
+| 18d.21 | Maus über die Platte, dann linken Kreis anklicken, 25 › „OK und weiter“ › rechten Kreis, 4 › OK | Hinweis „benutzt schon Extrudieren 1“, Platte grau; Zapfen und Scheibe im Loch entstehen | [ ] |
+| 18d.22 | Alt + Klick auf eine Fläche mit Löchern; Knöpfe Alle/Keine/Noch freie/Schraffierte/Automatisch | Fläche samt Inhalt an/aus; Schnellwahl wirkt | [ ] |
+| 18d.23 | Drehen mit Draftpad-Skizze › „Drehachse“ › Linie im Bild anklicken | Achse aus Draftpad vorgewählt, Linie unter dem Zeiger orange, nach Klick gewählt; Liste: Achsen, Hilfslinien, Linien mit Länge | [ ] |
 
 ## 18e. Draftpad-Zeichnung als Skizze (neu)
 

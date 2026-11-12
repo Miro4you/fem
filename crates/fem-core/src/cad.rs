@@ -172,6 +172,38 @@ mod tests {
         assert!((r["volume"].as_f64().unwrap() - 12000.0).abs() < 1e-6);
     }
 
+    /// Eine Skizze, mehrere Extrusionen mit verschiedenen Flächen (wie in Onshape): Platte ohne die Kreise,
+    /// ein Kreis als Zapfen nach oben, der andere als Bohrung durch alles; leere Auswahl ist ein Fehler
+    #[test]
+    fn eine_skizze_mehrere_extrusionen() {
+        let xy = json!({"origin": [0, 0, 0], "normal": [0, 0, 1], "u": [1, 0, 0]});
+        let mut ents = rect(0.0, 0.0, 80.0, 40.0);
+        ents.push(json!({"t": "circle", "c": [20, 20], "r": 6}));
+        ents.push(json!({"t": "circle", "c": [60, 20], "r": 8}));
+        let features = json!([
+            {"id": 1, "type": "sketch", "plane": xy, "ents": ents},
+            // Platte: nur die Fläche außerhalb der Kreise
+            {"id": 2, "type": "extrude", "sketch": 1, "mode": "add", "depth": 10, "dir": 1, "regions": [{"pt": [40, 5], "area": 0}]},
+            // Zapfen: linker Kreis, 25 hoch (steht 15 über der Platte)
+            {"id": 3, "type": "extrude", "sketch": 1, "mode": "add", "depth": 25, "dir": 1, "regions": [[20, 20]]},
+            // Deckel über allem und rechter Kreis als Bohrung durch alles
+            {"id": 4, "type": "extrude", "sketch": 1, "mode": "cut", "through": true, "dir": 1, "regions": [[60, 20]]},
+        ]);
+        let Some(r) = run(features.clone(), None, None) else { return };
+        assert!(r["status"].as_array().unwrap().iter().all(|s| s["ok"] == true), "{}", r["status"]);
+        let pi = std::f64::consts::PI;
+        let soll = (3200.0 - pi * 36.0 - pi * 64.0) * 10.0 + pi * 36.0 * 25.0;
+        let v = r["volume"].as_f64().unwrap();
+        assert!((v - soll).abs() < 1e-6 * soll, "{v} statt {soll}");
+        assert_eq!(r["bodies"], 1);
+
+        // leere Auswahl: verständlicher Fehler statt stiller automatischer Auswahl
+        let mut f2 = features.clone();
+        f2[1]["regions"] = json!([]);
+        let r = run(f2, None, None).unwrap();
+        assert!(r["status"][1]["error"].as_str().unwrap().contains("keine Fläche gewählt"), "{}", r["status"]);
+    }
+
     /// Drehteil und überlappende Formen ohne Trimmen (Bereiche einzeln wählbar)
     #[test]
     fn drehteil_und_bereiche() {

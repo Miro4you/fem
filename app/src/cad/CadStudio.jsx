@@ -55,7 +55,7 @@ import {
   axisOf,
   num,
 } from './features.js'
-import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure } from './sketch.js'
+import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure, kernelSketch } from './sketch.js'
 import { readDraftpad, defaultLayers, importDraftpad } from './draftpad.js'
 
 const FEATURE_ICON = {
@@ -215,7 +215,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     const list = [...features.slice(0, edit.index), edit.draft]
     const isSk = edit.draft.type === 'sketch'
     // unvollständig: Stand davor zeigen (der Kern bekommt nur fertige Features)
-    const regionsOf = edit.draft.type === 'extrude' || edit.draft.type === 'revolve' ? edit.draft.sketch : null
+    const regionsOf = null
     let stop = false
     const t = setTimeout(
       () =>
@@ -253,6 +253,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     const draft = { id, type, name: featureName(features, type), ...defaults(type) }
     const lastSketch = [...features].reverse().find((f) => f.type === 'sketch' && !f.suppressed)
     if (['extrude', 'revolve', 'hole'].includes(type) && lastSketch) draft.sketch = lastSketch.id
+    // Skizze schon von einem anderen Feature benutzt: nichts vorwählen, Flächen im Bild anklicken
+    if ((type === 'extrude' || type === 'revolve') && lastSketch && features.some((f) => (f.type === 'extrude' || f.type === 'revolve') && f.sketch === lastSketch.id && !f.suppressed))
+      draft.regions = []
     if (type === 'revolve' && lastSketch) {
       const line = lastSketch.sketch.ents.find((e) => e.t === 'line' && e.axis) ?? lastSketch.sketch.ents.find((e) => e.t === 'line' && e.cons) ?? null
       draft.axis = line?.id ?? null
@@ -286,15 +289,24 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   const setDraft = (patch) => setEdit((e) => (e ? { ...e, draft: { ...e.draft, ...(typeof patch === 'function' ? patch(e.draft) : patch) } } : e))
 
-  const accept = () => {
+  const accept = (next = false) => {
     if (!edit) return
     const d = edit.draft
     if (d.type === 'sketch' && !d.sketch) return cancel()
     const prob = problemOf(d, [...features.slice(0, edit.index), d])
     if (prob && d.type !== 'sketch') return note(prob)
-    const next = edit.isNew ? [...features, d] : features.map((f) => (f.id === d.id ? d : f))
-    commitFeatures(next)
+    const list = edit.isNew ? [...features, d] : features.map((f) => (f.id === d.id ? d : f))
+    commitFeatures(list)
     if (d.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
+    if (next) {
+      // gleich das nächste Feature mit derselben Skizze, nichts gewählt
+      const id = featureId(list)
+      const draft = { ...defaults(d.type), id, type: d.type, name: featureName(list, d.type), sketch: d.sketch, mode: d.mode, axis: d.axis, regions: [] }
+      setEdit({ id, draft, isNew: true, index: list.length })
+      setPickFor(null)
+      setRegionHover(-1)
+      return
+    }
     setEdit(null)
     setPickFor(null)
     setSel(emptySel)
@@ -427,7 +439,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         return
       }
       if (!sketchEdit) {
-        if (e.key === 'Escape' && edit) cancel()
+        if (e.key === 'Escape' && edit) {
+          if (pickFor) setPickFor(null)
+          else cancel()
+        }
         return
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -572,27 +587,84 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     return out
   }, [edit?.draft, viewTess])
 
-  // Bereiche zum Anklicken (Extrudieren/Drehen)
+  // Bereiche zum Anklicken (Extrudieren/Drehen) – direkt aus der Skizze, je Skizze einmal geholt
   const regionDraft = edit && (edit.draft.type === 'extrude' || edit.draft.type === 'revolve') ? edit.draft : null
-  const regionSketch = regionDraft ? features.find((f) => f.id === regionDraft.sketch)?.sketch : null
-  const useFill = !!regionDraft && regionDraft.useFills !== false && (preview?.regions ?? []).some((r) => r.fill)
-  const regionList = regionDraft && preview?.regions && regionSketch
-    ? preview.regions.map((r) => ({
-        loops: r.loops,
-        on: regionDraft.regions ? regionDraft.regions.some((q) => insidePoly(q, r.loops)) : useFill ? r.fill : r.evenodd,
-      }))
-    : null
-  const regions = regionList
+  const regionSketchF = regionDraft ? features.find((f) => f.id === regionDraft.sketch && f.type === 'sketch') : null
+  const regionSketch = regionSketchF?.sketch ?? null
+  const regionKey = regionSketch ? JSON.stringify(kernelSketch(regionSketchF.id, regionSketch)) : null
+  const [regionCache, setRegionCache] = useState(() => new Map())
+  const [regionHover, setRegionHover] = useState(-1)
+  useEffect(() => {
+    if (!regionKey || regionCache.has(regionKey)) return
+    let stop = false
+    const sk = JSON.parse(regionKey)
+    api
+      .cadBuild({ base: null, features: [sk], regions_of: sk.id, tess: false })
+      .then((r) => !stop && setRegionCache((m) => new Map(m).set(regionKey, r.regions ?? [])))
+      .catch((e) => !stop && onError(String(e)))
+    return () => {
+      stop = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionKey])
+  const regionInfo = regionKey ? (regionCache.get(regionKey) ?? null) : null
+  const anyFill = !!regionInfo?.some((r) => r.fill)
+  const pickPt = (p) => (Array.isArray(p) ? p : p.pt)
+  const onOf = (d, r) => (d.regions == null ? (d.useFills !== false && anyFill ? r.fill : r.evenodd) : d.regions.some((p) => insidePoly(pickPt(p), r.loops)))
+  // andere Features derselben Skizze: welche Flächen sie schon benutzen
+  const regionState = useMemo(() => {
+    if (!regionInfo || !regionDraft) return null
+    const others = features.filter((f) => (f.type === 'extrude' || f.type === 'revolve') && !f.suppressed && f.sketch === regionDraft.sketch && f.id !== regionDraft.id)
+    return regionInfo.map((r) => ({ on: onOf(regionDraft, r), used: others.find((f) => onOf(f, r))?.name ?? null }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionInfo, regionDraft, features, anyFill])
+  // neues Feature, Skizze mit vielen Flächen: nichts vorwählen (sonst wird alles auf einmal extrudiert)
+  const preChecked = useRef(null)
+  useEffect(() => {
+    if (!regionDraft || !regionInfo || !edit?.isNew) return
+    const k = `${edit.id}|${regionDraft.sketch}`
+    if (preChecked.current === k) return
+    preChecked.current = k
+    if (regionDraft.regions == null && regionInfo.length > 6) setDraft({ regions: [] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionInfo, regionDraft?.sketch, edit?.id])
+  const setPicks = (on) => setDraft({ regions: regionInfo.filter((_, k) => on[k]).map((r) => ({ pt: r.pt, area: r.area })) })
+  const loopArea = (lp) => Math.abs(lp.reduce((a, p, k) => (k ? a + (lp[k - 1][0] * p[1] - p[0] * lp[k - 1][1]) : a), 0) / 2)
+  const regions =
+    regionInfo && regionState && regionSketch && pickFor !== 'skaxis'
+      ? {
+          plane: regionSketch.plane,
+          list: regionInfo,
+          state: regionState,
+          hover: regionHover,
+          onHover: setRegionHover,
+          onToggle: (i, alt) => {
+            const on = regionState.map((x) => x.on)
+            const target = !on[i]
+            let idx = [i]
+            if (alt) {
+              // Fläche samt allem, was darin liegt (Löcher, Inseln)
+              const outer = [...regionInfo[i].loops].sort((p, q) => loopArea(q) - loopArea(p))[0]
+              idx = regionInfo.map((r, k) => (k === i || insidePoly(r.pt, [outer]) ? k : -1)).filter((k) => k >= 0)
+            }
+            for (const k of idx) on[k] = target
+            setPicks(on)
+          },
+        }
+      : null
+  const regionTools = regionInfo
     ? {
-        plane: regionSketch.plane,
-        list: regionList,
-        onToggle: (i) => {
-          const cur = regionList.map((r, k) => (k === i ? !r.on : r.on))
-          const pts = preview.regions.filter((_, k) => cur[k]).map((r) => r.pt)
-          setDraft({ regions: pts.length ? pts : null })
-        },
+        count: regionInfo.length,
+        chosen: regionState?.filter((x) => x.on).length ?? 0,
+        anyFill,
+        all: () => setPicks(regionInfo.map(() => true)),
+        none: () => setDraft({ regions: [] }),
+        fills: () => setPicks(regionInfo.map((r) => r.fill)),
+        free: () => setPicks(regionInfo.map((_, k) => !regionState?.[k]?.used)),
+        auto: () => setDraft({ regions: null }),
       }
     : null
+  const regionHint = regionHover >= 0 && regionState?.[regionHover]?.used && !regionState[regionHover].on ? `Diese Fläche benutzt schon „${regionState[regionHover].used}“` : null
   const axisLine = (() => {
     if (edit?.draft.type !== 'revolve' || !regionSketch || !edit.draft.axis) return null
     const e = regionSketch.ents.find((x) => x.id === edit.draft.axis)
@@ -606,10 +678,24 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     const used = edit?.draft?.sketch
     return features
       .filter((f) => f.type === 'sketch' && !f.suppressed && !f.hidden && f.id !== sketchEdit?.id && f.sketch?.ents?.length)
-      .map((f) => ({ id: f.id, plane: f.sketch.plane, data: f.sketch, active: used === f.id || selSketch === f.id }))
-  }, [features, showSketches, edit?.draft?.sketch, sketchEdit?.id, selSketch])
-  const onSketchPick = (id, open) => {
-    if (edit) return
+      .map((f) => ({ id: f.id, plane: f.sketch.plane, data: f.sketch, active: used === f.id || selSketch === f.id, highlightEnts: pickFor === 'skaxis' && used === f.id }))
+  }, [features, showSketches, edit?.draft?.sketch, sketchEdit?.id, selSketch, pickFor])
+  const onSketchPick = (id, open, ent) => {
+    if (edit) {
+      const d = edit.draft
+      if (pickFor === 'skaxis' && id === d.sketch && ent) {
+        const e = features.find((f) => f.id === id)?.sketch.ents.find((x) => x.id === ent)
+        if (e?.t !== 'line') return note('Als Drehachse eine gerade Linie anklicken')
+        setDraft({ axis: ent })
+        setPickFor(null)
+      } else if ((d.type === 'extrude' || d.type === 'revolve' || d.type === 'hole') && id != null && id !== d.sketch) {
+        // andere Skizze im Bild angeklickt: für dieses Feature übernehmen
+        const sk = features.find((f) => f.id === id)?.sketch
+        const axis = d.type === 'revolve' ? (sk?.ents.find((e) => e.t === 'line' && e.axis) ?? sk?.ents.find((e) => e.t === 'line' && e.cons))?.id ?? null : d.axis
+        setDraft({ sketch: id, regions: d.type === 'hole' ? d.regions : [], axis })
+      }
+      return
+    }
     const f = features.find((g) => g.id === id)
     if (!f) return setSelSketch(null)
     setSelSketch(id)
@@ -779,7 +865,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             edit={edit}
             features={features}
             setDraft={setDraft}
-            onOk={accept}
+            onOk={() => accept(false)}
+            onOkNext={() => accept(true)}
+            regionTools={regionTools}
             onCancel={cancel}
             pickFor={pickFor}
             setPickFor={setPickFor}
@@ -888,9 +976,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           {building && <Loader2 size={16} className="spin cad-busy" />}
           <input ref={fileRef} type="file" accept=".json,.draftpad" style={{ display: 'none' }} onChange={onDraftpadFile} />
         </div>
-        {(msg || pickFor) && (
+        {(msg || pickFor || regionHint) && (
           <div className="cad-hint">
             {msg ??
+              regionHint ??
               {
                 plane: 'Ebene wählen: Hauptebene (XY, XZ, YZ) oder ebene Fläche des Bauteils anklicken',
                 edges: 'Kanten anklicken (nochmal klicken = abwählen). Tangential anschließende Kanten kommen mit.',
@@ -900,6 +989,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 axis: 'Achse: Kreiskante, Zylinderfläche oder gerade Kante anklicken',
                 mplane: 'Spiegelebene: Hauptebene oder ebene Fläche anklicken',
                 cyl: 'Radius- oder Bohrungsfläche (Zylinder) anklicken',
+                skaxis: 'Drehachse: eine gerade Linie der Skizze anklicken (Esc bricht ab)',
               }[pickFor]}
           </div>
         )}
@@ -979,7 +1069,7 @@ function PickButton({ active, label, value, onClick }) {
   )
 }
 
-function FeatureDialog({ edit, features, setDraft, onOk, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
+function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
   const d = edit.draft
   const before = features.slice(0, edit.index)
   const sketches = before.filter((f) => f.type === 'sketch' && !f.suppressed)
@@ -1072,15 +1162,7 @@ function FeatureDialog({ edit, features, setDraft, onOk, onCancel, pickFor, setP
               <input type="checkbox" checked={d.symmetric} onChange={(e) => setDraft({ symmetric: e.target.checked })} /> Symmetrisch
             </label>
           </div>
-          <p className="hint">
-            Bereiche im Bild anklicken, um sie ein- oder auszuschließen (blau = dabei).{' '}
-            {d.regions ? '' : features.find((f) => f.id === d.sketch)?.sketch.fills?.length && d.useFills !== false ? 'Jetzt: die schraffierten Flächen aus Draftpad.' : 'Jetzt: alle Flächen der Skizze (Löcher bleiben frei).'}
-          </p>
-          {d.regions && (
-            <button className="btn small" onClick={() => setDraft({ regions: null })}>
-              Bereiche zurücksetzen
-            </button>
-          )}
+          <RegionTools d={d} t={regionTools} />
         </>
       )}
 
@@ -1088,23 +1170,28 @@ function FeatureDialog({ edit, features, setDraft, onOk, onCancel, pickFor, setP
         <>
           {sketchSel}
           {modeSel}
+          <PickButton
+            active={pickFor === 'skaxis'}
+            label="Drehachse"
+            value={axisName(features.find((f) => f.id === d.sketch)?.sketch, d.axis) ?? 'Linie im Bild anklicken'}
+            onClick={() => setPickFor(pickFor === 'skaxis' ? null : 'skaxis')}
+          />
           <label className="field">
-            <span>Drehachse (Linie der Skizze, gern als Hilfslinie)</span>
+            <span>oder aus der Liste</span>
             <select value={d.axis ?? ''} onChange={(e) => setDraft({ axis: e.target.value || null })}>
               <option value="">– wählen –</option>
-              {(features.find((f) => f.id === d.sketch)?.sketch.ents ?? [])
-                .filter((e) => e.t === 'line')
-                .map((e, i) => (
-                  <option key={e.id} value={e.id}>
-                    {e.cons ? 'Hilfslinie' : 'Linie'} {i + 1}
-                  </option>
-                ))}
+              {axisOptions(features.find((f) => f.id === d.sketch)?.sketch).map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
             </select>
           </label>
           <Num label="Winkel" unit="°" value={d.angle} onChange={(angle) => setDraft({ angle })} />
           <label className="check">
             <input type="checkbox" checked={d.symmetric} onChange={(e) => setDraft({ symmetric: e.target.checked })} /> Symmetrisch
           </label>
+          <RegionTools d={d} t={regionTools} />
         </>
       )}
 
@@ -1281,6 +1368,11 @@ function FeatureDialog({ edit, features, setDraft, onOk, onCancel, pickFor, setP
         <button className="btn primary" disabled={(!!prob && d.type !== 'sketch') || (d.type === 'sketch' && !d.sketch)} onClick={onOk}>
           <Check size={15} /> {d.type === 'sketch' ? 'Skizze fertig' : 'OK'}
         </button>
+        {(d.type === 'extrude' || d.type === 'revolve') && (
+          <button className="btn" disabled={!!prob} title="Übernehmen und gleich das nächste mit derselben Skizze anlegen (andere Flächen wählen)" onClick={onOkNext}>
+            OK und weiter
+          </button>
+        )}
         <button className="btn" onClick={onCancel}>
           <X size={15} /> Abbrechen
         </button>
@@ -1442,4 +1534,54 @@ function DraftpadPanel({ dp, setDp, onImport }) {
       </div>
     </section>
   )
+}
+
+// Bereichswahl im Extrudieren/Drehen-Dialog
+function RegionTools({ d, t }) {
+  if (!t) return <p className="hint">Flächen der Skizze werden geladen …</p>
+  const mode = d.regions == null ? (d.useFills !== false && t.anyFill ? 'schraffierte Flächen (automatisch)' : 'alle Flächen, Löcher frei (automatisch)') : `${t.chosen} von ${t.count} Flächen`
+  return (
+    <div className="cad-regions">
+      <span className="field-label">
+        Flächen: <b>{mode}</b>
+      </span>
+      <div className="cad-cons-row">
+        <button className="btn small" onClick={t.all}>
+          Alle
+        </button>
+        <button className="btn small" onClick={t.none}>
+          Keine
+        </button>
+        <button className="btn small" title="Alle Flächen, die noch kein anderes Feature dieser Skizze benutzt" onClick={t.free}>
+          Noch freie
+        </button>
+        {t.anyFill && (
+          <button className="btn small" onClick={t.fills}>
+            Schraffierte
+          </button>
+        )}
+        <button className="btn small" title="Außenkontur mit Löchern frei (bzw. Schraffuren aus Draftpad)" onClick={t.auto}>
+          Automatisch
+        </button>
+      </div>
+      <p className="hint">
+        Im Bild anklicken = Fläche dazu/weg (blau = dabei, grau = schon von einem anderen Feature benutzt). Alt + Klick = Fläche samt allem, was darin
+        liegt. Löcher sind eigene Flächen: weglassen = Loch bleibt frei.
+      </p>
+    </div>
+  )
+}
+
+// Drehachse: Name und Auswahlliste (Achsen aus Draftpad zuerst, dann Hilfslinien, dann übrige Linien mit Länge)
+function axisOptions(sk) {
+  if (!sk) return []
+  const len = (e) => Math.hypot(sk.pts[e.b].x - sk.pts[e.a].x, sk.pts[e.b].y - sk.pts[e.a].y)
+  const lines = sk.ents.filter((e) => e.t === 'line')
+  const rank = (e) => (e.axis ? 0 : e.cons ? 1 : 2)
+  return [...lines]
+    .sort((a, b) => rank(a) - rank(b) || len(b) - len(a))
+    .map((e) => ({ id: e.id, label: `${e.axis ? 'Achse (Draftpad)' : e.cons ? 'Hilfslinie' : 'Linie'} · ${fmtN(len(e))} mm` }))
+}
+function axisName(sk, id) {
+  return axisOptions(sk).find((o) => o.id === id)?.label ?? null
 }

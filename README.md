@@ -191,8 +191,10 @@ Reiter **„Konstruktion“** – oder auf der Startseite **„Neues Teil konstr
    deckungsgleich, Punkt auf, Mittelpunkt, symmetrisch, fixieren, Hilfslinie. Blau = noch frei, schwarz = bestimmt,
    oben steht „Voll bestimmt“ bzw. die Zahl der Freiheitsgrade. „Kante übernehmen“ holt Bauteilkanten in die Skizze.
    Strg+Z/Strg+Y, Entf löscht, Esc beendet das Werkzeug.
-2. **Extrudieren** (dazu / weg / neuer Körper, Tiefe, umkehren, symmetrisch, durch alles) – Bereiche der Skizze im Bild
-   an- und abwählen (überlappende Formen müssen nicht getrimmt werden). **Drehen** um eine Linie der Skizze
+2. **Extrudieren** (dazu / weg / neuer Körper, Tiefe, umkehren, symmetrisch, durch alles) – Flächen der Skizze im Bild
+   an- und abwählen (überlappende Formen müssen nicht getrimmt werden, Löcher sind eigene Flächen, Alt + Klick nimmt
+   eine Fläche samt Inhalt). Eine Skizze reicht für viele Features: „OK und weiter“ legt das nächste mit derselben
+   Skizze an, schon benutzte Flächen sind grau. Fertige Skizzen bleiben im Bild (Auge im Verlauf blendet aus). **Drehen** um eine Linie der Skizze
    (gern als Hilfslinie).
 3. **Bohrung** an den Punkten einer Skizze: Größe M3–M20 (Durchgang mittel), Durchmesser, Tiefe mit Bohrspitze oder
    durchgehend, Senkung für Zylinderkopf oder Senkkopf.

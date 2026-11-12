@@ -115,9 +115,11 @@ export function problemOf(f, features) {
       return f.sketch?.ents.length ? null : 'Skizze ist leer'
     case 'extrude':
       if (!has(f.sketch)) return 'Skizze wählen'
+      if (Array.isArray(f.regions) && !f.regions.length) return 'Flächen der Skizze im Bild anklicken'
       return f.through || pos(f.depth) ? null : 'Tiefe > 0 angeben'
     case 'revolve':
       if (!has(f.sketch)) return 'Skizze wählen'
+      if (Array.isArray(f.regions) && !f.regions.length) return 'Flächen der Skizze im Bild anklicken'
       if (!f.axis) return 'Drehachse wählen (Linie der Skizze)'
       return pos(f.angle) ? null : 'Winkel > 0 angeben'
     case 'hole':

@@ -357,10 +357,19 @@ def sketch_faces(sk, picks=None, what="Skizze", fills=False):
     if not regions:
         raise Problem(f"{what}: keine geschlossene Kontur – Linien müssen an den Enden zusammenhängen")
     chosen = None
+    if picks is not None and len(picks) == 0:
+        # bewusst nichts gewählt (nicht dasselbe wie „automatisch“)
+        occ.remove([(2, r["tag"]) for r in regions], recursive=True)
+        raise Problem(f"{what}: keine Fläche gewählt – Flächen der Skizze im Bild anklicken")
     if picks:
-        chosen = [r for r in regions if any(inside_poly(p, r["loops"]) for p in picks)]
+        # Punkt je gewählter Fläche: [u, v] oder { pt: [u, v], area }
+        pts = [p["pt"] if isinstance(p, dict) else p for p in picks]
+        chosen = [r for r in regions if any(inside_poly(p, r["loops"]) for p in pts)]
+        lost = sum(1 for p in pts if not any(inside_poly(p, r["loops"]) for r in regions))
         if not chosen:
-            raise Problem(f"{what}: die gewählten Bereiche gibt es nicht mehr – im Feature neu wählen")
+            raise Problem(f"{what}: die gewählten Flächen gibt es nicht mehr (Skizze geändert?) – im Feature neu wählen")
+        if lost:
+            raise Problem(f"{what}: {lost} von {len(pts)} gewählten Flächen gibt es nicht mehr (Skizze geändert?) – im Feature neu wählen")
     elif fills and sk.get("fills"):
         chosen = [r for r in regions if in_fills(r["pt"], sk["fills"])] or None
     if chosen is None:
