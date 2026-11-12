@@ -484,8 +484,7 @@ Browser-Tests mit Playwright (ist vorinstalliert): Chromium mit
 `.cad-tool` (Werkzeugknöpfe), `.cad-dialog` (Feature-Dialog), `.cad-side` (Verlauf), `.cad-status`
 (Freiheitsgrade), `.cad-hint` (Meldung), `.cad-dim` (Maße) bedienen und Screenshots ansehen.
 Flächen/Kanten trifft man, indem man die Maus rastert, bis `.cad-view .viewport-canvas` den Zeiger `pointer` hat.
-Beispielzeichnungen von Felix: zwei `.draftpad.json` (Wellenschnitt mit Lagern, Ventil-Kreuzstück) – bei Bedarf
-neu hochladen lassen; im Repo liegen sie nicht.
+Beispielzeichnungen von Felix: `examples/draftpad/*.draftpad.json` (Wellenschnitt mit Lagern, Ventil-Kreuzstück).
 
 Nach jedem Paket: `README.md` (Abschnitt „Konstruktion“), `TESTPROTOKOLL.md` (18d/18e, neue Zeilen),
 `NAECHSTE_SCHRITTE.md` aktualisieren, PDF des Testprotokolls neu erzeugen, committen, pushen.
@@ -504,11 +503,9 @@ Nach jedem Paket: `README.md` (Abschnitt „Konstruktion“), `TESTPROTOKOLL.md`
   Teil ein zusammenhängender Körper. Mit Rotationsachse häufig Drehteile (Drehen), aber nicht zwingend – das
   entscheidet man je Teil (Paket F).
 
-## Noch offen
-
-1. Ist der Pi vom NAS (dort läuft Projekt-FEM) aus erreichbar? Sonst muss die Adresse/der Weg geklärt werden,
-   bevor D getestet werden kann. Ersatz zum Testen: Draftpad-Server lokal starten (siehe „Bauen und Testen“).
-2. Sollen Teile aus der Zeichnung standardmäßig **verklebt** oder mit **Kontakt** gerechnet werden? (Heute fragt
-   der Reiter Modell je Berührfläche; Vorschlag: verklebt als Vorgabe, weil schnell und stabil.)
-3. Beispielzeichnungen: die zwei `.draftpad.json` von Felix (Wellenschnitt, Ventil-Kreuzstück) liegen nicht im
-   Repo – zum Testen neu hochladen lassen oder als `examples/draftpad/` aufnehmen, wenn Felix einverstanden ist.
+- **Netz:** Der Pi (Draftpad) ist vom NAS (Projekt-FEM) aus erreichbar, beide im selben Heimnetz.
+- **Berührflächen:** Teile aus der Zeichnung standardmäßig **verklebt**; im Reiter Modell je Berührfläche auf
+  Kontakt umstellbar (gibt es schon – nur die Vorgabe prüfen).
+- **Beispiele:** Felix' Zeichnungen liegen in `examples/draftpad/` (`wellenschnitt.draftpad.json`: Welle mit
+  Lagern, Schrauben, Achse – 179 Linien, 22 Schraffuren in 4 Gruppen; `ventil-kreuzstueck.draftpad.json`:
+  Kreuzstück mit Riegel – 67 Linien, 17 Schraffuren, Freihand-Notizen auf eigener Ebene). Für Tests benutzen.
