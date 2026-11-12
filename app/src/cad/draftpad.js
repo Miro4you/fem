@@ -2,8 +2,8 @@
 //
 // Draftpad: Millimeter, y nach unten; Bögen mit start/sweep (Bogenmaß, positiv = im Uhrzeigersinn am Bildschirm).
 // Skizze: y nach oben, Bögen gegen den Uhrzeigersinn von a nach b.
-import { addPoint, addEnt, addCon } from './sketch.js'
-import { solve } from './solver.js'
+import { addPoint, addEnt, addCon, measure } from './sketch.js'
+import { solve, DIM_TYPES } from './solver.js'
 
 const GEO = new Set(['line', 'arc', 'circle'])
 
@@ -19,7 +19,7 @@ export function readDraftpad(text) {
   const layers = d.layers.map((l) => {
     const ents = d.entities.filter((e) => e.layerId === l.id)
     const count = (k) => ents.filter((e) => e.kind === k).length
-    return { id: l.id, name: l.name || 'Ebene', visible: l.visible !== false, lines: count('line'), arcs: count('arc') + count('circle'), hatches: count('hatch'), strokes: count('stroke') }
+    return { id: l.id, name: l.name || 'Ebene', visible: l.visible !== false, lines: count('line'), arcs: count('arc') + count('circle'), hatches: count('hatch'), strokes: count('stroke'), dims: count('dim') }
   })
   return { doc: d, layers }
 }
@@ -142,10 +142,41 @@ function fillsOf(doc) {
 
 const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1])
 
+/// Maße der gewählten Ebenen (Skizzenkoordinaten, Text-Maße ohne Zahl bleiben weg)
+function dimsOf(doc, layerIds) {
+  const out = []
+  for (const e of doc.entities) {
+    if (e.kind !== 'dim' || !layerIds.has(e.layerId) || !e.p1 || !e.p2) continue
+    if (e.type === 'lin') {
+      const dir = e.dir ?? Math.atan2(e.p2.y - e.p1.y, e.p2.x - e.p1.x)
+      const n = [-Math.sin(dir), Math.cos(dir)]
+      const m = [(e.p1.x + e.p2.x) / 2, (e.p1.y + e.p2.y) / 2]
+      const k = (e.off ?? 0) - ((m[0] - e.p1.x) * n[0] + (m[1] - e.p1.y) * n[1])
+      out.push({ type: 'lin', p1: flip(e.p1), p2: flip(e.p2), dir, at: [m[0] + k * n[0], -(m[1] + k * n[1])] })
+    } else if (e.type === 'dia' || e.type === 'rad') out.push({ type: e.type, p1: flip(e.p1), p2: flip(e.p2) })
+  }
+  return out
+}
+
+/// Alles, was in der Vorschau blass mitgezeichnet wird: Freihand und Texte (Skizzenkoordinaten, vor Verschiebung)
+export function notesOf(doc, layerIds) {
+  const strokes = []
+  const texts = []
+  for (const e of doc.entities) {
+    if (layerIds && !layerIds.has(e.layerId)) continue
+    if (e.kind === 'stroke' && (e.pts?.length ?? 0) >= 4) {
+      const p = []
+      for (let i = 0; i + 1 < e.pts.length; i += 2) p.push([e.pts[i], -e.pts[i + 1]])
+      strokes.push(p)
+    } else if (e.kind === 'text' && e.at && e.text) texts.push({ at: flip(e.at), text: String(e.text).split('\n')[0].slice(0, 40), size: e.size ?? 3.5 })
+  }
+  return { strokes, texts }
+}
+
 /// Zeichnung in die Skizze übernehmen.
 /// opts: { layers: Set, tol (mm, Punkte zusammenführen), center (Mitte auf den Ursprung), fixed (Geometrie fest),
-///         fills (schraffierte Flächen als Material vorwählen), scale }
-/// → { sketch, stats: { lines, arcs, circles, merged, cons, solved } }
+///         fills (schraffierte Flächen als Material vorwählen), dims (Draftpad-Maße übernehmen, nur ohne fixed), scale }
+/// → { sketch, stats: { lines, arcs, circles, merged, tees, cons, dims, solved, fills, size, offset }, open: [[x,y],…] (offene Enden) }
 export function importDraftpad(sk0, doc, opts) {
   const tol = opts.tol ?? 0.3
   const k = opts.scale ?? 1
@@ -224,6 +255,7 @@ export function importDraftpad(sk0, doc, opts) {
   const useCount = new Map()
   for (const e of made) for (const id of e.t === 'line' ? [e.a, e.b] : e.t === 'arc' ? [e.a, e.b] : []) useCount.set(id, (useCount.get(id) ?? 0) + 1)
   let tees = 0
+  const teed = new Set()
   const P = (id) => [s.pts[id].x, s.pts[id].y]
   for (const [id, n] of useCount) {
     if (n !== 1) continue
@@ -244,12 +276,20 @@ export function importDraftpad(sk0, doc, opts) {
       if (d <= tol && (!best || d < best.d)) best = { l, f, d }
     }
     if (best) {
+      teed.add(id)
       if (!fixed) addCon(s, { t: 'on', p: id, e: best.l.id })
       s.pts[id].x = best.f[0]
       s.pts[id].y = best.f[1]
       tees++
     }
   }
+
+  // offene Enden (Punkte, an denen nur ein Linienstück/Bogen endet und die nicht angeheftet wurden)
+  // Hilfslinien (Achsen, Mittellinien, verdeckte Kanten) zählen nicht – sie enden immer frei
+  const solidCount = new Map()
+  for (const e of made) if (!e.cons && (e.t === 'line' || e.t === 'arc')) for (const id of [e.a, e.b]) solidCount.set(id, (solidCount.get(id) ?? 0) + 1)
+  const open = []
+  for (const [id, n] of solidCount) if (n === 1 && !teed.has(id)) open.push(P(id))
 
   // Bedingungen erkennen: waagrecht/senkrecht, tangentiale Übergänge Linie–Bogen
   let cons = 0
@@ -284,6 +324,39 @@ export function importDraftpad(sk0, doc, opts) {
       }
     }
   }
+  // Maße aus Draftpad (nur bei bemaßbarer Kopie): als Skizzenmaße mit dem gemessenen Wert
+  let dims = 0
+  if (opts.dims && !fixed) {
+    const near = (q) => {
+      let best = null
+      for (const c of pts) {
+        const d = dist(c.at, q)
+        if (d <= tol && (!best || d < best.d)) best = { id: c.id, d }
+      }
+      return best?.id ?? null
+    }
+    for (const d of dimsOf(doc, opts.layers)) {
+      const a = tr(d.p1)
+      const b = tr(d.p2)
+      let con = null
+      if (d.type === 'lin') {
+        const ia = near(a)
+        const ib = near(b)
+        if (!ia || !ib || ia === ib) continue
+        const t = Math.abs(Math.sin(d.dir)) < 1e-6 ? 'dx' : Math.abs(Math.cos(d.dir)) < 1e-6 ? 'dy' : 'dist'
+        con = { t, a: ia, b: ib, at: tr(d.at) }
+      } else if (d.type === 'dia' || d.type === 'rad') {
+        const r = dist(a, b)
+        const e = made.find((x) => (x.t === 'circle' || x.t === 'arc') && dist(P(x.c), a) <= tol && Math.abs((x.t === 'circle' ? x.r : dist(P(x.a), P(x.c))) - r) <= tol)
+        if (!e) continue
+        con = { t: e.t === 'circle' ? 'dia' : 'rad', e: e.id, at: b }
+      }
+      if (!con) continue
+      const c = addCon(s, con)
+      c.v = Number(measure(s, c).toFixed(4))
+      dims++
+    }
+  }
   if (opts.fills) {
     const fl = fillsOf(doc).map((f) => ({ ...f, loops: f.loops.map((lp) => lp.map(tr)) }))
     if (fl.length) s.fills = [...(s.fills ?? []), ...fl]
@@ -295,11 +368,34 @@ export function importDraftpad(sk0, doc, opts) {
     const r = solve(t, { analyse: false, maxIter: 40 })
     if (r.ok) Object.assign(s, t)
     else {
-      s.cons = s.cons.filter((c) => !sk0.cons.some((o) => o.id === c.id) ? c.t === 'on' : true)
+      s.cons = s.cons.filter((c) => (!sk0.cons.some((o) => o.id === c.id) ? c.t === 'on' || DIM_TYPES.has(c.t) : true))
       const t2 = structuredClone(s)
       ok = solve(t2, { analyse: false, maxIter: 40 }).ok
       if (ok) Object.assign(s, t2)
       cons = 0
+    }
+    // überzählige oder widersprüchliche Maße (z. B. Gesamtlänge und alle Teillängen) weglassen
+    if (dims) {
+      const mine = s.cons.filter((c) => DIM_TYPES.has(c.t) && !sk0.cons.some((o) => o.id === c.id))
+      const base = structuredClone(s)
+      const ids = new Set(mine.map((c) => c.id))
+      base.cons = base.cons.filter((c) => !ids.has(c.id))
+      let info = solve(structuredClone(base), { maxIter: 40 })
+      dims = 0
+      if (info.ok) {
+        for (const c of mine) {
+          const t = structuredClone(base)
+          t.cons.push(c)
+          const r = solve(t, { maxIter: 40 })
+          if (!r.ok || r.redundant > info.redundant) continue
+          base.cons.push(c)
+          info = r
+          dims++
+        }
+      }
+      const t = structuredClone(base)
+      if (solve(t, { analyse: false, maxIter: 40 }).ok) Object.assign(s, t)
+      else Object.assign(s, base)
     }
   }
   return {
@@ -315,7 +411,9 @@ export function importDraftpad(sk0, doc, opts) {
       fills: s.fills?.length ?? 0,
       size: [(hi[0] - lo[0]) * k, (hi[1] - lo[1]) * k],
       offset: off,
+      dims,
     },
+    open,
   }
 }
 

@@ -810,3 +810,12 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .dp-source { background: var(--accent-soft); border: 1px solid var(--accent); color: var(--text); }
 .dp-source .cad-cons-row { margin-top: 6px; }
 .icon-btn.dp-stale-btn { color: var(--warn-text); }
+
+/* Draftpad-Import: Vorschau */
+.dp-preview { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.dp-preview svg { width: 100%; height: 170px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.dp-preview .dp-line { fill: none; stroke: var(--text); stroke-linecap: round; }
+.dp-preview .dp-cons { fill: none; stroke: var(--accent); opacity: 0.7; }
+.dp-preview .dp-note { fill: none; stroke: var(--muted); opacity: 0.45; stroke-linecap: round; stroke-linejoin: round; }
+.dp-preview .dp-note-text { fill: var(--muted); opacity: 0.55; font-family: inherit; }
+.dp-preview .dp-open { fill: #e5484d; stroke: #fff; stroke-width: 0; }

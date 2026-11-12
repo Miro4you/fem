@@ -136,8 +136,9 @@ Start: App-Menü „Projekt-FEM“ oder `target/release/projekt-fem-app`. Rückm
   Ansichtswürfel im CAD, Skizzen bleiben sichtbar, eine Skizze für mehrere Extrusionen (Bereichswahl wie Onshape),
   Verbindung zum Draftpad-Server (Bibliothek, verknüpfte Skizze, Aktualisieren)
 - ✅ Draftpad-Zeichnung als Skizze übernehmen (Ebenen wählen, Lücken schließen, Bedingungen erkennen, Schraffur =
-  Material, Achse = Drehachse). Ideen: direkt aus der Draftpad-Cloud holen statt Datei, Draftpad-Maße als Skizzenmaße
-  übernehmen, mehrere Ansichten einer Zeichnung als Vorder-/Seitenansicht kombinieren
+  Material, Achse = Drehachse), aus der Draftpad-Ablage verknüpft, Vorschau mit offenen Enden, Draftpad-Maße als
+  Skizzenmaße (Kopie). Ideen: mehrere Ansichten einer Zeichnung als Vorder-/Seitenansicht kombinieren, Draftpad
+  eingebettet, Live-Strom statt Abfrage
 - ✅ Geometrie anpassen (grobe Abschätzung): Reiter „Geometrie“ – Radius/Bohrung ändern, Material hinzu/weg per
   Skizze, Vorher/Nachher-Vergleich. Später möglich: Linienzug-Skizze, Kanten neu verrunden, Fasen
 - Hinweis: Die „R3“-Radien am Hebel (Flächen 16/17) sind laut Geometrie R6

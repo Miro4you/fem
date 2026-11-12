@@ -59,8 +59,8 @@ import {
   axisOf,
   num,
 } from './features.js'
-import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure, kernelSketch } from './sketch.js'
-import { readDraftpad, defaultLayers, importDraftpad, fillLoops } from './draftpad.js'
+import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure, kernelSketch, polyline } from './sketch.js'
+import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
 import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
 
@@ -771,7 +771,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       const { doc, layers } = readDraftpad(text)
       const hasFills = layers.some((l) => l.hatches)
       // aus der Online-Ablage: standardmäßig verknüpft (Draftpad bleibt die Vorlage, Aktualisieren per Knopf)
-      setDp({ doc, layers, name, source, opts: { layers: defaultLayers(layers), tol: '0.3', center: true, fixed: false, fills: hasFills, linked: !!source } })
+      setDp({ doc, layers, name, source, opts: { layers: defaultLayers(layers), tol: '0.3', center: true, fixed: false, fills: hasFills, dims: true, linked: !!source } })
       // ohne offene Skizze: neue Skizze anfangen, erst die Ebene wählen
       if (!sketchEdit) {
         if (edit) cancel()
@@ -809,6 +809,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         center: o.center,
         fixed: linked || o.fixed,
         fills: o.fills,
+        dims: !(linked || o.fixed) && o.dims,
         stableIds: !!dp.source,
       })
       const r = solved(sketch)
@@ -823,6 +824,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         `Übernommen: ${stats.lines} Linien, ${stats.arcs} Bögen, ${stats.circles} Kreise` +
           (stats.merged ? `, ${stats.merged} Lücken geschlossen` : '') +
           (stats.cons ? `, ${stats.cons} Bedingungen erkannt` : '') +
+          (stats.dims ? `, ${stats.dims} Maße aus Draftpad` : '') +
           (stats.fills ? `, ${stats.fills} Schraffuren als Material vorgewählt` : '') +
           (stats.solved ? '' : ' – Bedingungen ließen sich nicht alle einhalten und wurden weggelassen'),
       )
@@ -1713,11 +1715,14 @@ function DraftpadPanel({ dp, setDp, onImport }) {
   const o = dp.opts
   const set = (patch) => setDp({ ...dp, opts: { ...o, ...patch } })
   const hasFills = dp.layers.some((l) => l.hatches)
+  const hasDims = dp.layers.some((l) => o.layers.has(l.id) && l.dims)
+  const canDims = !(dp.source && o.linked) && !o.fixed
   return (
     <section className="section cad-dialog">
       <h2>
         <FileUp size={15} /> Draftpad: {dp.name}
       </h2>
+      <DraftpadPreview dp={dp} />
       <span className="field-label">Ebenen übernehmen</span>
       {dp.layers.map((l) => (
         <label key={l.id} className="check" title={l.visible ? '' : 'in Draftpad ausgeblendet'}>
@@ -1770,6 +1775,12 @@ function DraftpadPanel({ dp, setDp, onImport }) {
           <input type="checkbox" checked={!o.fixed} onChange={(e) => set({ fixed: !e.target.checked })} /> Bedingungen erkennen (waagrecht, senkrecht, tangential) – danach bemaßbar
         </label>
       )}
+      {hasDims && canDims && (
+        <label className="check">
+          <input type="checkbox" checked={o.dims} onChange={(e) => set({ dims: e.target.checked })} /> Maße aus Draftpad als Skizzenmaße (gemessener Wert, überzählige
+          bleiben weg)
+        </label>
+      )}
       {hasFills && (
         <label className="check">
           <input type="checkbox" checked={o.fills} onChange={(e) => set({ fills: e.target.checked })} /> Schraffierte Flächen als Material vorwählen
@@ -1785,6 +1796,62 @@ function DraftpadPanel({ dp, setDp, onImport }) {
         </button>
       </div>
     </section>
+  )
+}
+
+// Vorschau im Import-Dialog: übernommene Linien kräftig, Hilfslinien gestrichelt, Freihand und Texte blass,
+// offene Enden rot (dort schließt sich keine Fläche – Lücke größer als „Lücken schließen bis“)
+function DraftpadPreview({ dp }) {
+  const o = dp.opts
+  const tol = num(o.tol) > 0 ? num(o.tol) : 0.3
+  const pv = useMemo(() => {
+    if (!o.layers.size) return null
+    try {
+      const { sketch, stats, open } = importDraftpad(newSketch('XY'), dp.doc, { layers: o.layers, tol, center: o.center, fixed: true })
+      const off = stats.offset
+      const notes = notesOf(dp.doc, o.layers)
+      const mv = (p) => [p[0] + off[0], p[1] + off[1]]
+      const strokes = notes.strokes.map((l) => l.map(mv))
+      const texts = notes.texts.map((t) => ({ ...t, at: mv(t.at) }))
+      const lines = sketch.ents.filter((e) => e.t !== 'point').map((e) => ({ cons: !!e.cons, pts: polyline(sketch, e, 48) }))
+      const all = [...lines.flatMap((l) => l.pts), ...strokes.flat(), ...texts.map((t) => t.at)]
+      const lo = [Math.min(...all.map((p) => p[0])), Math.min(...all.map((p) => p[1]))]
+      const hi = [Math.max(...all.map((p) => p[0])), Math.max(...all.map((p) => p[1]))]
+      return { lines, strokes, texts, open, lo, hi }
+    } catch {
+      return null
+    }
+  }, [dp.doc, o.layers, o.center, tol])
+  if (!pv) return null
+  const w = Math.max(pv.hi[0] - pv.lo[0], 1)
+  const h = Math.max(pv.hi[1] - pv.lo[1], 1)
+  const pad = 0.04 * Math.max(w, h)
+  const u = Math.max(w, h) / 300 // ≈ 1 Bildpunkt
+  const path = (pts) => 'M' + pts.map((p) => `${p[0].toFixed(2)} ${(-p[1]).toFixed(2)}`).join('L')
+  return (
+    <div className="dp-preview">
+      <svg viewBox={`${pv.lo[0] - pad} ${-pv.hi[1] - pad} ${w + 2 * pad} ${h + 2 * pad}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Vorschau der Zeichnung">
+        {pv.strokes.map((l, i) => (
+          <path key={'s' + i} d={path(l)} className="dp-note" strokeWidth={u} />
+        ))}
+        {pv.texts.map((t, i) => (
+          <text key={'t' + i} x={t.at[0]} y={-t.at[1]} fontSize={t.size} className="dp-note-text">
+            {t.text}
+          </text>
+        ))}
+        {pv.lines.map((l, i) => (
+          <path key={i} d={path(l.pts)} className={l.cons ? 'dp-cons' : 'dp-line'} strokeWidth={(l.cons ? 1 : 1.4) * u} strokeDasharray={l.cons ? `${6 * u} ${3 * u}` : undefined} />
+        ))}
+        {pv.open.map((p, i) => (
+          <circle key={'o' + i} cx={p[0]} cy={-p[1]} r={3.5 * u} className="dp-open" />
+        ))}
+      </svg>
+      <small className={pv.open.length ? 'warn-text' : 'muted'}>
+        {pv.open.length
+          ? `${pv.open.length} offene ${pv.open.length === 1 ? 'Ende' : 'Enden'} (rot) – dort schließt sich keine Fläche. Größere Lücke? „Lücken schließen bis“ erhöhen.`
+          : 'Keine offenen Enden – alle Konturen sind geschlossen.'}
+      </small>
+    </div>
   )
 }
 

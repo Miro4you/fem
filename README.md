@@ -221,6 +221,9 @@ Lücken bis 0,3 mm (einstellbar) werden geschlossen, T-Stöße angeheftet, waagr
 Bedingungen erkannt – danach lässt sich weiter bemaßen. Schraffierte Flächen sind beim Extrudieren/Drehen als
 Material vorgewählt. Bei einer Schnittzeichnung (beide Hälften schraffiert) dreht „Drehen“ nur die Hälfte auf einer
 Seite der Achse.
+Der Import-Dialog zeigt eine **Vorschau**: übernommene Linien kräftig, Hilfslinien gestrichelt, Freihand und Texte
+blass, **offene Enden rot** mit Zähler (dort schließt sich keine Fläche – „Lücken schließen bis“ erhöhen). Bei einer
+**Kopie** werden Draftpad-Maße (Länge, Ø, R) als Skizzenmaße mit dem gemessenen Wert übernommen; überzählige bleiben weg.
 
 **Baugruppe aus einer Draftpad-Skizze:** Nach „Skizze fertig“ schlägt Projekt-FEM die Teile vor – je Schraffur-Art
 (gleiche Richtung, gleicher Abstand) ein Teil. Teile, die symmetrisch zu einer Achse liegen, werden gedreht, die
