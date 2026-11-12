@@ -80,8 +80,8 @@ export const to2d = (plane, p) => {
 
 const nid = (sk, pre) => `${pre}${sk.next++}`
 
-export function addPoint(sk, [x, y], fix = false) {
-  const id = nid(sk, 'p')
+export function addPoint(sk, [x, y], fix = false, wanted = null) {
+  const id = wanted && !sk.pts[wanted] ? wanted : nid(sk, 'p')
   sk.pts[id] = { x, y, fix }
   return id
 }

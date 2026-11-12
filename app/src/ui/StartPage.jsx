@@ -16,7 +16,7 @@ function ago(t) {
 }
 
 // Startseite: Teil öffnen (Datei, Onshape, Projekt) oder Stabwerk; zuletzt geöffnet
-export default function StartPage({ gmsh, onOpenStep, onOnshape, onProject, onFrame, onNewPart, onRecent, onDropFile, current, onBack }) {
+export default function StartPage({ gmsh, onOpenStep, onOnshape, onProject, onFrame, onNewPart, onDraftpad, onRecent, onDropFile, current, onBack }) {
   const [recent] = usePref('recent', [])
   const [drag, setDrag] = useState(false)
   return (
@@ -75,6 +75,11 @@ export default function StartPage({ gmsh, onOpenStep, onOnshape, onProject, onFr
             <IcWrench size={26} />
             <b>Neues Teil konstruieren</b>
             <span>Skizzieren, bemaßen, extrudieren – direkt hier, ohne anderes CAD.</span>
+          </button>
+          <button className="tile cad-new" onClick={onDraftpad} disabled={gmsh === null}>
+            <IcFileUp size={26} />
+            <b>Aus Draftpad</b>
+            <span>Skizze aus der Draftpad-Ablage holen, Teile anlegen, nachrechnen.</span>
           </button>
           <button className="tile" onClick={onFrame}>
             <IcTruss size={26} />

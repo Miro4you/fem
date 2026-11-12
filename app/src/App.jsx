@@ -245,6 +245,27 @@ export default function App() {
   const [cadApplied, setCadApplied] = useState(null) // Stand (Schlüssel), der im Rechenmodell ist
   const keepCadRef = useRef(false)
   const [cadDraftpad, setCadDraftpad] = useState(null) // Draftpad-Zeichnung, die als Skizze übernommen werden soll
+  const [cadLib, setCadLib] = useState(0) // Draftpad-Bibliothek in der Konstruktion öffnen
+  // aus Draftpad „In Projekt-FEM nachweisen“: neues Teil mit der Zeichnung (verknüpft)
+  useEffect(() => {
+    const id = api.startDraftpad
+    if (!id) return
+    ;(async () => {
+      try {
+        const [doc, meta] = await Promise.all([api.draftpadGet(id), api.draftpadMeta(id).catch(() => null)])
+        newCadPart()
+        setCadDraftpad((o) => ({
+          text: JSON.stringify(doc),
+          name: meta?.name ?? id,
+          n: (o?.n ?? 0) + 1,
+          source: { kind: 'draftpad', id, name: meta?.name ?? id, updated: meta?.updated ?? null },
+        }))
+      } catch (e) {
+        setError(`Draftpad-Zeichnung „${id}“ ließ sich nicht holen: ${e} – Draftpad-Adresse unter Einstellungen › CAD-Verbindungen prüfen`)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // Ergebnis zum Vergleichen (z. B. Original vor den Geometrieänderungen)
   const [reference, setReference] = useState(null)
   // eigene Werkstoffe und Festigkeitsnachweis
@@ -3042,6 +3063,10 @@ export default function App() {
             onProject={() => onLoadProject()}
             onFrame={() => switchView('frame')}
             onNewPart={newCadPart}
+            onDraftpad={() => {
+              newCadPart()
+              setCadLib((n) => n + 1)
+            }}
             onRecent={openRecent}
             onDropFile={onDropFile}
             current={mesh ? stemOf(fileName) : null}
@@ -3073,6 +3098,7 @@ export default function App() {
                 onApply={onCadApply}
                 onExport={onCadExport}
     incoming={cadDraftpad}
+    openLibrary={cadLib}
                 busy={!!busy}
                 onError={(e) => setError(e)}
                 onNotice={setNotice}

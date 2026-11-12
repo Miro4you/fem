@@ -173,6 +173,11 @@ fn router(shared: Shared) -> Router {
         .route("/cad/inbox", get(crate::cad::http_inbox))
         .route("/cad/onshape", get(crate::cad::http_onshape))
         .route("/cad/onshape_result", get(crate::cad::http_onshape_result))
+        .route("/draftpad/status", get(dp_status))
+        .route("/draftpad/config", post(dp_config))
+        .route("/draftpad/list", post(dp_list))
+        .route("/draftpad/get", post(dp_get))
+        .route("/draftpad/meta", post(dp_meta))
         .route("/onshape/status", get(crate::cad::http_onshape_status))
         .route("/onshape/keys", post(crate::cad::http_onshape_keys))
         .route("/onshape/import", post(crate::cad::http_onshape_import))
@@ -468,6 +473,47 @@ struct OsDoc {
     eid: String,
     #[serde(default)]
     href: Option<String>,
+}
+
+// --- Draftpad ---------------------------------------------------------------------------------
+
+async fn dp_status() -> Json<crate::draftpad::Status> {
+    Json(tokio::task::spawn_blocking(crate::draftpad::status).await.unwrap_or_default())
+}
+
+#[derive(Deserialize)]
+struct DpConfig {
+    url: String,
+    #[serde(default)]
+    token: Option<String>,
+}
+
+async fn dp_config(Json(a): Json<DpConfig>) -> ApiResult<Response> {
+    crate::draftpad::save(&a.url, a.token.as_deref()).map_err(bad)?;
+    Ok(Json(true).into_response())
+}
+
+#[derive(Deserialize)]
+struct DpList {
+    #[serde(default)]
+    thumbs: bool,
+}
+
+async fn dp_list(Json(a): Json<DpList>) -> ApiResult<Response> {
+    sc_blocking(move || crate::draftpad::list(a.thumbs)).await
+}
+
+#[derive(Deserialize)]
+struct DpId {
+    id: String,
+}
+
+async fn dp_get(Json(a): Json<DpId>) -> ApiResult<Response> {
+    sc_blocking(move || crate::draftpad::get(&a.id)).await
+}
+
+async fn dp_meta(Json(a): Json<DpId>) -> ApiResult<Response> {
+    sc_blocking(move || crate::draftpad::meta(&a.id)).await
 }
 
 async fn os_documents(Json(a): Json<OsQuery>) -> ApiResult<Response> {

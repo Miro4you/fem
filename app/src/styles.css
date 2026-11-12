@@ -758,8 +758,9 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-feat.bad .cad-feat-name { color: var(--bad); }
 .cad-feat.skipped { opacity: 0.6; }
 .cad-feat-name { border: none; background: none; padding: 0; cursor: pointer; text-align: left; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cad-feat .icon-btn { opacity: 0; }
-.cad-feat:hover .icon-btn, .cad-feat .icon-btn.keep { opacity: 1; }
+.cad-feat .icon-btn { display: none; }
+.cad-feat:hover .icon-btn, .cad-feat .icon-btn.keep { display: inline-flex; }
+.cad-feat-name { min-width: 60px; flex: 0 1 auto; }
 .cad-feat.on { background: var(--accent-soft); }
 .bad-icon { color: var(--bad); flex-shrink: 0; }
 .warn-icon { color: var(--warn-text); flex-shrink: 0; }
@@ -796,3 +797,16 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-part .row { align-items: center; }
 .cad-part select { flex: 1; min-width: 0; height: 28px; }
 .input-unit.mini { width: 90px; }
+.dp-connect { display: flex; flex-direction: column; gap: 8px; }
+.dp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; padding: 12px 16px; overflow: auto; min-height: 200px; align-content: start; }
+.dp-tile { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); cursor: pointer; text-align: left; }
+.dp-tile:hover { border-color: #c7ccd3; }
+.dp-tile.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.dp-tile b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-tile small { color: var(--muted); font-size: 11px; }
+.dp-thumb { display: flex; align-items: center; justify-content: center; height: 110px; background: #fff; border-radius: 6px; color: var(--muted); overflow: hidden; }
+.dp-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.cad-feat .dp-stale { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); }
+.dp-source { background: var(--accent-soft); border: 1px solid var(--accent); color: var(--text); }
+.dp-source .cad-cons-row { margin-top: 6px; }
+.icon-btn.dp-stale-btn { color: var(--warn-text); }

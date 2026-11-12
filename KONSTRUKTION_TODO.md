@@ -252,7 +252,7 @@ Namen und Berührflächen → Lager, Last, Rechnen läuft durch.
 
 ---
 
-## D. Verbindung zu Draftpad (Server statt Datei)
+## D. Verbindung zu Draftpad (Server statt Datei) ✅ (erledigt bis auf D.5.4/D.5.6 und D.6 – siehe dort)
 
 ### D.0 Wie Draftpad arbeitet (geprüft im Repo `Miro4you/Draftpad`, `server/server.mjs`, `src/storage/*.ts`)
 
@@ -406,6 +406,16 @@ Felix' Ablauf beginnt in Draftpad. Deshalb zusätzlich zur Bibliothek:
    (neben der Online-Ablage, `src/storage/cloud.ts`/`src/ui/cloud-dialog.ts`). Kompakt-/Einbettmodus: Knopf weglassen.
 3. Desktop-App von Projekt-FEM: gleicher Weg über die Heimnetz-Freigabe (die Adresse zeigt auf den Rechner,
    auf dem Projekt-FEM als Server läuft – bei Felix der NAS).
+
+### Stand D (12.11.2026)
+
+Erledigt: D.1 (`app/src-tauri/src/draftpad.rs`, Befehle/Routen `draftpad_*`), D.2 (Draftpad-Repo, Branch
+`claude/stoic-maxwell-rtmn09`: `?thumbs=0`, `/meta`, `?open=<id>`, Menü „In Projekt-FEM nachweisen“), D.3
+(Einstellungen, `ui/DraftpadLibrary.jsx`, Startseite), D.4 (verknüpft/Kopie, stabile Kennungen `d_<draftpad-id>`,
+feste Lage `source.opts.offset`, Aktualisieren, Abfrage alle 10 s, In Draftpad bearbeiten, Verknüpfung lösen),
+D.5.1 (Schraffuren aller Ebenen, Doppel weg), D.5.3 (Kreise mit Achsenkreuz → Bohrpunkt), D.7 (`#draftpad=<id>`).
+Offen: D.5.4 Draftpad-Maße als Skizzenmaße bei „Kopie“, D.5.5 Freihand-Notizen blass in der Import-Vorschau,
+D.5.6 offene Enden nach dem Import rot markieren, D.6.
 
 ### D.6 Später (nicht jetzt)
 

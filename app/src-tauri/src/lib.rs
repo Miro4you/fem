@@ -12,6 +12,7 @@ use fem_core::{Fix, Load, LocalFix, Material, Mesh, Model, Order, Region, Result
 use serde::{Deserialize, Serialize};
 
 pub mod cad;
+pub mod draftpad;
 pub mod onshape;
 pub mod solidcraft;
 pub mod server;
@@ -394,6 +395,31 @@ fn cad_info() -> serde_json::Value {
         "onshape": onshape::configured(),
         "onshapeUsage": onshape::usage(),
     })
+}
+
+#[tauri::command]
+async fn draftpad_status() -> draftpad::Status {
+    tauri::async_runtime::spawn_blocking(draftpad::status).await.unwrap_or_default()
+}
+
+#[tauri::command]
+fn draftpad_config(url: String, token: Option<String>) -> Result<(), String> {
+    draftpad::save(&url, token.as_deref())
+}
+
+#[tauri::command]
+async fn draftpad_list(thumbs: bool) -> Result<serde_json::Value, String> {
+    blocking(move || draftpad::list(thumbs)).await
+}
+
+#[tauri::command]
+async fn draftpad_get(id: String) -> Result<serde_json::Value, String> {
+    blocking(move || draftpad::get(&id)).await
+}
+
+#[tauri::command]
+async fn draftpad_meta(id: String) -> Result<serde_json::Value, String> {
+    blocking(move || draftpad::meta(&id)).await
 }
 
 #[tauri::command]
@@ -1435,6 +1461,11 @@ pub fn run() {
             solidcraft_pause,
             solidcraft_study,
             onshape_set_keys,
+            draftpad_status,
+            draftpad_config,
+            draftpad_list,
+            draftpad_get,
+            draftpad_meta,
             onshape_import,
             onshape_variables,
             onshape_set_variable,

@@ -3,6 +3,7 @@ import { Check, Copy, Download, Loader2, Trash2, X } from 'lucide-react'
 import * as api from '../api.js'
 import { NAV_PRESETS, usePref, NAV_DEFAULT, DISPLAY_DEFAULT } from '../prefs.js'
 import { IcMouse, IcTrackpad } from './icons.jsx'
+import { DraftpadConnect, DraftpadStatusLine } from './DraftpadLibrary.jsx'
 
 const TABS = [
   ['nav', 'Maus & Trackpad'],
@@ -254,6 +255,10 @@ function CadSettings({ onError }) {
       </div>
 
       <div className="card cad-card">
+        <DraftpadCard onError={onError} />
+      </div>
+
+      <div className="card cad-card">
         <SolidCraftLink />
       </div>
 
@@ -451,6 +456,46 @@ function NetSettings({ onError }) {
       >
         Neuen Zugangsschlüssel erzeugen
       </button>
+    </>
+  )
+}
+
+// Draftpad-Server (Online-Ablage): Skizzen holen, verknüpfte Skizzen aktualisieren
+function DraftpadCard({ onError }) {
+  const [st, setSt] = useState(null)
+  const [edit, setEdit] = useState(false)
+  useEffect(() => {
+    api.draftpadStatus().then(setSt).catch(onError)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return (
+    <>
+      <div className="kv">
+        <span>Draftpad</span>
+        <DraftpadStatusLine status={st} />
+      </div>
+      {st && (!st.configured || st.error || edit) ? (
+        <DraftpadConnect
+          status={st}
+          onError={onError}
+          onSaved={(s) => {
+            setSt(s)
+            setEdit(false)
+          }}
+        />
+      ) : (
+        st && (
+          <>
+            <p className="hint">
+              {st.url} – Skizzen holst du in der Konstruktion über „Draftpad“; in Draftpad bringt Menü › „In Projekt-FEM nachweisen“ die Zeichnung direkt
+              hierher.
+            </p>
+            <button className="link" onClick={() => setEdit(true)}>
+              Adresse oder Passwort ändern
+            </button>
+          </>
+        )
+      )}
     </>
   )
 }

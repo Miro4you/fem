@@ -40,6 +40,9 @@ import {
   PenOff,
   Tags,
   Boxes,
+  RefreshCw,
+  ExternalLink,
+  Unlink,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -59,6 +62,7 @@ import {
 import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure, kernelSketch } from './sketch.js'
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
+import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
 
 const FEATURE_ICON = {
   sketch: Pencil,
@@ -147,7 +151,7 @@ function coaxialFaces(tess, face) {
   })
 }
 
-export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied, busy, onError, incoming }) {
+export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied, busy, onError, incoming, openLibrary }) {
   const features = cad.features
   const [built, setBuilt] = useState(null) // Ergebnis aller Features
   const [building, setBuilding] = useState(false)
@@ -170,6 +174,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const reqRef = useRef(0)
   // Draftpad-Import: { doc, layers, name, opts }
   const [dp, setDp] = useState(null)
+  const [dpLib, setDpLib] = useState(false) // Draftpad-Bibliothek offen
+  const [stale, setStale] = useState({}) // verknüpfte Skizzen mit neuerer Draftpad-Fassung: { featureId: updated }
   const fileRef = useRef(null)
 
   const note = useCallback((m) => {
@@ -760,11 +766,12 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     : null
 
   // --- Draftpad ------------------------------------------------------------------------------
-  const takeDraftpad = (text, name) => {
+  const takeDraftpad = (text, name, source = null) => {
     try {
       const { doc, layers } = readDraftpad(text)
       const hasFills = layers.some((l) => l.hatches)
-      setDp({ doc, layers, name, opts: { layers: defaultLayers(layers), tol: '0.3', center: true, fixed: false, fills: hasFills } })
+      // aus der Online-Ablage: standardmäßig verknüpft (Draftpad bleibt die Vorlage, Aktualisieren per Knopf)
+      setDp({ doc, layers, name, source, opts: { layers: defaultLayers(layers), tol: '0.3', center: true, fixed: false, fills: hasFills, linked: !!source } })
       // ohne offene Skizze: neue Skizze anfangen, erst die Ebene wählen
       if (!sketchEdit) {
         if (edit) cancel()
@@ -779,11 +786,14 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     e.target.value = ''
     if (f) takeDraftpad(await f.text(), f.name)
   }
+  useEffect(() => {
+    if (openLibrary) setDpLib(true)
+  }, [openLibrary])
   const lastIncoming = useRef(null)
   useEffect(() => {
     if (incoming && incoming.n !== lastIncoming.current) {
       lastIncoming.current = incoming.n
-      takeDraftpad(incoming.text, incoming.name)
+      takeDraftpad(incoming.text, incoming.name, incoming.source ?? null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incoming?.n])
@@ -792,9 +802,21 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     try {
       const o = dp.opts
       const tol = num(o.tol)
-      const { sketch, stats } = importDraftpad(sketchEdit.sketch, dp.doc, { layers: o.layers, tol: tol > 0 ? tol : 0.3, center: o.center, fixed: o.fixed, fills: o.fills })
+      const linked = !!(dp.source && o.linked)
+      const { sketch, stats } = importDraftpad(sketchEdit.sketch, dp.doc, {
+        layers: o.layers,
+        tol: tol > 0 ? tol : 0.3,
+        center: o.center,
+        fixed: linked || o.fixed,
+        fills: o.fills,
+        stableIds: !!dp.source,
+      })
       const r = solved(sketch)
       changeSketch(r.info.ok ? r.sketch : sketch, r.info, false)
+      if (dp.source) {
+        const source = { ...dp.source, layers: [...o.layers], opts: { tol: tol > 0 ? tol : 0.3, offset: stats.offset, fills: o.fills }, mode: linked ? 'linked' : 'copy' }
+        setEdit((e) => (e ? { ...e, draft: { ...e.draft, source, name: e.isNew ? dp.source.name : e.draft.name } } : e))
+      }
       setDp(null)
       setTool('select')
       note(
@@ -810,6 +832,80 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     }
   }
 
+  // verknüpfte Skizze neu aus Draftpad holen (Lage, Ebenen und Kennungen bleiben – Bezüge wie die Drehachse halten)
+  const reimport = async (f, mode) => {
+    const src = f.source
+    const [doc, meta] = await Promise.all([api.draftpadGet(src.id), api.draftpadMeta(src.id).catch(() => null)])
+    const layers = new Set(src.layers.filter((id) => doc.layers.some((l) => l.id === id)))
+    if (!layers.size) throw new Error(`„${src.name}“: die übernommenen Ebenen gibt es in Draftpad nicht mehr`)
+    const { sketch } = importDraftpad(newSketch(f.sketch.plane, f.sketch.planeRef), doc, { ...src.opts, layers, fixed: mode === 'linked', stableIds: true })
+    const r = mode === 'linked' ? { sketch } : solved(sketch)
+    return { ...f, sketch: r.sketch ?? sketch, source: { ...src, mode, updated: meta?.updated ?? src.updated, name: meta?.name ?? src.name } }
+  }
+  const refreshDraftpad = async (f, mode = 'linked') => {
+    try {
+      const g = await reimport(f, mode)
+      const list = features.map((x) => (x.id === f.id ? g : x))
+      // Bezüge prüfen: Drehachsen, die es nicht mehr gibt
+      const lost = list.filter((x) => x.type === 'revolve' && x.sketch === f.id && x.axis && !g.sketch.ents.some((e) => e.id === x.axis))
+      commitFeatures(list)
+      setStale((m) => {
+        const n = { ...m }
+        delete n[f.id]
+        return n
+      })
+      note(
+        mode === 'copy'
+          ? `„${f.name}“ ist jetzt eine eigene Kopie (bemaßbar, nicht mehr verknüpft)`
+          : `„${f.name}“ aus Draftpad aktualisiert` + (lost.length ? ` – Drehachse fehlt bei ${lost.map((x) => `„${x.name}“`).join(', ')}` : ''),
+      )
+    } catch (e) {
+      note(String(e.message ?? e))
+    }
+  }
+  const openInDraftpad = async (f) => {
+    const st = await api.draftpadStatus().catch(() => null)
+    if (!st?.url) return note('Draftpad ist nicht verbunden')
+    window.open(`${st.url}/?open=${encodeURIComponent(f.source.id)}`, '_blank')
+  }
+  // Änderungen in Draftpad bemerken (alle 10 s und beim Zurückkehren ins Fenster)
+  const linkedKey = features
+    .filter((f) => f.type === 'sketch' && f.source?.kind === 'draftpad' && f.source.mode === 'linked' && !f.suppressed)
+    .map((f) => `${f.id}:${f.source.id}:${f.source.updated}`)
+    .join('|')
+  const featuresRef = useRef(features)
+  featuresRef.current = features
+  useEffect(() => {
+    if (!linkedKey) return
+    let stop = false
+    const check = async () => {
+      for (const f of featuresRef.current) {
+        if (f.type !== 'sketch' || f.source?.kind !== 'draftpad' || f.source.mode !== 'linked' || f.suppressed) continue
+        try {
+          const m = await api.draftpadMeta(f.source.id)
+          if (stop) return
+          if (m?.updated && f.source.updated && m.updated > f.source.updated) setStale((s) => (s[f.id] === m.updated ? s : { ...s, [f.id]: m.updated }))
+        } catch {
+          /* Server gerade nicht erreichbar */
+        }
+      }
+    }
+    check()
+    const t = setInterval(check, 10000)
+    const onVis = () => document.visibilityState === 'visible' && check()
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', check)
+    return () => {
+      stop = true
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('focus', check)
+    }
+  }, [linkedKey])
+  const staleList = Object.keys(stale)
+    .map((id) => features.find((f) => String(f.id) === id))
+    .filter(Boolean)
+
   // --- Ausgabe ---------------------------------------------------------------------------------
   const hasBody = (built?.bodies ?? 0) > 0
   const errors = (built?.status ?? []).filter((s) => !s.ok && !s.skipped)
@@ -822,6 +918,17 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         {parts && !edit && <PartsDialog parts={parts} setParts={setParts} sketch={partsSketch} onCreate={createParts} />}
         {!edit && !parts && (
           <>
+            {staleList.map((f) => (
+              <div key={f.id} className="notice warn small">
+                <RefreshCw size={14} />
+                <div>
+                  Die Draftpad-Zeichnung zu „{f.name}“ wurde geändert.{' '}
+                  <button className="link" onClick={() => refreshDraftpad(f)}>
+                    Aktualisieren
+                  </button>
+                </div>
+              </div>
+            ))}
             <section className="section">
               <h2>
                 <Hash size={15} /> Verlauf
@@ -850,6 +957,16 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     {(st?.error || prob) && !f.suppressed && <TriangleAlert size={13} className="bad-icon" />}
                     {st?.warn && <Info size={13} className="warn-icon" />}
                     <span className="spacer" />
+                    {f.source?.mode === 'linked' && (
+                      <button
+                        className={'icon-btn keep' + (stale[f.id] ? ' dp-stale-btn' : '')}
+                        title={stale[f.id] ? 'In Draftpad geändert – jetzt aktualisieren' : `Verknüpft mit Draftpad „${f.source.name}“ – neu holen`}
+                        onClick={() => refreshDraftpad(f)}
+                      >
+                        <RefreshCw size={13} />
+                      </button>
+                    )}
+                    {stale[f.id] && <span className="dp-stale">geändert</span>}
                     {f.type === 'sketch' && !f.suppressed && f.sketch?.fills?.length > 0 && (
                       <button className="icon-btn keep" title="Teile aus den Schraffuren anlegen (je Schraffur-Art ein Körper)" onClick={() => openParts(f)}>
                         <Boxes size={13} />
@@ -913,6 +1030,23 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             edit={edit}
             features={features}
             setDraft={setDraft}
+            linkTools={
+              edit.draft.source?.kind === 'draftpad' && !edit.isNew
+                ? {
+                    refresh: () => {
+                      const f = features.find((x) => x.id === edit.id)
+                      cancel()
+                      if (f) refreshDraftpad(f, f.source?.mode ?? 'linked')
+                    },
+                    open: () => openInDraftpad(edit.draft),
+                    unlink: () => {
+                      const f = features.find((x) => x.id === edit.id)
+                      cancel()
+                      if (f) refreshDraftpad(f, 'copy')
+                    },
+                  }
+                : null
+            }
             onOk={() => accept(false)}
             onOkNext={() => accept(true)}
             regionTools={regionTools}
@@ -955,7 +1089,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                   <Icon size={17} />
                 </button>
               ))}
-              <button className="cad-tool" title="Draftpad-Zeichnung in diese Skizze übernehmen" onClick={() => fileRef.current?.click()}>
+              <button className="cad-tool" title="Draftpad-Zeichnung in diese Skizze übernehmen" onClick={() => setDpLib(true)}>
                 <FileUp size={17} />
               </button>
               <span className="cad-sep" />
@@ -996,7 +1130,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                   </button>
                 )
               })}
-              <button className="cad-tool labeled" title="Zeichnung aus Draftpad (.draftpad.json) als Skizze übernehmen" disabled={!!edit} onClick={() => fileRef.current?.click()}>
+              <button className="cad-tool labeled" title="Zeichnung aus Draftpad (Online-Ablage oder .draftpad.json) als Skizze übernehmen" disabled={!!edit} onClick={() => setDpLib(true)}>
                 <FileUp size={17} />
                 <span>Draftpad</span>
               </button>
@@ -1023,6 +1157,17 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           )}
           {building && <Loader2 size={16} className="spin cad-busy" />}
           <input ref={fileRef} type="file" accept=".json,.draftpad" style={{ display: 'none' }} onChange={onDraftpadFile} />
+          {dpLib && (
+            <DraftpadLibrary
+              onClose={() => setDpLib(false)}
+              onError={note}
+              onFile={() => {
+                setDpLib(false)
+                fileRef.current?.click()
+              }}
+              onPick={({ doc, source }) => takeDraftpad(JSON.stringify(doc), source.name, source)}
+            />
+          )}
         </div>
         {(msg || pickFor || regionHint) && (
           <div className="cad-hint">
@@ -1117,7 +1262,7 @@ function PickButton({ active, label, value, onClick }) {
   )
 }
 
-function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
+function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, linkTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
   const d = edit.draft
   const before = features.slice(0, edit.index)
   const sketches = before.filter((f) => f.type === 'sketch' && !f.suppressed)
@@ -1192,6 +1337,32 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
       {d.type === 'sketch' && (
         <>
           <PickButton active={pickFor === 'plane'} label="Ebene" value={sk ? (sk.planeRef?.std ? `Ebene ${sk.planeRef.std}` : 'Fläche') : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'plane' ? null : 'plane')} />
+          {d.source?.kind === 'draftpad' && (
+            <div className="notice small dp-source">
+              <FileUp size={14} />
+              <div>
+                {d.source.mode === 'linked' ? 'Verknüpft mit' : 'Kopie von'} Draftpad „{d.source.name}“
+                {d.source.mode === 'linked' && <>. Die Geometrie ist fest – ändern in Draftpad, dann hier aktualisieren.</>}
+                {linkTools && (
+                  <div className="cad-cons-row">
+                    {d.source.mode === 'linked' && (
+                      <button className="btn small" onClick={linkTools.refresh}>
+                        <RefreshCw size={13} /> Aktualisieren
+                      </button>
+                    )}
+                    <button className="btn small" onClick={linkTools.open}>
+                      <ExternalLink size={13} /> In Draftpad bearbeiten
+                    </button>
+                    {d.source.mode === 'linked' && (
+                      <button className="btn small" title="Bedingungen erkennen und in Projekt-FEM bemaßbar machen; danach kein Aktualisieren mehr" onClick={linkTools.unlink}>
+                        <Unlink size={13} /> Verknüpfung lösen
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {sk && (
             <>
               <SketchConstraints sk={sk} sel={sel} onCon={onCon} onFix={onFix} onConstruction={onConstruction} construction={construction} onDelete={onDelete} />
@@ -1566,6 +1737,24 @@ function DraftpadPanel({ dp, setDp, onImport }) {
           </span>
         </label>
       ))}
+      {dp.source && (
+        <div className="field">
+          <span>Art</span>
+          <Seg
+            value={o.linked ? 'linked' : 'copy'}
+            onChange={(v) => set({ linked: v === 'linked' })}
+            options={[
+              ['linked', 'Verknüpft (aktualisierbar)'],
+              ['copy', 'Kopie (bemaßbar)'],
+            ]}
+          />
+          <small className="muted">
+            {o.linked
+              ? 'Draftpad bleibt die Vorlage: Geometrie fest, Änderungen in Draftpad werden erkannt und per „Aktualisieren“ übernommen.'
+              : 'Eigene Kopie: Bedingungen werden erkannt, du kannst hier bemaßen und ändern – kein Aktualisieren aus Draftpad.'}
+          </small>
+        </div>
+      )}
       <label className="field">
         <span>Lücken schließen bis</span>
         <div className="input-unit">
@@ -1576,9 +1765,11 @@ function DraftpadPanel({ dp, setDp, onImport }) {
       <label className="check">
         <input type="checkbox" checked={o.center} onChange={(e) => set({ center: e.target.checked })} /> Mitte der Zeichnung auf den Ursprung
       </label>
-      <label className="check">
-        <input type="checkbox" checked={!o.fixed} onChange={(e) => set({ fixed: !e.target.checked })} /> Bedingungen erkennen (waagrecht, senkrecht, tangential) – danach bemaßbar
-      </label>
+      {!(dp.source && o.linked) && (
+        <label className="check">
+          <input type="checkbox" checked={!o.fixed} onChange={(e) => set({ fixed: !e.target.checked })} /> Bedingungen erkennen (waagrecht, senkrecht, tangential) – danach bemaßbar
+        </label>
+      )}
       {hasFills && (
         <label className="check">
           <input type="checkbox" checked={o.fills} onChange={(e) => set({ fills: e.target.checked })} /> Schraffierte Flächen als Material vorwählen

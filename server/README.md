@@ -65,6 +65,10 @@ Update: wieder `docker compose pull && docker compose up -d` – oder automatisc
 - **Standard im Docker-Image: ohne Schlüssel** (`PROJEKT_FEM_OHNE_SCHLUESSEL=1`, gedacht für Heimnetz/NAS). Jedes
   Gerät im Heimnetz darf rechnen und deine Onshape-Verbindung nutzen. **Für einen Server im Internet (oder mit
   Portfreigabe) unbedingt `PROJEKT_FEM_OHNE_SCHLUESSEL=0` setzen** – dann gilt der Schlüssel wie oben.
+- **Draftpad:** Adresse des Draftpad-Servers in Projekt-FEM unter Einstellungen › CAD-Verbindungen eintragen
+  oder fest per `PROJEKT_FEM_DRAFTPAD=http://<pi>:8080` (Passwort ggf. `PROJEKT_FEM_DRAFTPAD_PASSWORT`). Auf einem
+  Server im Internet mit Zugangsschlüssel geht nur die Umgebungsvariable (sonst könnte man den Server beliebige
+  Adressen abrufen lassen). Das Passwort bleibt auf dem Server, die Oberfläche sieht es nie.
 - **Verschlüsselung (https):** Wie MathPad läuft der Container ohne https. Über das Internet sollte der Schlüssel
   nicht unverschlüsselt laufen. Empfehlung: eine Domain auf den Server zeigen lassen und davor **Caddy** setzen
   (holt das Zertifikat automatisch):

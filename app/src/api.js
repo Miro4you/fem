@@ -12,13 +12,16 @@ const storage = {
   set: (k, v) => { try { localStorage.setItem(k, v) } catch { /* privat */ } },
 }
 
+/// Draftpad-Zeichnung, die beim Start geöffnet werden soll (#draftpad=<id>, z. B. aus Draftpad „In Projekt-FEM nachweisen“)
+export let startDraftpad = null
 if (!isDesktop && typeof window !== 'undefined') {
-  // Link aus der Desktop-App: http://rechner:8790/#k=SCHLÜSSEL
-  const m = window.location.hash.match(/^#k=([a-z0-9]+)/i)
-  if (m) {
-    storage.set(KEY_STORE, m[1])
-    history.replaceState(null, '', window.location.pathname)
-  }
+  // Link aus der Desktop-App: http://rechner:8790/#k=SCHLÜSSEL, aus Draftpad: …/#draftpad=<id> bzw. #k=…&draftpad=<id>
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const k = hash.get('k')
+  const dp = hash.get('draftpad')
+  if (k && /^[a-z0-9]+$/i.test(k)) storage.set(KEY_STORE, k)
+  if (dp && /^[a-z0-9][a-z0-9-]{0,63}$/.test(dp)) startDraftpad = dp
+  if (k || dp) history.replaceState(null, '', window.location.pathname)
 }
 
 // eigene Sitzung je Browser-Tab (eigenes Modell auf dem Server)
@@ -110,6 +113,15 @@ export const modifyGeometry = (base, ops, size, refine = []) =>
   isDesktop
     ? invoke('modify_geometry', { base, ops, size, refine })
     : http('/modify_geometry', { method: 'POST', json: { base, ops, size, refine } })
+
+// --- Draftpad (Online-Ablage) – über den Rechenkern, das Passwort bleibt dort -----------------------
+export const draftpadStatus = () => (isDesktop ? invoke('draftpad_status') : http('/draftpad/status'))
+/// token: undefined = Passwort behalten, '' = löschen
+export const draftpadConfig = (url, token) =>
+  isDesktop ? invoke('draftpad_config', { url, token: token ?? null }) : http('/draftpad/config', { method: 'POST', json: { url, token: token ?? null } })
+export const draftpadList = (thumbs = true) => (isDesktop ? invoke('draftpad_list', { thumbs }) : http('/draftpad/list', { method: 'POST', json: { thumbs } }))
+export const draftpadGet = (id) => (isDesktop ? invoke('draftpad_get', { id }) : http('/draftpad/get', { method: 'POST', json: { id } }))
+export const draftpadMeta = (id) => (isDesktop ? invoke('draftpad_meta', { id }) : http('/draftpad/meta', { method: 'POST', json: { id } }))
 
 /// Konstruktion: Features aufbauen → { status, volume, bodies, tess, regions?, step? }
 export const cadBuild = (args) => (isDesktop ? invoke('cad_build', { args }) : http('/cad_build', { method: 'POST', json: args }))

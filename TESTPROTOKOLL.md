@@ -323,6 +323,11 @@ selbst starten.
 | 18e.9 | Namen vergeben (Grundplatte, Deckel, Flansch, Lagerringe) › Anlegen | je Teil ein Feature „Neuer Körper“ mit Namen; Hinweise zu losen Stücken/Überschneidungen am Feature | [ ] |
 | 18e.10 | In die Rechnung übernehmen | Hinweis „Baugruppe übernommen: n Körper (Namen), m Berührflächen – verklebt“; im Modell die Körper mit Namen | [ ] |
 | 18e.11 | Bruchlinie (Freihand) am Plattenende | wird als Kontur übernommen, die Platte ist eine geschlossene Fläche; freie Notizen bleiben weg | [ ] |
+| 18e.12 | Einstellungen › CAD-Verbindungen › Draftpad: Adresse des Pi eintragen (z. B. `192.168.1.20:8080`) | „verbunden“ | [ ] |
+| 18e.13 | Startseite › „Aus Draftpad“ | Zeichnungen der Online-Ablage mit Vorschaubild; Doppelklick oder „Übernehmen“ → Ebene wählen → Import „Verknüpft (aktualisierbar)“ | [ ] |
+| 18e.14 | In Draftpad etwas ändern und speichern, dann zurück zu Projekt-FEM | nach ≤ 10 s Hinweis „…wurde geändert“ und Abzeichen am Verlauf; „Aktualisieren“ baut neu, Drehachse bleibt | [ ] |
+| 18e.15 | Skizze öffnen › „In Draftpad bearbeiten“ / „Verknüpfung lösen“ | Draftpad öffnet die Zeichnung; danach ist die Skizze eine bemaßbare Kopie | [ ] |
+| 18e.16 | In Draftpad: Menü › „In Projekt-FEM nachweisen“ (beim ersten Mal Adresse, z. B. `http://nas:8790`) | Projekt-FEM öffnet sich mit neuem Teil und der Zeichnung | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

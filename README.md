@@ -207,8 +207,14 @@ Reiter **„Konstruktion“** – oder auf der Startseite **„Neues Teil konstr
 6. **„In die Rechnung übernehmen“** baut das Teil als STEP, vernetzt es und stellt Lager, Lasten und Nähte auf die
    neuen Flächen um (Ergebnis wird mit vorher verglichen). **„Als STEP speichern“** exportiert es.
 
-**Aus Draftpad:** Knopf „Draftpad“ (in der Werkzeugleiste oder in einer offenen Skizze) oder die `.draftpad.json`
-einfach auf Projekt-FEM ziehen bzw. über „Projekt öffnen“ wählen. Ebene für die Skizze wählen, dann Ebenen der
+**Aus Draftpad:** Startseite „Aus Draftpad“ oder Knopf „Draftpad“ in der Konstruktion öffnet die
+**Online-Ablage von Draftpad** (Adresse des Draftpad-Servers einmal eintragen, z. B. der Raspberry Pi; optional mit
+Passwort – es bleibt im Rechenkern). In Draftpad bringt Menü › **„In Projekt-FEM nachweisen“** die Zeichnung mit
+einem Klick hierher. Aus der Ablage geholte Skizzen sind **verknüpft**: die Geometrie ist fest, Projekt-FEM merkt
+Änderungen in Draftpad (Hinweis „wurde geändert“) und „Aktualisieren“ baut die Körper mit der neuen Form; „In
+Draftpad bearbeiten“ öffnet die Zeichnung dort, „Verknüpfung lösen“ macht eine bemaßbare Kopie. Weiter geht auch
+eine `.draftpad.json`-Datei (in der Bibliothek „Datei vom Rechner …“, auf Projekt-FEM ziehen oder über „Projekt
+öffnen“). Ebene für die Skizze wählen, dann Ebenen der
 Zeichnung ankreuzen (Vorschlag: die „Reinzeichnung“). Linien, Bögen und Kreise werden Skizzenelemente,
 Strich-Punkt-Linien und Achsen Hilfslinien (eine Achse ist gleich die Drehachse), Freihand-Notizen bleiben weg.
 Lücken bis 0,3 mm (einstellbar) werden geschlossen, T-Stöße angeheftet, waagrecht/senkrecht/tangential als

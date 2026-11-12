@@ -42,8 +42,8 @@ function primitives(doc, layerIds) {
     if (!layerIds.has(e.layerId) || !GEO.has(e.kind)) continue
     const lt = e.style?.lineType ?? 'solid'
     const cons = e.axis || lt === 'dashdot' || lt === 'dashdotdot' || lt === 'dashed'
-    if (e.kind === 'line') out.push({ t: 'line', a: flip(e.a), b: flip(e.b), cons, axis: !!e.axis, hidden: lt === 'dashed' })
-    else if (e.kind === 'circle') out.push({ t: 'circle', c: flip(e.c), r: e.r, cons })
+    if (e.kind === 'line') out.push({ did: e.id, t: 'line', a: flip(e.a), b: flip(e.b), cons, axis: !!e.axis, hidden: lt === 'dashed' })
+    else if (e.kind === 'circle') out.push({ did: e.id, t: 'circle', c: flip(e.c), r: e.r, cons, mark: !!e.mark })
     else {
       const c = flip(e.c)
       const s = -e.start
@@ -51,8 +51,8 @@ function primitives(doc, layerIds) {
       // gegen den Uhrzeigersinn: von min(s, s+w) nach max(s, s+w)
       const a0 = Math.min(s, s + w)
       const a1 = Math.max(s, s + w)
-      if (Math.abs(a1 - a0) >= 2 * Math.PI - 1e-9) out.push({ t: 'circle', c, r: e.r, cons })
-      else out.push({ t: 'arc', c, r: e.r, a: [c[0] + e.r * Math.cos(a0), c[1] + e.r * Math.sin(a0)], b: [c[0] + e.r * Math.cos(a1), c[1] + e.r * Math.sin(a1)], cons })
+      if (Math.abs(a1 - a0) >= 2 * Math.PI - 1e-9) out.push({ did: e.id, t: 'circle', c, r: e.r, cons })
+      else out.push({ did: e.id, t: 'arc', c, r: e.r, a: [c[0] + e.r * Math.cos(a0), c[1] + e.r * Math.sin(a0)], b: [c[0] + e.r * Math.cos(a1), c[1] + e.r * Math.sin(a1)], cons })
     }
   }
   // Freihand-Striche, die an beiden Enden an Konturen anschließen (z. B. Bruchlinien), schließen eine Kontur:
@@ -76,7 +76,7 @@ function primitives(doc, layerIds) {
     for (let i = 0; i + 1 < e.pts.length; i += 2) pts.push([e.pts[i], -e.pts[i + 1]])
     if (!near(pts[0]) || !near(pts[pts.length - 1])) continue
     const simple = simplify(pts, 0.15)
-    for (let i = 0; i + 1 < simple.length; i++) out.push({ t: 'line', a: simple[i], b: simple[i + 1], cons: false, stroke: true })
+    for (let i = 0; i + 1 < simple.length; i++) out.push({ did: `${e.id}_${i}`, t: 'line', a: simple[i], b: simple[i + 1], cons: false, stroke: true })
   }
   return out
 }
@@ -155,7 +155,7 @@ export function importDraftpad(sk0, doc, opts) {
   const all = prims.flatMap((p) => (p.t === 'line' ? [p.a, p.b] : [[p.c[0] - p.r, p.c[1] - p.r], [p.c[0] + p.r, p.c[1] + p.r]]))
   const lo = [Math.min(...all.map((p) => p[0])), Math.min(...all.map((p) => p[1]))]
   const hi = [Math.max(...all.map((p) => p[0])), Math.max(...all.map((p) => p[1]))]
-  const off = opts.center ? [-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2] : [0, 0]
+  const off = opts.offset ?? (opts.center ? [-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2] : [0, 0])
   const tr = (p) => [(p[0] + off[0]) * k, (p[1] + off[1]) * k]
   prims = prims.map((p) => (p.t === 'line' ? { ...p, a: tr(p.a), b: tr(p.b) } : p.t === 'circle' ? { ...p, c: tr(p.c), r: p.r * k } : { ...p, c: tr(p.c), a: tr(p.a), b: tr(p.b), r: p.r * k }))
 
@@ -179,7 +179,8 @@ export function importDraftpad(sk0, doc, opts) {
   const grid = new Map()
   const cell = (q) => `${Math.floor(q[0] / tol)},${Math.floor(q[1] / tol)}`
   let merged = 0
-  const pointFor = (q, fix = false) => {
+  const stable = !!opts.stableIds
+  const pointFor = (q, fix = false, wanted = null) => {
     const [cx, cy] = cell(q).split(',').map(Number)
     let best = null
     for (let i = -1; i <= 1; i++)
@@ -192,7 +193,7 @@ export function importDraftpad(sk0, doc, opts) {
       if (best.d > 0) merged++
       return best.c.id
     }
-    const id = addPoint(s, q, fix)
+    const id = addPoint(s, q, fix, stable ? wanted : null)
     const c = { at: q, id }
     pts.push(c)
     const kk = cell(q)
@@ -204,9 +205,15 @@ export function importDraftpad(sk0, doc, opts) {
   const made = []
   for (const p of prims) {
     let e
-    if (p.t === 'line') e = addEnt(s, { t: 'line', a: pointFor(p.a, fixed), b: pointFor(p.b, fixed), cons: p.cons || undefined, axis: p.axis || undefined })
-    else if (p.t === 'circle') e = addEnt(s, { t: 'circle', c: pointFor(p.c, fixed), r: p.r, cons: p.cons || undefined, fix: fixed || undefined })
-    else e = addEnt(s, { t: 'arc', c: pointFor(p.c, fixed), a: pointFor(p.a, fixed), b: pointFor(p.b, fixed), cons: p.cons || undefined })
+    const sid = (suffix) => (stable && p.did ? `d_${p.did}${suffix}` : null)
+    const ent = (x) => addEnt(s, stable && p.did && !s.ents.some((o) => o.id === `d_${p.did}`) ? { ...x, id: `d_${p.did}` } : x)
+    if (p.t === 'line') e = ent({ t: 'line', a: pointFor(p.a, fixed, sid('_a')), b: pointFor(p.b, fixed, sid('_b')), cons: p.cons || undefined, axis: p.axis || undefined })
+    else if (p.t === 'circle') {
+      e = ent({ t: 'circle', c: pointFor(p.c, fixed, sid('_c')), r: p.r, cons: p.cons || undefined, fix: fixed || undefined })
+      // Kreis mit Achsenkreuz: Mitte als Punkt (Bohrpunkt für „Bohrung“)
+      if (p.mark && opts.markPoints !== false) addEnt(s, { t: 'point', p: e.c, ...(stable && p.did ? { id: `d_${p.did}_m` } : {}) })
+    }
+    else e = ent({ t: 'arc', c: pointFor(p.c, fixed, sid('_c')), a: pointFor(p.a, fixed, sid('_a')), b: pointFor(p.b, fixed, sid('_b')), cons: p.cons || undefined })
     made.push(e)
   }
   // zusammengeführte Punkte liegen etwas daneben: auf den Mittelwert setzen
@@ -307,6 +314,7 @@ export function importDraftpad(sk0, doc, opts) {
       solved: ok,
       fills: s.fills?.length ?? 0,
       size: [(hi[0] - lo[0]) * k, (hi[1] - lo[1]) * k],
+      offset: off,
     },
   }
 }
