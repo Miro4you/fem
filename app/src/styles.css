@@ -759,7 +759,8 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-feat.skipped { opacity: 0.6; }
 .cad-feat-name { border: none; background: none; padding: 0; cursor: pointer; text-align: left; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cad-feat .icon-btn { opacity: 0; }
-.cad-feat:hover .icon-btn, .cad-feat.off .icon-btn { opacity: 1; }
+.cad-feat:hover .icon-btn, .cad-feat .icon-btn.keep { opacity: 1; }
+.cad-feat.on { background: var(--accent-soft); }
 .bad-icon { color: var(--bad); flex-shrink: 0; }
 .warn-icon { color: var(--warn-text); flex-shrink: 0; }
 .notice.small { padding: 6px 8px; }

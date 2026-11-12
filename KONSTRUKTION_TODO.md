@@ -83,7 +83,7 @@ Ansicht, im leeren neuen Teil die drei Achsen am Ursprung stehen.
 
 ---
 
-## B. Skizzen bleiben sichtbar
+## B. Skizzen bleiben sichtbar ✅ (erledigt)
 
 **Ist:** `CadView` zeichnet nur die Skizze, die gerade bearbeitet wird (Prop `sketch`). Fertige Skizzen sind
 unsichtbar. Außerdem baut der Skizzen-Effekt (der große `useEffect` mit `s.sketch.clear()`) bei jedem

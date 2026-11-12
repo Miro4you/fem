@@ -35,6 +35,10 @@ import {
   Hash,
   FileUp,
   Layers,
+  Power,
+  PowerOff,
+  PenOff,
+  Tags,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -154,6 +158,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const [pickFor, setPickFor] = useState(null) // welches Feld gerade per Klick gewählt wird
   const [msg, setMsg] = useState(null)
   const [showStd, setShowStd] = useState(true) // Hauptebenen immer zeigen
+  const [showSketches, setShowSketches] = useState(true) // fertige Skizzen im Hintergrund zeigen
+  const [selSketch, setSelSketch] = useState(null) // im Bild angeklickte Skizze (im Verlauf markiert)
+  const [showGlyphs, setShowGlyphs] = useState(null) // Bedingungszeichen: null = automatisch (bis 40)
   const [history, setHistory] = useState({ undo: [], redo: [] })
   const skHist = useRef({ undo: [], redo: [] })
   const viewRef = useRef(null)
@@ -263,6 +270,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   const openEdit = (f) => {
     if (edit) return note('Erst das offene Feature bestätigen oder abbrechen')
+    setSelSketch(null)
     const index = features.findIndex((g) => g.id === f.id)
     setEdit({ id: f.id, draft: structuredClone(f), isNew: false, index })
     setSel(emptySel)
@@ -592,6 +600,22 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     return { plane: regionSketch.plane, a: [regionSketch.pts[e.a].x, regionSketch.pts[e.a].y], b: [regionSketch.pts[e.b].x, regionSketch.pts[e.b].y] }
   })()
 
+  // fertige Skizzen im Hintergrund (nicht die gerade bearbeitete)
+  const bgSketches = useMemo(() => {
+    if (!showSketches) return []
+    const used = edit?.draft?.sketch
+    return features
+      .filter((f) => f.type === 'sketch' && !f.suppressed && !f.hidden && f.id !== sketchEdit?.id && f.sketch?.ents?.length)
+      .map((f) => ({ id: f.id, plane: f.sketch.plane, data: f.sketch, active: used === f.id || selSketch === f.id }))
+  }, [features, showSketches, edit?.draft?.sketch, sketchEdit?.id, selSketch])
+  const onSketchPick = (id, open) => {
+    if (edit) return
+    const f = features.find((g) => g.id === id)
+    if (!f) return setSelSketch(null)
+    setSelSketch(id)
+    if (open) openEdit(f)
+  }
+
   const sketchProps = sketchEdit
     ? {
         data: sketchEdit.sketch,
@@ -603,6 +627,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         onChange: onSketchChange,
         onSel: setSel,
         onMessage: note,
+        showGlyphs,
       }
     : null
 
@@ -685,7 +710,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 return (
                   <div
                     key={f.id}
-                    className={'cad-feat' + (f.suppressed ? ' off' : '') + (st && !st.ok && !st.skipped ? ' bad' : '') + (st?.skipped ? ' skipped' : '')}
+                    className={'cad-feat' + (f.suppressed ? ' off' : '') + (st && !st.ok && !st.skipped ? ' bad' : '') + (st?.skipped ? ' skipped' : '') + (selSketch === f.id ? ' on' : '')}
                     onDoubleClick={() => openEdit(f)}
                     title={st?.error ?? st?.warn?.join(' · ') ?? prob ?? 'Doppelklick zum Bearbeiten'}
                   >
@@ -696,8 +721,17 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     {(st?.error || prob) && !f.suppressed && <TriangleAlert size={13} className="bad-icon" />}
                     {st?.warn && <Info size={13} className="warn-icon" />}
                     <span className="spacer" />
-                    <button className="icon-btn" title={f.suppressed ? 'Wieder einschalten' : 'Unterdrücken (vorübergehend aus)'} onClick={() => commitFeatures(features.map((g, k) => (k === i ? { ...g, suppressed: !g.suppressed } : g)))}>
-                      {f.suppressed ? <EyeOff size={13} /> : <Eye size={13} />}
+                    {f.type === 'sketch' && !f.suppressed && (
+                      <button
+                        className={'icon-btn' + (f.hidden ? ' keep' : '')}
+                        title={f.hidden ? 'Skizze im Bild zeigen' : 'Skizze im Bild ausblenden (wirkt weiter)'}
+                        onClick={() => setCad({ ...cad, features: features.map((g, k) => (k === i ? { ...g, hidden: !g.hidden || undefined } : g)) })}
+                      >
+                        {f.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                    )}
+                    <button className={'icon-btn' + (f.suppressed ? ' keep' : '')} title={f.suppressed ? 'Wieder einschalten' : 'Unterdrücken (vorübergehend aus, wirkt nicht mehr)'} onClick={() => commitFeatures(features.map((g, k) => (k === i ? { ...g, suppressed: !g.suppressed } : g)))}>
+                      {f.suppressed ? <PowerOff size={13} /> : <Power size={13} />}
                     </button>
                     <button className="icon-btn" title="Löschen" onClick={() => removeFeature(f)}>
                       <Trash2 size={13} />
@@ -805,6 +839,13 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               <button className="cad-tool" title="Wiederholen (Strg+Y)" onClick={skRedo}>
                 <Redo2 size={17} />
               </button>
+              <button
+                className={'cad-tool' + ((showGlyphs ?? (sketchEdit.sketch.cons.length <= 40)) ? ' on' : '')}
+                title="Bedingungszeichen im Bild zeigen/verbergen (bei vielen Elementen automatisch aus)"
+                onClick={() => setShowGlyphs(!(showGlyphs ?? sketchEdit.sketch.cons.length <= 40))}
+              >
+                <Tags size={17} />
+              </button>
               <span className="cad-sep" />
               <SketchStatus info={skInfo} />
             </>
@@ -830,6 +871,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 </button>
               )}
               <span className="cad-sep" />
+              <button className={'cad-tool' + (showSketches ? ' on' : '')} title={showSketches ? 'Fertige Skizzen ausblenden' : 'Fertige Skizzen zeigen'} onClick={() => setShowSketches(!showSketches)}>
+                {showSketches ? <Pencil size={17} /> : <PenOff size={17} />}
+              </button>
               <button className={'cad-tool' + (showStd ? ' on' : '')} title={showStd ? 'Hauptebenen verbergen (erscheinen weiter, wenn eine Ebene gewählt werden soll)' : 'Hauptebenen zeigen'} onClick={() => setShowStd(!showStd)}>
                 <Layers size={17} />
               </button>
@@ -870,6 +914,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           showPlanes={!sketchEdit && (showStd || !hasBody || pickFor === 'plane' || pickFor === 'mplane' || editingSketchEmpty)}
           regions={regions}
           axisLine={axisLine}
+          sketches={bgSketches}
+          onSketchPick={onSketchPick}
           preview={!!edit && ['extrude', 'revolve', 'hole'].includes(edit.draft.type) && edit.draft.mode === 'cut'}
         />
       </section>

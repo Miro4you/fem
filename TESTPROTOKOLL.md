@@ -300,6 +300,9 @@ selbst starten.
 | 18d.14 | Parameterstudie: Skizzenmaß mit Namen versehen, in der Studie wählen | Werte werden nacheinander gebaut und gerechnet | [ ] |
 | 18d.15 | Konstruktion öffnen | Ansichtswürfel oben rechts, Achsenkreuz unten links, Achsen X/Y/Z (rot/grün/blau) am Ursprung, Hauptebenen beschriftet („XY · Oben“ …) | [ ] |
 | 18d.16 | Würfelfläche bzw. Achse im Achsenkreuz anklicken; Knopf „Ebenen“ in der Werkzeugleiste; beim Skizzieren „⊥“ | Ansicht dreht sich dorthin; Ebenen aus/ein (zum Wählen einer Ebene erscheinen sie trotzdem); Blick senkrecht auf die Skizze | [ ] |
+| 18d.17 | Skizze fertig, dann extrudieren/drehen | Skizze bleibt als dünne Linien im Raum (auch vor dem Körper); vom offenen Feature benutzte Skizze blau | [ ] |
+| 18d.18 | Skizzenlinie im Bild anklicken / doppelklicken; Auge an der Skizze im Verlauf; Knopf „Skizzen“ in der Leiste | Skizze im Verlauf markiert / zum Bearbeiten geöffnet; einzeln bzw. alle aus- und einblenden; Ein/Aus-Knopf = unterdrücken | [ ] |
+| 18d.19 | Große Draftpad-Skizze bearbeiten | Bedingungszeichen automatisch aus (Knopf „Bedingungen“ zeigt sie), Ziehen/Hover flüssig | [ ] |
 
 ## 18e. Draftpad-Zeichnung als Skizze (neu)
 

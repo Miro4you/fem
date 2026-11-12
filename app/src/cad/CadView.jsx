@@ -35,6 +35,17 @@ const HOVER = new THREE.Color('#ffffff')
 const SELECT = new THREE.Color('#f59e0b')
 const FACE_PICK = new THREE.Color('#60a5fa')
 
+const front = (m) => {
+  m.depthTest = false
+  m.transparent = true
+  return m
+}
+
+function clearGroup(g) {
+  g.traverse((o) => (o.geometry?.dispose(), o.material?.dispose()))
+  g.clear()
+}
+
 /// Punkt in einem Linienzug (gerade/ungerade über alle Ränder)
 function insideLoops(q, loops) {
   let n = 0
@@ -58,12 +69,14 @@ export default function CadView({
   regions, // { plane, list: [{ loops, on }], onToggle }
   axisLine, // { plane, a, b } hervorgehobene Achse (Drehen)
   preview, // { color } Körper halbdurchsichtig zeigen
+  sketches, // Hintergrund-Skizzen [{ id, plane, data, active }]
+  onSketchPick, // (id, open) – Klick/Doppelklick auf eine Hintergrund-Skizze
   ref,
 }) {
   const host = useRef(null)
   const ctx = useRef(null)
   const cb = useRef({})
-  cb.current = { pick, onPick, sketch, regions, tess }
+  cb.current = { pick, onPick, sketch, regions, tess, sketches, onSketchPick }
   const [overlay, setOverlay] = useState({ dims: [], glyphs: [] })
   const [hover, setHover] = useState(null) // { face } | { edge } | { std } | Skizze: { pt } | { ent }
   const [edit, setEdit] = useState(null) // Maß bearbeiten { id, x, y, value }
@@ -106,6 +119,9 @@ export default function CadView({
       body: new THREE.Group(),
       planes: new THREE.Group(),
       axes: new THREE.Group(),
+      bgGroup: new THREE.Group(),
+      regionGroup: new THREE.Group(),
+      previewGroup: new THREE.Group(),
       labelPts: [],
       sketch: new THREE.Group(),
       extra: new THREE.Group(),
@@ -114,7 +130,7 @@ export default function CadView({
       size: 100,
       center: new THREE.Vector3(),
     }
-    scene.add(s.body, s.planes, s.axes, s.sketch, s.extra)
+    scene.add(s.body, s.planes, s.axes, s.bgGroup, s.regionGroup, s.sketch, s.previewGroup, s.extra)
     const pickPoint = (cx, cy) => {
       if (!s.surf) return null
       setRay(cx, cy)
@@ -338,27 +354,16 @@ export default function CadView({
     s.dirty = true
   }, [showPlanes, selected, hover, tess])
 
-  // --- Skizze, Bereiche, Achse ---------------------------------------------------------------------
+  // --- Skizze, Bereiche, Achse, Hintergrund-Skizzen ------------------------------------------------
   const skData = sketch?.data
   const skPlane = sketch?.plane
+  const hoverSk = hover?.pt ? 'p:' + hover.pt : hover?.ent ? 'e:' + hover.ent : ''
+  const hoverBg = hover?.bg ?? null
+
+  // Bereiche (Extrudieren/Drehen) und Drehachse
   useEffect(() => {
     const s = ctx.current
-    s.sketch.traverse((o) => (o.geometry?.dispose(), o.material?.dispose()))
-    s.sketch.clear()
-    const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches)
-    const defined = dark ? 0xe8eaed : 0x111827
-    const free = 0x2563eb
-    const selCol = 0xf59e0b
-    const front = (m) => {
-      m.depthTest = false
-      m.transparent = true
-      return m
-    }
-    const add = (obj, order = 20) => {
-      obj.renderOrder = order
-      s.sketch.add(obj)
-    }
-    // Bereiche (Extrudieren/Drehen)
+    clearGroup(s.regionGroup)
     if (regions?.list?.length) {
       const b = basis(regions.plane)
       const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...b.u), new THREE.Vector3(...b.v), new THREE.Vector3(...b.n)).setPosition(...b.o)
@@ -373,7 +378,8 @@ export default function CadView({
           front(new THREE.MeshBasicMaterial({ color: r.on ? 0x2563eb : 0x94a3b8, opacity: r.on ? 0.35 : 0.12, side: THREE.DoubleSide, depthWrite: false })),
         )
         mesh.applyMatrix4(m)
-        add(mesh, 12)
+        mesh.renderOrder = 12
+        s.regionGroup.add(mesh)
       })
     }
     if (axisLine) {
@@ -383,40 +389,103 @@ export default function CadView({
       const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a).sub(d), new THREE.Vector3(...c).add(d)])
       const l = new THREE.Line(g, front(new THREE.LineDashedMaterial({ color: 0xdc2626, dashSize: s.size / 60, gapSize: s.size / 90 })))
       l.computeLineDistances()
-      add(l, 25)
+      l.renderOrder = 25
+      s.regionGroup.add(l)
     }
+    s.dirty = true
+  }, [regions, axisLine])
+
+  // Hintergrund-Skizzen (fertige Skizzen bleiben sichtbar)
+  useEffect(() => {
+    const s = ctx.current
+    clearGroup(s.bgGroup)
+    for (const k of sketches ?? []) {
+      const strong = k.active || hoverBg === k.id
+      const solid = []
+      const dashed = []
+      for (const e of k.data.ents) {
+        if (e.t === 'point') continue
+        const pts = polyline(k.data, e, 48).map((q) => to3d(k.plane, q))
+        const out = e.cons ? dashed : solid
+        for (let i = 0; i + 1 < pts.length; i++) out.push(...pts[i], ...pts[i + 1])
+      }
+      const color = strong ? 0x2563eb : 0x64748b
+      const opacity = strong ? 0.9 : 0.55
+      if (solid.length) {
+        const g = new THREE.BufferGeometry()
+        g.setAttribute('position', new THREE.Float32BufferAttribute(solid, 3))
+        const l = new THREE.LineSegments(g, front(new THREE.LineBasicMaterial({ color, opacity })))
+        l.renderOrder = 11
+        s.bgGroup.add(l)
+      }
+      if (dashed.length) {
+        const g = new THREE.BufferGeometry()
+        g.setAttribute('position', new THREE.Float32BufferAttribute(dashed, 3))
+        const l = new THREE.LineSegments(g, front(new THREE.LineDashedMaterial({ color, opacity: opacity * 0.8, dashSize: s.size / 80, gapSize: s.size / 120 })))
+        l.computeLineDistances()
+        l.renderOrder = 11
+        s.bgGroup.add(l)
+      }
+    }
+    s.dirty = true
+  }, [sketches, hoverBg])
+
+  // bearbeitete Skizze: Linien (zu wenigen Objekten zusammengefasst), Punkte, Ursprung, Maßlinien
+  useEffect(() => {
+    const s = ctx.current
+    clearGroup(s.sketch)
     if (!skData || !skPlane) {
       s.dirty = true
       return
+    }
+    const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches)
+    const defined = new THREE.Color(dark ? 0xe8eaed : 0x111827)
+    const free = new THREE.Color(0x2563eb)
+    const selCol = new THREE.Color(0xf59e0b)
+    const hovCol = new THREE.Color(0x60a5fa)
+    const add = (obj, order) => {
+      obj.renderOrder = order
+      s.sketch.add(obj)
     }
     const sk = skData
     const freeSet = sketch.info?.free ?? new Set()
     const selE = new Set(sketch.sel?.ents ?? [])
     const selP = new Set(sketch.sel?.pts ?? [])
-    const W = (q) => new THREE.Vector3(...to3d(skPlane, q))
+    const hovE = hoverSk.startsWith('e:') ? hoverSk.slice(2) : null
+    const hovP = hoverSk.startsWith('p:') ? hoverSk.slice(2) : null
+    const W = (q) => to3d(skPlane, q)
+    const buf = { solid: { pos: [], col: [] }, dashed: { pos: [], col: [] } }
     for (const e of sk.ents) {
       if (e.t === 'point') continue
       const pts = polyline(sk, e).map(W)
       const isFree = entPoints(e).some((p) => freeSet.has(p)) || (e.t === 'circle' && freeSet.has(e.id))
-      const color = selE.has(e.id) ? selCol : hover?.ent === e.id ? 0x60a5fa : isFree ? free : defined
-      const g = new THREE.BufferGeometry().setFromPoints(pts)
-      const mat = e.cons
-        ? front(new THREE.LineDashedMaterial({ color, dashSize: s.size / 80, gapSize: s.size / 120 }))
-        : front(new THREE.LineBasicMaterial({ color }))
-      const line = new THREE.Line(g, mat)
-      if (e.cons) line.computeLineDistances()
-      add(line, 22)
+      const c = selE.has(e.id) ? selCol : hovE === e.id ? hovCol : isFree ? free : defined
+      const out = e.cons ? buf.dashed : buf.solid
+      for (let i = 0; i + 1 < pts.length; i++) {
+        out.pos.push(...pts[i], ...pts[i + 1])
+        out.col.push(c.r, c.g, c.b, c.r, c.g, c.b)
+      }
+    }
+    for (const [k, v] of Object.entries(buf)) {
+      if (!v.pos.length) continue
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.Float32BufferAttribute(v.pos, 3))
+      g.setAttribute('color', new THREE.Float32BufferAttribute(v.col, 3))
+      const mat = k === 'dashed' ? new THREE.LineDashedMaterial({ vertexColors: true, dashSize: s.size / 80, gapSize: s.size / 120 }) : new THREE.LineBasicMaterial({ vertexColors: true })
+      const l = new THREE.LineSegments(g, front(mat))
+      if (k === 'dashed') l.computeLineDistances()
+      add(l, 22)
     }
     // Punkte
     const ptPos = []
     const ptCol = []
-    const c = new THREE.Color()
     const shown = new Set(sk.ents.flatMap((e) => (e.t === 'circle' || e.t === 'arc' ? [e.c, ...(e.t === 'arc' ? [e.a, e.b] : [])] : entPoints(e))))
+    const c = new THREE.Color()
     for (const id of shown) {
       const p = sk.pts[id]
       if (!p) continue
-      ptPos.push(...W([p.x, p.y]).toArray())
-      c.set(selP.has(id) ? selCol : hover?.pt === id ? 0x60a5fa : p.fix ? 0x6b7280 : freeSet.has(id) ? free : defined)
+      ptPos.push(...W([p.x, p.y]))
+      c.copy(selP.has(id) ? selCol : hovP === id ? hovCol : p.fix ? new THREE.Color(0x6b7280) : freeSet.has(id) ? free : defined)
       ptCol.push(c.r, c.g, c.b)
     }
     if (ptPos.length) {
@@ -438,26 +507,39 @@ export default function CadView({
     for (const con of sk.cons) {
       if (!isDim(con)) continue
       const d = dimGeometry(sk, con)
-      if (!d) continue
-      if (d.arc) continue
-      segs.push(W(d.from), W(d.to))
-      for (const [a, b] of d.ext) segs.push(W(a), W(b))
+      if (!d || d.arc) continue
+      segs.push(...W(d.from), ...W(d.to))
+      for (const [a, b] of d.ext) segs.push(...W(a), ...W(b))
     }
-    if (segs.length) add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(segs), front(new THREE.LineBasicMaterial({ color: 0x64748b }))), 21)
-    // Vorschau der laufenden Zeichenaktion
-    const t = tmp.current
-    if (t?.preview?.length) {
-      for (const pl of t.preview) {
-        const g = new THREE.BufferGeometry().setFromPoints(pl.map(W))
-        add(new THREE.Line(g, front(new THREE.LineBasicMaterial({ color: 0x2563eb, opacity: 0.8 }))), 26)
-      }
-    }
-    if (t?.snapAt) {
-      const g = new THREE.BufferGeometry().setFromPoints([W(t.snapAt)])
-      add(new THREE.Points(g, front(new THREE.PointsMaterial({ size: 11, sizeAttenuation: false, color: 0xf59e0b }))), 27)
+    if (segs.length) {
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3))
+      add(new THREE.LineSegments(g, front(new THREE.LineBasicMaterial({ color: 0x64748b }))), 21)
     }
     s.dirty = true
-  }, [skData, skPlane, sketch?.sel, sketch?.info, sketch?.tool, regions, axisLine, hover, overlay.tick])
+  }, [skData, skPlane, sketch?.sel, sketch?.info, hoverSk])
+
+  // Vorschau der laufenden Zeichenaktion
+  useEffect(() => {
+    const s = ctx.current
+    clearGroup(s.previewGroup)
+    const t = tmp.current
+    if (skPlane && t?.preview?.length) {
+      for (const pl of t.preview) {
+        const g = new THREE.BufferGeometry().setFromPoints(pl.map((q) => new THREE.Vector3(...to3d(skPlane, q))))
+        const l = new THREE.Line(g, front(new THREE.LineBasicMaterial({ color: 0x2563eb, opacity: 0.8 })))
+        l.renderOrder = 26
+        s.previewGroup.add(l)
+      }
+    }
+    if (skPlane && t?.snapAt) {
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...to3d(skPlane, t.snapAt))])
+      const p = new THREE.Points(g, front(new THREE.PointsMaterial({ size: 11, sizeAttenuation: false, color: 0xf59e0b })))
+      p.renderOrder = 27
+      s.previewGroup.add(p)
+    }
+    s.dirty = true
+  }, [skPlane, sketch?.tool, overlay.tick])
 
   // --- HTML-Beschriftung (Maße, Bedingungszeichen) ---------------------------------------------------
   useEffect(() => {
@@ -615,6 +697,24 @@ export default function CadView({
       return best ? { ...best, q } : { q }
     }
 
+    // Linie einer Hintergrund-Skizze unter dem Zeiger → id der Skizze
+    const bgHit = (ev) => {
+      const list = cb.current.sketches
+      if (!list?.length || !cb.current.onSketchPick) return null
+      let best = null
+      for (const k of list) {
+        const q = onPlane(ev, k.plane)
+        if (!q) continue
+        const tol = 7 * mmPerPx(k.plane)
+        for (const e of k.data.ents) {
+          if (e.t === 'point') continue
+          const d = distTo(k.data, e, q)
+          if (d < tol && (!best || d / tol < best.d)) best = { id: k.id, d: d / tol }
+        }
+      }
+      return best?.id ?? null
+    }
+
     const refsOf = (plane) => {
       // Bauteilpunkte und Kreismitten, die in der Skizzenebene liegen (zum Fangen)
       const t = cb.current.tess
@@ -702,7 +802,11 @@ export default function CadView({
         return
       }
       const want = cb.current.pick
-      if (!want) return setHover((o) => (o ? null : o))
+      if (!want) {
+        const id = bgHit(ev)
+        const nh = id != null ? { bg: id } : null
+        return setHover((o) => (JSON.stringify(o) === JSON.stringify(nh) ? o : nh))
+      }
       const h = pick3d(ev, want)
       const nh = h?.face ? { face: h.face.tag } : h?.edge ? { edge: h.edge.tag } : h?.std ? { std: h.std } : null
       setHover((o) => (JSON.stringify(o) === JSON.stringify(nh) ? o : nh))
@@ -785,7 +889,10 @@ export default function CadView({
       if (!down || Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 4 || down.button !== 0) return
       if (sk) return sketchClick(ev, sk)
       const want = cb.current.pick
-      if (!want) return
+      if (!want) {
+        cb.current.onSketchPick?.(bgHit(ev), false)
+        return
+      }
       const h = pick3d(ev, want)
       cb.current.onPick?.(h, ev)
     }
@@ -980,6 +1087,11 @@ export default function CadView({
         if (sk.tool === 'line') finishTool()
         return
       }
+      // Doppelklick auf eine Hintergrund-Skizze: bearbeiten
+      if (!cb.current.pick) {
+        const id = bgHit(ev)
+        if (id != null) return cb.current.onSketchPick?.(id, true)
+      }
       // Doppelklick auf ebene Fläche: Blick senkrecht darauf
       const h = pick3d(ev, { planar: true })
       if (h?.face?.normal) lookAtPlane({ origin: h.face.point ?? h.face.center, normal: h.face.normal })
@@ -1023,7 +1135,7 @@ export default function CadView({
     const s = ctx.current
     // Körper und Skizze (auch ohne Körper, z. B. nach einem Import)
     const box = new THREE.Box3()
-    for (const g of [s.body, s.sketch]) if (g.children.length) box.expandByObject(g)
+    for (const g of [s.body, s.sketch, s.bgGroup, s.regionGroup]) if (g.children.length) box.expandByObject(g)
     const center = box.isEmpty() ? s.center.clone() : box.getCenter(new THREE.Vector3())
     const radius = box.isEmpty() ? s.size / 2 : Math.max(box.getSize(new THREE.Vector3()).length() / 2, 5)
     s.lastFit = radius
@@ -1074,7 +1186,7 @@ export default function CadView({
     sk.onChange(r.sketch, r.info)
   }
 
-  const cursor = sketch ? (sketch.tool === 'select' ? (hover?.pt || hover?.ent ? 'pointer' : 'default') : 'crosshair') : pick && hover ? 'pointer' : 'default'
+  const cursor = sketch ? (sketch.tool === 'select' ? (hover?.pt || hover?.ent ? 'pointer' : 'default') : 'crosshair') : (pick || hover?.bg != null) && hover ? 'pointer' : 'default'
   return (
     <div className="viewport cad-view">
       <div ref={host} className="viewport-canvas" style={{ cursor }} />
@@ -1125,6 +1237,7 @@ export default function CadView({
           </button>
         ))}
       {sketch &&
+        (sketch.showGlyphs ?? (sketch.data?.cons?.length ?? 0) <= 40) &&
         overlay.glyphs.map((g) => (
           <button
             key={g.id}
