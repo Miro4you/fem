@@ -11,7 +11,8 @@ Felix' Wünsche (wörtlich zusammengefasst):
 3. Die Skizze soll überhaupt **angezeigt** werden (nach „Skizze fertig“ ist sie im Moment weg).
 4. Wieder ein **Koordinatensystem** im CAD (Achsenkreuz, Ansichtswürfel).
 
-Reihenfolge der Pakete: **A → B → C → D → E**. A und B sind klein und machen C erst gut bedienbar.
+Reihenfolge der Pakete: **A → B → C → F → D → E**. A und B sind klein und machen C erst gut bedienbar; F ist der
+Ablauf, um den es Felix eigentlich geht (siehe „Entscheidungen“ am Ende); D macht ihn bequem.
 Jedes Paket einzeln bauen, im Browser testen, committen, pushen.
 
 ---
@@ -178,6 +179,79 @@ ohne die Skizze zu verlassen; unter der Maus wird der Bereich hell; schon benutz
 
 ---
 
+## F. Baugruppe aus einer Skizze (der eigentliche Zweck)
+
+**Wozu:** Felix skizziert in Draftpad eine Baugruppe (meist eine Schnittzeichnung). Wenn er etwas nachweisen
+will, schiebt er die Skizze nach Projekt-FEM, macht daraus „quick and dirty“ Körper, gibt Lasten an und rechnet.
+Es entstehen **mehrere Körper** (Baugruppe); **jedes Teil ist ein zusammenhängender Körper**. Hat die Zeichnung
+eine Rotationsachse, sind die Teile oft rotationssymmetrisch (→ Drehen), aber nicht immer (→ Extrudieren).
+
+**Ist:** Mit „Schraffierte Flächen als Material“ werden alle Schraffuren auf einmal extrudiert/gedreht – die
+Teile hängen dann zusammen oder zerfallen zufällig (Ventil-Beispiel: 4 lose Körper, Wellen-Beispiel: 3).
+
+**Beobachtung an Felix' Zeichnungen:** Ein Teil besteht aus mehreren Schraffur-Elementen mit **gleichem Muster
+und gleichem Abstand** (z. B. `diag`/Abstand 5 = ein Teil, `diag2`/Abstand 2 = ein anderes) – genau wie in der
+Norm: gleiches Teil gleiche Schraffur, Nachbarteil andere Richtung/Abstand. Daraus lassen sich Teile vorschlagen.
+
+**To-do:**
+
+1. **Schraffur-Gruppen merken** (`draftpad.js`, `fillsOf`/`importDraftpad`): statt `sketch.fills = [loops…]`
+   speichern `sketch.fills = [{ loops, group }]` mit `group = "<ebene>|<pattern>|<angle>|<spacing>|<farbe>"`.
+   Alte Form (nur `loops`-Listen) beim Laden weiter annehmen. Kern (`in_fills`) und `kernelSketch` anpassen:
+   an den Kern gehen nur die `loops` der gewünschten Gruppe (neues Feld im Feature, siehe 3).
+2. **Teile vorschlagen:** nach dem Import (und über einen Knopf „Teile aus Schraffuren …“ an der Skizze im
+   Verlauf) ein Dialog „Erkannte Teile“: je Schraffur-Gruppe eine Zeile mit
+   - Häkchen (dabei / nicht),
+   - Name (Vorschlag „Teil 1“, „Teil 2“ …; frei änderbar – der Name wird der Körpername),
+   - Art: **Drehen** um die Achse (Vorschlag, wenn die Skizze eine Achse hat **und** die Gruppe Flächen auf
+     beiden Seiten der Achse hat oder an die Achse grenzt) oder **Extrudieren** (Tiefe, symmetrisch zur
+     Skizzenebene als Vorschlag),
+   - Vorschau: beim Überfahren der Zeile die Flächen der Gruppe im Bild hervorheben.
+   „Anlegen“ erzeugt je Zeile **ein Feature** (Extrudieren/Drehen) mit `mode: 'new'`, `fillGroup: <group>`,
+   `name` = Teilname. Alles in einem Rückgängig-Schritt.
+3. **Feature-Felder:** `extrude`/`revolve` bekommen `fillGroup` (Auswahl = alle Bereiche in den Schraffuren
+   dieser Gruppe; hat Vorrang vor `useFills`, wird von `regions` übersteuert, sobald man im Bild klickt) und
+   `bodyName`. `kernelFeature` gibt `fills: <loops der Gruppe>` und `name` mit; im Kern `sketch_faces` so
+   erweitern, dass die Schraffurflächen aus dem **Feature** kommen können (nicht nur aus der Skizze).
+4. **Ein Feature = ein Körper:** bei `mode: 'new'` verschmilzt `combine` die Werkzeugkörper eines Features
+   schon; prüfen, dass Flächen, die sich nur an einer Kante berühren, nicht als zwei lose Körper enden – wenn
+   doch, Warnung „Teil besteht aus n losen Stücken“ (kein Fehler).
+5. **Überschneidungen zwischen Teilen** (quick and dirty heißt: Skizzen sind nicht exakt): nach jedem neuen
+   Körper prüfen, ob er einen vorhandenen durchdringt (`occ.intersect` auf Kopien, Volumen > 1e-6 · kleineres
+   Volumen). Wenn ja: Warnung am Feature und Option im Dialog „Überschneidung vom neuen Teil abziehen“
+   (Standard an) – sonst vernetzt Gmsh die Baugruppe nicht sauber bzw. der Kontakt wird falsch.
+6. **Körpernamen bis in die Rechnung:** `gmsh.model.setEntityName` landet **nicht** in der STEP-Datei
+   (geprüft). Die von Gmsh geschriebene STEP enthält aber je Körper einen Eintrag
+   `PRODUCT('Open CASCADE STEP translator 7.8 1.<k>', …)` in Körperreihenfolge. Vorgehen: der Kern merkt sich
+   je Körper den Namen (über den Schwerpunkt des Werkzeugkörpers beim Anlegen → nach jedem Feature neu
+   zuordnen: Körper, der den Punkt enthält), schreibt die STEP und ersetzt danach im Text die Namen der
+   `PRODUCT`-Einträge `…1.<k>` durch die Körpernamen (Sonderzeichen `'` und `\` entfernen). Prüfen mit dem
+   vorhandenen Weg: `fem_core::gmsh` liest Namen über die `.xao`-Datei (`solid_names`), Test
+   `Grundplatte/Block/Zapfen` in `gmsh.rs` als Vorlage. Außerdem `result.bodies_info = [{ name, volume, center }]`
+   zurückgeben und im Verlauf unter „Rechnen“ als Liste zeigen.
+   Achtung: Körper mit Namen wie „Schraube …/Mutter …“ erkennt Projekt-FEM als Verbindungselemente
+   (`fastener.rs`) – das ist erwünscht, wenn Felix ein Teil so nennt.
+7. **In der Rechnung:** mehrere Körper gibt es schon (Reiter Modell: Werkstoff je Körper, Körper ausblenden,
+   Berührflächen verklebt oder mit Kontakt/Reibung, Schrauben). Nach „In die Rechnung übernehmen“ einen Hinweis
+   zeigen: „n Körper, m Berührflächen – unter Verbindungen festlegen, ob verklebt oder Kontakt“. Nichts Neues
+   bauen, nur prüfen, dass die Baugruppe aus der Konstruktion dort sauber ankommt (Namen, `touching`).
+8. **Drehteile, die nicht voll umlaufen** (Nut, Passfeder, Schlüsselfläche) und Teile, die in Wahrheit Quader
+   sind: bleibt Handarbeit über Paket C (Bereiche anklicken, Extrudieren mit Tiefe, „Weg“). Im Dialog aus 2.
+   deshalb je Zeile die Art umschaltbar lassen.
+9. **Wälzlager, Schrauben, Normteile** in der Zeichnung sind meist nicht schraffiert → werden nicht vorgeschlagen.
+   Im Dialog ein Satz dazu („nicht schraffierte Flächen: im Bild anklicken und mit Extrudieren/Drehen selbst
+   anlegen“). Später: Lager als Ersatz-Verbindung (steife Kopplung zwischen Innen- und Außenring).
+
+**Test (`cad.rs`):** Skizze mit zwei Schraffur-Gruppen neben einer Achse (zwei Rechtecke, die sich an einer
+Kante berühren) → zwei Features `revolve`, `mode: new` → 2 Körper, Volumen je Ring von Hand prüfen, Namen in
+der STEP wiederfinden (`mesh_step` + `body_names`).
+
+**Fertig, wenn:** Wellen-Zeichnung importieren → Dialog schlägt die Teile vor → „Anlegen“ → benannte Drehkörper,
+die sich berühren, aber nicht durchdringen → „In die Rechnung übernehmen“ → im Modell erscheinen die Körper mit
+Namen und Berührflächen → Lager, Last, Rechnen läuft durch.
+
+---
+
 ## D. Verbindung zu Draftpad (Server statt Datei)
 
 ### D.0 Wie Draftpad arbeitet (geprüft im Repo `Miro4you/Draftpad`, `server/server.mjs`, `src/storage/*.ts`)
@@ -208,6 +282,8 @@ zurückgeben). Über den Rechenkern statt direkt aus dem Browser, damit (a) das 
 CORS-/CSP-Sonderfälle braucht.
 
 - Einstellung `draftpad.json` im Einstellungsordner (`config_dir()` wie bei Onshape): `{ url, token }`.
+  Heute läuft Draftpad auf einem Raspberry Pi **ohne Passwort** (http, Heimnetz); später soll es auf einen Server mit
+  **eigener Domain** (https, dann mit Passwort). Beides muss gehen: `http://192.168.x.y:8080` und `https://…`.
   `url` ohne Schrägstrich am Ende; ohne `http://` davor → `http://` ergänzen (wie Draftpads `cloud.ts`).
 - Funktionen: `status()` → `{ configured, reachable, auth_ok, error? }` (ruft `/api/health`, bei
   `auth` zusätzlich `/api/drawings` zum Prüfen des Passworts); `set_config(url, token)`;
@@ -260,7 +336,7 @@ Ziel: Zeichnung in Draftpad ändern → in Projekt-FEM „Aktualisieren“ → K
    `{ kind: 'draftpad', id, name, updated, layers: [ebenen-ids], opts: { tol, center|origin, fills }, mode: 'linked' | 'copy' }`.
    Bei Datei-Import `id: null` (kein Aktualisieren möglich, nur „Datei neu wählen“).
 2. **Zwei Arten**, im `DraftpadPanel` wählbar:
-   - **Verknüpft (Vorschlag als Standard):** Geometrie ist fest (alle Punkte `fix`, Kreise `fix`), es werden
+   - **Verknüpft (Standard – passt zu Felix' Ablauf „skizzieren, rüberschieben, schnell extrudieren“):** Geometrie ist fest (alle Punkte `fix`, Kreise `fix`), es werden
      **keine** Bedingungen erzeugt, in Projekt-FEM wird an der Skizze nichts gezeichnet/gezogen
      (Skizzen-Dialog zeigt statt der Werkzeuge: Quelle, Ebenen, „Aktualisieren“, „In Draftpad bearbeiten“,
      „Verknüpfung lösen“). Vorteil: kein Löser nötig, schnell, eindeutig – Draftpad ist die Wahrheit.
@@ -316,6 +392,20 @@ Ziel: Zeichnung in Draftpad ändern → in Projekt-FEM „Aktualisieren“ → K
 6. Lücken: Standard 0,3 mm bleibt. In Felix' Beispielen gibt es Lücken bis 0,5 mm; im Dialog nach dem Import
    anzeigen, **wo** noch offene Enden sind (rote Punkte an Endpunkten, die nur ein Element haben), mit Zähler.
    Dafür in `importDraftpad` die Liste `open: [[x,y],…]` zurückgeben.
+
+### D.7 „Rüberschieben“ aus Draftpad (ein Klick)
+
+Felix' Ablauf beginnt in Draftpad. Deshalb zusätzlich zur Bibliothek:
+
+1. **Projekt-FEM öffnet eine Zeichnung über die Adresse:** `http://<projekt-fem>/#draftpad=<id>` (bzw. mit
+   Schlüssel `#k=…&draftpad=<id>`; in `api.js` wird `#k=` schon ausgewertet – dort erweitern und den Wert an
+   `App` geben). Beim Start: neues Teil anlegen (`newCadPart`), Zeichnung über `api.draftpadGet(id)` holen und
+   wie beim Datei-Import als `incoming` an `CadStudio` geben (`setCadDraftpad`), mit `source.id` (verknüpft).
+2. **Knopf in Draftpad** (Menü): „In Projekt-FEM nachweisen“ – speichert die Zeichnung in der Online-Ablage
+   (falls noch nicht) und öffnet die Adresse aus 1. Die Projekt-FEM-Adresse ist eine Draftpad-Einstellung
+   (neben der Online-Ablage, `src/storage/cloud.ts`/`src/ui/cloud-dialog.ts`). Kompakt-/Einbettmodus: Knopf weglassen.
+3. Desktop-App von Projekt-FEM: gleicher Weg über die Heimnetz-Freigabe (die Adresse zeigt auf den Rechner,
+   auf dem Projekt-FEM als Server läuft – bei Felix der NAS).
 
 ### D.6 Später (nicht jetzt)
 
@@ -400,13 +490,25 @@ neu hochladen lassen; im Repo liegen sie nicht.
 Nach jedem Paket: `README.md` (Abschnitt „Konstruktion“), `TESTPROTOKOLL.md` (18d/18e, neue Zeilen),
 `NAECHSTE_SCHRITTE.md` aktualisieren, PDF des Testprotokolls neu erzeugen, committen, pushen.
 
-## Offene Fragen an Felix (vor Paket D klären)
+## Entscheidungen von Felix (12.11.2026)
 
-1. Wo läuft dein Draftpad-Server (Raspberry Pi, NAS, math-pad.de)? Ist er vom NAS aus erreichbar, auf dem
-   Projekt-FEM läuft? Mit Passwort?
-2. Verknüpfte Skizze: reicht „fest wie in Draftpad, Aktualisieren per Knopf“ als Standard, oder willst du die
-   importierte Skizze in Projekt-FEM meistens noch bemaßen und verändern?
-3. Soll eine Skizze nach der ersten Verwendung sichtbar bleiben (Vorschlag: ja, mit Auge zum Ausblenden) oder
-   wie in Onshape automatisch ausgeblendet werden?
-4. Bei einer Schnittzeichnung (Draftpad): sollen aus den schraffierten Flächen getrennte Körper werden (so ist es
-   jetzt – jedes Teil einzeln) oder ein Körper?
+- **Draftpad-Server:** läuft im Moment auf dem Raspberry Pi, **ohne Passwort**. Soll später auf einen Server
+  (eigener oder mit auf den MathPad-Server), auf jeden Fall mit **eigener Domain**. → Adresse einstellbar,
+  http und https, Passwort optional (D.1).
+- **Zweck:** erst in Draftpad skizzieren; wenn etwas nachgewiesen werden soll, die Skizze nach Projekt-FEM
+  schieben, **anhand der Skizze schnell extrudieren (quick and dirty)**, Lasten angeben, rechnen. → Paket F und
+  D.7; verknüpfte, feste Skizze als Standard (D.4).
+- **Sichtbarkeit:** Skizzen bleiben nach der ersten Verwendung sichtbar und lassen sich **einzeln ausschalten**
+  (Paket B).
+- **Körper:** meistens sind es **Baugruppen** – man muss aus einer Skizze **mehrere Körper** machen können, jedes
+  Teil ein zusammenhängender Körper. Mit Rotationsachse häufig Drehteile (Drehen), aber nicht zwingend – das
+  entscheidet man je Teil (Paket F).
+
+## Noch offen
+
+1. Ist der Pi vom NAS (dort läuft Projekt-FEM) aus erreichbar? Sonst muss die Adresse/der Weg geklärt werden,
+   bevor D getestet werden kann. Ersatz zum Testen: Draftpad-Server lokal starten (siehe „Bauen und Testen“).
+2. Sollen Teile aus der Zeichnung standardmäßig **verklebt** oder mit **Kontakt** gerechnet werden? (Heute fragt
+   der Reiter Modell je Berührfläche; Vorschlag: verklebt als Vorgabe, weil schnell und stabil.)
+3. Beispielzeichnungen: die zwei `.draftpad.json` von Felix (Wellenschnitt, Ventil-Kreuzstück) liegen nicht im
+   Repo – zum Testen neu hochladen lassen oder als `examples/draftpad/` aufnehmen, wenn Felix einverstanden ist.
