@@ -298,6 +298,8 @@ selbst starten.
 | 18d.12 | Projekt speichern, neu laden | Verlauf wieder da, „Übernommen“ | [ ] |
 | 18d.13 | Drehteil: Profil zeichnen, Drehen um eine Linie | Rotationskörper, Achse rot gestrichelt | [ ] |
 | 18d.14 | Parameterstudie: Skizzenmaß mit Namen versehen, in der Studie wählen | Werte werden nacheinander gebaut und gerechnet | [ ] |
+| 18d.15 | Konstruktion öffnen | Ansichtswürfel oben rechts, Achsenkreuz unten links, Achsen X/Y/Z (rot/grün/blau) am Ursprung, Hauptebenen beschriftet („XY · Oben“ …) | [ ] |
+| 18d.16 | Würfelfläche bzw. Achse im Achsenkreuz anklicken; Knopf „Ebenen“ in der Werkzeugleiste; beim Skizzieren „⊥“ | Ansicht dreht sich dorthin; Ebenen aus/ein (zum Wählen einer Ebene erscheinen sie trotzdem); Blick senkrecht auf die Skizze | [ ] |
 
 ## 18e. Draftpad-Zeichnung als Skizze (neu)
 

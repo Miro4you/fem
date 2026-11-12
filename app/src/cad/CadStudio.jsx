@@ -34,6 +34,7 @@ import {
   Diameter,
   Hash,
   FileUp,
+  Layers,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -152,6 +153,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const [skInfo, setSkInfo] = useState(null)
   const [pickFor, setPickFor] = useState(null) // welches Feld gerade per Klick gewählt wird
   const [msg, setMsg] = useState(null)
+  const [showStd, setShowStd] = useState(true) // Hauptebenen immer zeigen
   const [history, setHistory] = useState({ undo: [], redo: [] })
   const skHist = useRef({ undo: [], redo: [] })
   const viewRef = useRef(null)
@@ -828,6 +830,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 </button>
               )}
               <span className="cad-sep" />
+              <button className={'cad-tool' + (showStd ? ' on' : '')} title={showStd ? 'Hauptebenen verbergen (erscheinen weiter, wenn eine Ebene gewählt werden soll)' : 'Hauptebenen zeigen'} onClick={() => setShowStd(!showStd)}>
+                <Layers size={17} />
+              </button>
               <button className="cad-tool" title="Rückgängig (Strg+Z)" disabled={!!edit || !history.undo.length} onClick={undo}>
                 <Undo2 size={17} />
               </button>
@@ -862,7 +867,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           onPick={onPick}
           selected={selected}
           sketch={sketchProps}
-          showPlanes={!sketchEdit && (!hasBody || pickFor === 'plane' || pickFor === 'mplane' || editingSketchEmpty)}
+          showPlanes={!sketchEdit && (showStd || !hasBody || pickFor === 'plane' || pickFor === 'mplane' || editingSketchEmpty)}
           regions={regions}
           axisLine={axisLine}
           preview={!!edit && ['extrude', 'revolve', 'hole'].includes(edit.draft.type) && edit.draft.mode === 'cut'}

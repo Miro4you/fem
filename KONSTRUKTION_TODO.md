@@ -51,7 +51,7 @@ Der Kern liefert mit `regions_of: <skizzen-id>` die Bereiche zurück:
 
 ---
 
-## A. Koordinatensystem und Ansichtswürfel in der Konstruktion
+## A. Koordinatensystem und Ansichtswürfel in der Konstruktion ✅ (erledigt)
 
 **Ist:** `CadView.jsx` hat weder Achsenkreuz noch Ansichtswürfel. Im Modell-Reiter gibt es beides
 (`app/src/components/Viewport.jsx`: `ViewCube`, `Triad`, `VIEWS`, Zustand `cam`, `fitView`, Stile `.view-nav`,

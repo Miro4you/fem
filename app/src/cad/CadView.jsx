@@ -2,6 +2,8 @@
 import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { CadControls } from '../components/CadControls.js'
+import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
+import { IcHome, IcFit } from '../ui/icons.jsx'
 import {
   basis,
   to3d,
@@ -27,6 +29,7 @@ import {
 } from './sketch.js'
 
 const PLANE_COLORS = { XY: 0x3b82f6, XZ: 0x16a34a, YZ: 0xdc2626 }
+const PLANE_NAMES = { XY: 'Oben', XZ: 'Vorne', YZ: 'Rechts' }
 const BODY = new THREE.Color('#b9c0c8')
 const HOVER = new THREE.Color('#ffffff')
 const SELECT = new THREE.Color('#f59e0b')
@@ -64,6 +67,10 @@ export default function CadView({
   const [overlay, setOverlay] = useState({ dims: [], glyphs: [] })
   const [hover, setHover] = useState(null) // { face } | { edge } | { std } | Skizze: { pt } | { ent }
   const [edit, setEdit] = useState(null) // Maß bearbeiten { id, x, y, value }
+  // Kamera-Achsen (rechts, oben, zum Betrachter) für Ansichtswürfel und Achsenkreuz
+  const [cam, setCam] = useState([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+  // Beschriftungen im Raum (Achsen X/Y/Z, Hauptebenen)
+  const [labels3d, setLabels3d] = useState([])
   const tmp = useRef(null) // laufende Zeichenaktion
 
   useImperativeHandle(ref, () => ({
@@ -98,6 +105,8 @@ export default function CadView({
       ray,
       body: new THREE.Group(),
       planes: new THREE.Group(),
+      axes: new THREE.Group(),
+      labelPts: [],
       sketch: new THREE.Group(),
       extra: new THREE.Group(),
       dirty: true,
@@ -105,7 +114,7 @@ export default function CadView({
       size: 100,
       center: new THREE.Vector3(),
     }
-    scene.add(s.body, s.planes, s.sketch, s.extra)
+    scene.add(s.body, s.planes, s.axes, s.sketch, s.extra)
     const pickPoint = (cx, cy) => {
       if (!s.surf) return null
       setRay(cx, cy)
@@ -137,6 +146,18 @@ export default function CadView({
       s.dirty = false
       renderer.render(scene, camera)
       s.updateOverlay?.()
+      // Ansichtswürfel/Achsenkreuz nachführen
+      const q = camera.quaternion
+      const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((a) => new THREE.Vector3(...a).applyQuaternion(q).toArray())
+      setCam((old) => (old.every((v, i) => v.every((x, k) => Math.abs(x - axes[i][k]) < 1e-4)) ? old : axes))
+      // Beschriftungen im Raum aufs Bild projizieren
+      const w = el.clientWidth
+      const h = el.clientHeight
+      const lb = s.labelPts.map((l) => {
+        const p = l.pos.clone().project(camera)
+        return { ...l, x: ((p.x + 1) / 2) * w, y: ((1 - p.y) / 2) * h, visible: p.z < 1 && p.z > -1 }
+      })
+      setLabels3d((old) => (old.length === lb.length && old.every((o, i) => Math.abs(o.x - lb[i].x) < 0.5 && Math.abs(o.y - lb[i].y) < 0.5 && o.text === lb[i].text && o.visible === lb[i].visible) ? old : lb))
     }
     loop()
     ctx.current = s
@@ -247,12 +268,46 @@ export default function CadView({
     s.dirty = true
   }, [tess, selected, hover, pick, preview])
 
+  // --- Achsen am Ursprung (immer sichtbar) -----------------------------------------------------------
+  useEffect(() => {
+    const s = ctx.current
+    s.axes.traverse((o) => (o.geometry?.dispose(), o.material?.dispose()))
+    s.axes.clear()
+    const L = Math.max(20, 0.25 * s.size)
+    const ax = []
+    for (const [k, dir, color] of [
+      ['X', [1, 0, 0], 0xdc2626],
+      ['Y', [0, 1, 0], 0x16a34a],
+      ['Z', [0, 0, 1], 0x2563eb],
+    ]) {
+      const end = new THREE.Vector3(...dir).multiplyScalar(L)
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), end]),
+        new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.75, depthTest: false }),
+      )
+      line.renderOrder = 18
+      s.axes.add(line)
+      ax.push({ key: 'ax-' + k, text: k, cls: 'cad-axlabel ax-' + k.toLowerCase(), pos: end.clone().multiplyScalar(1.08) })
+    }
+    const o = new THREE.Points(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0)]),
+      new THREE.PointsMaterial({ size: 6, sizeAttenuation: false, color: 0x6b7280, depthTest: false, transparent: true }),
+    )
+    o.renderOrder = 18
+    s.axes.add(o)
+    s.axisLabels = ax
+    s.labelPts = [...ax, ...(s.planeLabels ?? [])]
+    s.dirty = true
+  }, [tess])
+
   // --- Hauptebenen ----------------------------------------------------------------------------------
   useEffect(() => {
     const s = ctx.current
     s.planes.traverse((o) => (o.geometry?.dispose(), o.material?.dispose()))
     s.planes.clear()
     s.stdPlanes = []
+    s.planeLabels = []
+    s.labelPts = [...(s.axisLabels ?? [])]
     if (!showPlanes) {
       s.dirty = true
       return
@@ -275,7 +330,11 @@ export default function CadView({
       frame.applyMatrix4(m)
       s.planes.add(quad, frame)
       s.stdPlanes.push({ name, mesh: quad, L })
+      // Beschriftung in der Ecke der Ebene
+      const corner = new THREE.Vector3(...b.u).multiplyScalar(L * 0.98).add(new THREE.Vector3(...b.v).multiplyScalar(L * 0.98))
+      s.planeLabels.push({ key: 'pl-' + name, text: `${name} · ${PLANE_NAMES[name]}`, cls: 'cad-planelabel', pos: corner })
     }
+    s.labelPts = [...(s.axisLabels ?? []), ...s.planeLabels]
     s.dirty = true
   }, [showPlanes, selected, hover, tess])
 
@@ -972,6 +1031,9 @@ export default function CadView({
     s.controls.setView(center, new THREE.Vector3(...dir).normalize(), dist, new THREE.Vector3(...up))
     s.dirty = true
   }
+  function fitView(name) {
+    fitAll(VIEWS[name].dir, VIEWS[name].up)
+  }
   function lookAtPlane(plane, sk = null) {
     const s = ctx.current
     const b = basis(plane)
@@ -1016,6 +1078,30 @@ export default function CadView({
   return (
     <div className="viewport cad-view">
       <div ref={host} className="viewport-canvas" style={{ cursor }} />
+      {labels3d
+        .filter((l) => l.visible)
+        .map((l) => (
+          <span key={l.key} className={l.cls} style={{ left: l.x, top: l.y }}>
+            {l.text}
+          </span>
+        ))}
+      <div className="view-nav">
+        <ViewCube cam={cam} onView={fitView} />
+        <div className="view-buttons">
+          <button className="icon-btn" title="Isometrisch (Startansicht)" aria-label="Isometrische Ansicht" onClick={() => fitView('iso')}>
+            <IcHome />
+          </button>
+          <button className="icon-btn" title="Alles zeigen" aria-label="Alles zeigen" onClick={() => fitAll(cam[2], cam[1])}>
+            <IcFit />
+          </button>
+          {sketch && (
+            <button className="icon-btn cad-normal-btn" title="Senkrecht auf die Skizze schauen" aria-label="Senkrecht auf die Skizze" onClick={() => lookAtPlane(sketch.plane, sketch.data)}>
+              ⊥
+            </button>
+          )}
+        </div>
+      </div>
+      <Triad cam={cam} onView={fitView} />
       {sketch &&
         overlay.dims.map((d) => (
           <button

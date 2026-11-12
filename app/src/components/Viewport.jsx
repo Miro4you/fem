@@ -8,7 +8,7 @@ import { regionGrid } from '../region.js'
 const BASE = new THREE.Color('#b9c0c8')
 
 // Ansichtsrichtungen (Blickrichtung zum Ziel hin, z zeigt nach oben)
-const VIEWS = {
+export const VIEWS = {
   iso: { dir: [1, -1.25, 0.85], up: [0, 0, 1] },
   front: { dir: [0, -1, 0], up: [0, 0, 1] },
   back: { dir: [0, 1, 0], up: [0, 0, 1] },
@@ -930,7 +930,7 @@ export default function Viewport({
 }
 
 // Ansichtswürfel: dreht mit der Kamera; Fläche anklicken = Blick senkrecht darauf
-function ViewCube({ cam, onView }) {
+export function ViewCube({ cam, onView }) {
   const [R, U, B] = cam
   const S = 28
   const C = 50
@@ -963,7 +963,7 @@ function ViewCube({ cam, onView }) {
 }
 
 // Koordinatensystem unten links: X rot, Y grün, Z blau; Achse anklicken = Blick auf die Ebene senkrecht dazu
-function Triad({ cam, onView }) {
+export function Triad({ cam, onView }) {
   const [R, U, B] = cam
   const C = 46
   const L = 30

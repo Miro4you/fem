@@ -735,7 +735,7 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-stage { display: flex; flex-direction: column; }
 .cad-stage .cad-view { flex: 1; position: relative; }
 .cad-toolbar { position: absolute; top: 10px; left: 0; right: 0; margin: 0 auto; width: max-content; z-index: 5; display: flex; align-items: center; gap: 2px;
-  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 20px); flex-wrap: wrap; justify-content: center; row-gap: 2px; }
+  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 260px); flex-wrap: wrap; justify-content: center; row-gap: 2px; }
 .cad-tool { display: inline-flex; align-items: center; gap: 5px; height: 32px; min-width: 32px; padding: 0 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; cursor: pointer; color: var(--text); }
 .cad-tool:hover:not(:disabled) { background: var(--hover); }
 .cad-tool.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
@@ -783,3 +783,10 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-dim-edit { position: absolute; transform: translate(-50%, -50%); z-index: 6; }
 .cad-dim-edit input { width: 90px; height: 28px; text-align: center; border: 2px solid var(--accent); border-radius: 6px; background: var(--panel); }
 .tile.cad-new svg { color: var(--accent); }
+.cad-axlabel, .cad-planelabel { position: absolute; transform: translate(-50%, -50%); z-index: 2; pointer-events: none; user-select: none; }
+.cad-axlabel { font-size: 12px; font-weight: 700; }
+.cad-axlabel.ax-x { color: #dc2626; }
+.cad-axlabel.ax-y { color: #16a34a; }
+.cad-axlabel.ax-z { color: #2563eb; }
+.cad-planelabel { font-size: 11px; color: var(--muted); white-space: nowrap; transform: translate(-100%, -100%); }
+.cad-normal-btn { font-size: 16px; font-weight: 700; }
