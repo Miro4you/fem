@@ -133,7 +133,12 @@ function matchEdges(tess, refs) {
     let best = null
     for (const c of tess.curves) {
       const d = Math.hypot(c.mid[0] - r.mid[0], c.mid[1] - r.mid[1], c.mid[2] - r.mid[2])
-      if (d < 0.02 * size && (!best || d < best.d)) best = { d, tag: c.tag }
+      if (d > 0.02 * size) continue
+      // gleiche Richtung und Art bevorzugen (sonst werden eng benachbarte Kanten verwechselt)
+      const par = !r.dir || !c.dir ? 1 : Math.abs(r.dir[0] * c.dir[0] + r.dir[1] * c.dir[1] + r.dir[2] * c.dir[2])
+      const pen = (par > 0.999 ? 0 : 1) + (r.kind && c.kind !== r.kind ? 1 : 0)
+      const score = pen * size + d
+      if (!best || score < best.score) best = { score, tag: c.tag }
     }
     if (best) out.add(best.tag)
   }
@@ -641,7 +646,16 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   }, [beforeKey, built])
   const shownTessBefore = before?.tess ?? shownTess
   // beim Wählen von Kanten/Flächen den Stand davor zeigen (sonst sind sie schon verrundet/weg)
-  const viewTess = edit && pickFor && ['edges', 'faces', 'cyl'].includes(pickFor) && before?.tess ? before.tess : sketchEdit ? (preview?.tess ?? null) : shownTess
+  // Verrunden/Fase: sobald Kanten gewählt sind, das Ergebnis zeigen und die Kanten des Stands davor darüber legen
+  const edgeFeature = !!edit && ['fillet', 'chamfer'].includes(edit.draft.type)
+  const pickEdges = edgeFeature && pickFor === 'edges' && before?.tess && preview?.tess && edit.draft.edges?.length ? before.tess.curves : null
+  const viewTess = pickEdges
+    ? preview.tess
+    : edit && pickFor && ['edges', 'faces', 'cyl'].includes(pickFor) && before?.tess
+      ? before.tess
+      : sketchEdit
+        ? (preview?.tess ?? null)
+        : shownTess
 
   const selected = useMemo(() => {
     const d = edit?.draft
@@ -654,13 +668,13 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       return out
     }
     if (!d) return out
-    if (d.edges) out.edges = matchEdges(viewTess, d.edges)
+    if (d.edges) out.edges = matchEdges(pickEdges ? before.tess : viewTess, d.edges)
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
     if (d.type === 'mirror' && d.plane?.std) out.std.add(d.plane.std)
     if (d.type === 'mirror' && d.plane?.face) out.faces = matchFaces(viewTess, [d.plane.face])
     if ((d.type === 'refillet' || d.type === 'rehole') && d.surfaces) out.faces = matchFaces(viewTess, d.surfaces.map((c) => ({ center: c })))
     return out
-  }, [edit?.draft, viewTess, cmeasure])
+  }, [edit?.draft, viewTess, cmeasure, pickEdges])
 
   // Bereiche zum Anklicken (Extrudieren/Drehen) – direkt aus der Skizze, je Skizze einmal geholt
   const regionDraft = edit && (edit.draft.type === 'extrude' || edit.draft.type === 'revolve') ? edit.draft : null
@@ -1331,6 +1345,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           onSketchPick={onSketchPick}
           preview={!!edit && ['extrude', 'revolve', 'hole'].includes(edit.draft.type) && edit.draft.mode === 'cut'}
           handle={dragHandle}
+          pickEdges={pickEdges}
           measureTool={sketchEdit ? null : { on: cmeasure.on, onToggle: () => setCmeasure((m) => ({ on: !m.on, picks: [] })) }}
         />
         {cmeasure.on && !sketchEdit && (

@@ -78,6 +78,7 @@ export default function CadView({
   sketches, // Hintergrund-Skizzen [{ id, plane, data, active }]
   onSketchPick, // (id, open) – Klick/Doppelklick auf eine Hintergrund-Skizze
   measureTool, // Messen { on, onToggle }
+  pickEdges, // Kanten zum Wählen (Stand vor dem Feature), wenn das Bild schon das Ergebnis zeigt
   handle, // Ziehgriff { origin, dir (Einheit), value (mm), onChange(v), label, min } – z. B. Extrusionstiefe
   ref,
 }) {
@@ -338,6 +339,36 @@ export default function CadView({
     s.dirty = true
   }, [section, tess])
 
+  // Kanten des Stands vor dem Feature (z. B. beim Verrunden): dünn darüber zeichnen, daran wird gewählt
+  useEffect(() => {
+    const s = ctx.current
+    if (s.ghost) {
+      s.scene.remove(s.ghost)
+      s.ghost.geometry.dispose()
+      s.ghost.material.dispose()
+      s.ghost = null
+    }
+    s.pickCurves = pickEdges?.length ? pickEdges : null
+    if (s.pickCurves) {
+      const segs = []
+      for (const c of s.pickCurves) {
+        const p = c.pts
+        for (let k = 0; k + 5 < p.length; k += 3) segs.push(p[k], p[k + 1], p[k + 2], p[k + 3], p[k + 4], p[k + 5])
+      }
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(segs), 3))
+      s.ghost = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.6 }))
+      s.ghost.renderOrder = 12
+      s.scene.add(s.ghost)
+    }
+    s.dirty = true
+  }, [pickEdges])
+
+  // Testhilfe: aktuelle Darstellung (Kanten/Flächen) für automatische Browser-Tests
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.__cadTess = { tess, pickEdges }
+  }, [tess, pickEdges])
+
   // Farben der Flächen und hervorgehobene Kanten
   useEffect(() => {
     const s = ctx.current
@@ -360,7 +391,7 @@ export default function CadView({
     s.hi.traverse((o) => (o.geometry?.dispose(), o.material?.dispose()))
     s.hi.clear()
     const edgeSel = selected?.edges ?? new Set()
-    for (const cu of s.curves) {
+    for (const cu of s.pickCurves ?? s.curves) {
       const on = edgeSel.has(cu.tag)
       if (!on && hover?.edge !== cu.tag) continue
       const g = new THREE.BufferGeometry()
@@ -371,7 +402,7 @@ export default function CadView({
       s.hi.add(line)
     }
     s.dirty = true
-  }, [tess, selected, hover, pick, preview])
+  }, [tess, selected, hover, pick, preview, pickEdges])
 
   // --- Achsen am Ursprung (immer sichtbar) -----------------------------------------------------------
   useEffect(() => {
@@ -784,7 +815,8 @@ export default function CadView({
     const r = s.setRay(ev.clientX, ev.clientY)
     const hit = s.surf ? r.intersectObject(s.surf, false)[0] : null
     const depth = hit ? hit.distance : Infinity
-    if (want.edges && s.curves?.length) {
+    const curves = s.pickCurves ?? s.curves
+    if (want.edges && curves?.length) {
       // nächste Kante in Bildschirmpixeln, die nicht hinter der getroffenen Fläche liegt
       const el = host.current
       const rect = el.getBoundingClientRect()
@@ -793,7 +825,7 @@ export default function CadView({
       let best = null
       const tol = 7
       const v = new THREE.Vector3()
-      for (const c of s.curves) {
+      for (const c of curves) {
         if (want.edges === 'circle' && c.kind !== 'circle') continue
         if (want.edges === 'line' && c.kind !== 'line') continue
         let prev = null
