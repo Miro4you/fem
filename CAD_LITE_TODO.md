@@ -117,7 +117,7 @@ wenn die Hinweise in der Praxis nicht reichen.
 5. Zwischenstände je Feature im Worker behalten → bei Änderung ab dem geänderten Feature neu rechnen.
 6. Tests: die sieben Kern-Tests aus `cad.rs` als JS-Tests (vitest) nachbauen, gleiche Volumen.
 
-## G2. Skizzierer
+## G2. Skizzierer (13.11.: 2, 3, 4 und Trimmen aus 5 erledigt – Zeichen im Bild mit Hervorheben, Bemaßen wie Onshape, Bedingungsleiste im Bild, Trimmen T)
 
 1. Löser: unser eigener bleibt (siehe Stand G0); `planegcs` nur, um Widersprüche zu erklären.
 2. **Bedingungen im Bild**: kleine Zeichen neben den Elementen (waagrecht, senkrecht, parallel, tangential,

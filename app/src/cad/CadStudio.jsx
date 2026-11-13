@@ -43,6 +43,7 @@ import {
   RefreshCw,
   ExternalLink,
   Unlink,
+  Scissors,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -60,7 +61,7 @@ import {
   num,
   fmtField,
 } from './features.js'
-import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure, kernelSketch, polyline, basis, to3d } from './sketch.js'
+import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, CON_GLYPH, isDim, measure, kernelSketch, polyline, basis, to3d } from './sketch.js'
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
 import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
@@ -89,7 +90,8 @@ const SKETCH_TOOLS = [
   ['circle', 'Kreis (Mitte, Radius)', Circle, 'C'],
   ['arc', 'Bogen (Mitte, Anfang, Ende – gegen den Uhrzeigersinn)', Spline, 'A'],
   ['point', 'Punkt (z. B. für Bohrungen)', Dot, 'P'],
-  ['dim', 'Bemaßen: Element(e) anklicken, Maß ablegen, Wert eingeben', Ruler, 'D'],
+  ['dim', 'Bemaßen: ein Element (Länge, Ø, R) oder zwei Elemente (Abstand, Winkel) anklicken, Maß ablegen, Wert eingeben', Ruler, 'D'],
+  ['trim', 'Trimmen: Stück bis zum nächsten Schnittpunkt anklicken (rot = fällt weg)', Scissors, 'T'],
   ['use', 'Kante des Bauteils übernehmen', Diameter, 'U'],
 ]
 
@@ -1211,6 +1213,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             />
           )}
         </div>
+        {sketchEdit && (sel.pts.length > 0 || sel.ents.length > 0 || sel.cons.length > 0) && (
+          <ConBar sk={sketchEdit.sketch} sel={sel} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
+        )}
         {(msg || pickFor || regionHint) && (
           <div className="cad-hint">
             {msg ??
@@ -1673,6 +1678,35 @@ function DirPick({ label, value, flip, active, onPick, onAxis, onFlip }) {
         )}
       </div>
     </label>
+  )
+}
+
+// Schwebende Leiste im Bild: passende Bedingungen zur Auswahl (wie die Bedingungsleiste in Onshape)
+function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete }) {
+  const opts = applicableCons(sk, sel)
+  const n = sel.pts.length + sel.ents.length
+  return (
+    <div className="cad-conbar" onPointerDown={(e) => e.stopPropagation()}>
+      <span className="muted">{n ? `${n} gewählt` : `${sel.cons.length} Bedingung${sel.cons.length === 1 ? '' : 'en'}`}</span>
+      {opts.map((o) => (
+        <button key={o.t + o.label} className="btn small" title={o.label} onClick={() => onCon(o)}>
+          {CON_GLYPH[o.t] ? <b className="cad-conbar-g">{CON_GLYPH[o.t]}</b> : null} {o.label}
+        </button>
+      ))}
+      {n > 0 && (
+        <button className="btn small" onClick={onFix}>
+          <Lock size={13} /> Fixieren
+        </button>
+      )}
+      {n > 0 && (
+        <button className={'btn small' + (construction ? ' on' : '')} onClick={onConstruction}>
+          Hilfslinie
+        </button>
+      )}
+      <button className="btn small" title="Entf" onClick={onDelete}>
+        <Trash2 size={13} /> Löschen
+      </button>
+    </div>
   )
 }
 

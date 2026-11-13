@@ -495,3 +495,192 @@ export function solveSketch(sk) {
 }
 
 export { DIM_TYPES }
+
+// --- Trimmen ----------------------------------------------------------------------------------
+
+const TAU = 2 * Math.PI
+const wrap = (a) => ((a % TAU) + TAU) % TAU
+
+/// Schnittpunkte zweier Elemente (Linie/Kreis/Bogen) → [[x, y], …]
+function intersectEnts(sk, e, f) {
+  const out = []
+  const onArc = (g, q) => {
+    if (g.t !== 'arc') return true
+    const [cx, cy] = P(sk, g.c)
+    const [a0, a1] = arcAngles(sk, g)
+    let ang = Math.atan2(q[1] - cy, q[0] - cx)
+    while (ang < a0 - 1e-9) ang += TAU
+    return ang <= a1 + 1e-9
+  }
+  const segT = (g, q) => {
+    const [ax, ay] = P(sk, g.a)
+    const [bx, by] = P(sk, g.b)
+    const L2 = (bx - ax) ** 2 + (by - ay) ** 2
+    return L2 ? ((q[0] - ax) * (bx - ax) + (q[1] - ay) * (by - ay)) / L2 : -1
+  }
+  const onSeg = (g, q) => {
+    const t = segT(g, q)
+    return t >= -1e-9 && t <= 1 + 1e-9
+  }
+  const isRound = (g) => g.t === 'circle' || g.t === 'arc'
+  if (e.t === 'line' && f.t === 'line') {
+    const [ax, ay] = P(sk, e.a)
+    const [bx, by] = P(sk, e.b)
+    const [cx, cy] = P(sk, f.a)
+    const [dx, dy] = P(sk, f.b)
+    const den = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx)
+    if (Math.abs(den) < 1e-12) return out
+    const t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / den
+    const q = [ax + t * (bx - ax), ay + t * (by - ay)]
+    if (t >= -1e-9 && t <= 1 + 1e-9 && onSeg(f, q)) out.push(q)
+    return out
+  }
+  if (e.t === 'line' || f.t === 'line') {
+    const [l, c] = e.t === 'line' ? [e, f] : [f, e]
+    if (!isRound(c)) return out
+    const [ax, ay] = P(sk, l.a)
+    const [bx, by] = P(sk, l.b)
+    const [cx, cy] = P(sk, c.c)
+    const r = radiusOf(sk, c)
+    const dx = bx - ax
+    const dy = by - ay
+    const A = dx * dx + dy * dy
+    const B = 2 * ((ax - cx) * dx + (ay - cy) * dy)
+    const C = (ax - cx) ** 2 + (ay - cy) ** 2 - r * r
+    const disc = B * B - 4 * A * C
+    if (A === 0 || disc < -1e-12) return out
+    const sq = Math.sqrt(Math.max(0, disc))
+    for (const t of disc < 1e-12 ? [-B / (2 * A)] : [(-B - sq) / (2 * A), (-B + sq) / (2 * A)]) {
+      const q = [ax + t * dx, ay + t * dy]
+      if (t >= -1e-9 && t <= 1 + 1e-9 && onArc(c, q)) out.push(q)
+    }
+    return out
+  }
+  if (isRound(e) && isRound(f)) {
+    const [x0, y0] = P(sk, e.c)
+    const [x1, y1] = P(sk, f.c)
+    const r0 = radiusOf(sk, e)
+    const r1 = radiusOf(sk, f)
+    const d = Math.hypot(x1 - x0, y1 - y0)
+    if (d < 1e-12 || d > r0 + r1 + 1e-9 || d < Math.abs(r0 - r1) - 1e-9) return out
+    const a = (r0 * r0 - r1 * r1 + d * d) / (2 * d)
+    const h = Math.sqrt(Math.max(0, r0 * r0 - a * a))
+    const mx = x0 + (a * (x1 - x0)) / d
+    const my = y0 + (a * (y1 - y0)) / d
+    for (const s of h < 1e-12 ? [0] : [1, -1]) {
+      const q = [mx + (s * h * (y1 - y0)) / d, my - (s * h * (x1 - x0)) / d]
+      if (onArc(e, q) && onArc(f, q)) out.push(q)
+    }
+  }
+  return out
+}
+
+/// Parameter eines Punkts auf einem Element: Linie 0…1, Kreis 0…2π (Winkel), Bogen 0…Öffnungswinkel
+function paramOf(sk, e, q) {
+  if (e.t === 'line') {
+    const [ax, ay] = P(sk, e.a)
+    const [bx, by] = P(sk, e.b)
+    const L2 = (bx - ax) ** 2 + (by - ay) ** 2
+    return L2 ? ((q[0] - ax) * (bx - ax) + (q[1] - ay) * (by - ay)) / L2 : 0
+  }
+  const [cx, cy] = P(sk, e.c)
+  const ang = Math.atan2(q[1] - cy, q[0] - cx)
+  if (e.t === 'circle') return wrap(ang)
+  const [a0] = arcAngles(sk, e)
+  return wrap(ang - a0)
+}
+
+/// Trimmen: das angeklickte Stück eines Elements bis zu den nächsten Schnittpunkten mit anderen Elementen
+/// entfernen. → { sketch, removed: [[x,y],…] (Linienzug des entfernten Stücks) } oder null
+export function trimAt(sk, entId, at) {
+  const e = sk.ents.find((x) => x.id === entId)
+  if (!e || !['line', 'circle', 'arc'].includes(e.t)) return null
+  const len = e.t === 'line' ? 1 : e.t === 'circle' ? TAU : (() => {
+    const [a0, a1] = arcAngles(sk, e)
+    return a1 - a0
+  })()
+  const eps = e.t === 'line' ? 1e-6 : 1e-6
+  const cuts = []
+  for (const f of sk.ents) {
+    if (f.id === e.id || f.t === 'point') continue
+    for (const q of intersectEnts(sk, e, f)) {
+      const t = paramOf(sk, e, q)
+      if (e.t !== 'circle' && (t < eps || t > len - eps)) continue // Endpunkte sind keine Schnitte
+      if (!cuts.some((c) => Math.abs(c.t - t) < eps)) cuts.push({ t, q, by: f.id })
+    }
+  }
+  cuts.sort((a, b) => a.t - b.t)
+  const tc = paramOf(sk, e, at)
+  const s = structuredClone(sk)
+  const se = s.ents.find((x) => x.id === e.id)
+  const keepCons = (ids) => s.cons.filter((c) => !['e', 'e1', 'e2'].some((k) => c[k] && ids.includes(c[k])) || ['par', 'perp', 'h', 'v'].includes(c.t))
+  // entferntes Stück zum Anzeigen
+  const pieceOf = (t0, t1) => {
+    const n = e.t === 'line' ? 1 : 32
+    return Array.from({ length: n + 1 }, (_, i) => {
+      const t = t0 + ((t1 - t0) * i) / n
+      if (e.t === 'line') {
+        const [ax, ay] = P(sk, e.a)
+        const [bx, by] = P(sk, e.b)
+        return [ax + t * (bx - ax), ay + t * (by - ay)]
+      }
+      const [cx, cy] = P(sk, e.c)
+      const r = radiusOf(sk, e)
+      const base = e.t === 'arc' ? arcAngles(sk, e)[0] : 0
+      return [cx + r * Math.cos(base + t), cy + r * Math.sin(base + t)]
+    })
+  }
+  const newPt = (c) => {
+    const id = addPoint(s, c.q)
+    addCon(s, { t: 'on', p: id, e: c.by })
+    return id
+  }
+  if (e.t === 'circle') {
+    if (cuts.length < 2) return { sketch: removeItems(sk, { ents: [e.id] }), removed: pieceOf(0, TAU) }
+    const hi = cuts.find((c) => c.t > tc) ?? cuts[0]
+    const lo = [...cuts].reverse().find((c) => c.t < tc) ?? cuts[cuts.length - 1]
+    // übrig bleibt der Bogen von hi gegen den Uhrzeigersinn bis lo
+    const a = newPt(hi)
+    const b = newPt(lo)
+    Object.assign(se, { t: 'arc', a, b })
+    delete se.r
+    delete se.fix
+    s.cons = s.cons.map((c) => (c.t === 'dia' && c.e === e.id ? { ...c, t: 'rad', v: c.v / 2 } : c))
+    return { sketch: s, removed: pieceOf(lo.t, lo.t + (wrap(hi.t - lo.t) || TAU)) }
+  }
+  const lo = [...cuts].reverse().find((c) => c.t < tc) ?? null
+  const hi = cuts.find((c) => c.t > tc) ?? null
+  const removed = pieceOf(lo ? lo.t : 0, hi ? hi.t : len)
+  if (!lo && !hi) return { sketch: removeItems(sk, { ents: [e.id] }), removed }
+  if (!lo) se.a = newPt(hi)
+  else if (!hi) se.b = newPt(lo)
+  else {
+    const oldB = se.b
+    se.b = newPt(lo)
+    const start = newPt(hi)
+    const second = addEnt(s, { t: e.t, ...(e.t === 'arc' ? { c: e.c } : {}), a: start, b: oldB, ...(e.cons ? { cons: true } : {}) })
+    // Richtung bleibt: waagrecht/senkrecht/parallel auch für das zweite Stück
+    for (const c of sk.cons) {
+      if ((c.t === 'par' || c.t === 'perp') && (c.e1 === e.id || c.e2 === e.id)) addCon(s, { ...c, id: undefined, e1: c.e1 === e.id ? second.id : c.e1, e2: c.e2 === e.id ? second.id : c.e2 })
+    }
+    if (e.t === 'line') {
+      const [ax, ay] = P(sk, e.a)
+      const [bx, by] = P(sk, e.b)
+      const L = Math.hypot(bx - ax, by - ay) || 1
+      if (Math.abs(ay - by) < 1e-6 * L) addCon(s, { t: 'h', a: start, b: oldB })
+      else if (Math.abs(ax - bx) < 1e-6 * L) addCon(s, { t: 'v', a: start, b: oldB })
+      else addCon(s, { t: 'par', e1: se.id, e2: second.id })
+    }
+  }
+  // Maße/Bedingungen, die sich auf die alte Länge beziehen, passen nicht mehr
+  const ends = (c) => (c.a === e.a && c.b === e.b) || (c.a === e.b && c.b === e.a)
+  s.cons = keepCons([e.id]).filter((c) => !(['dist', 'dx', 'dy', 'h', 'v'].includes(c.t) && ends(c)))
+  if (e.t === 'line') {
+    const [ax, ay] = [s.pts[se.a].x, s.pts[se.a].y]
+    const [bx, by] = [s.pts[se.b].x, s.pts[se.b].y]
+    const L = Math.hypot(bx - ax, by - ay) || 1
+    if (Math.abs(ay - by) < 1e-6 * L && !s.cons.some((c) => c.t === 'h' && ((c.a === se.a && c.b === se.b) || (c.a === se.b && c.b === se.a)))) addCon(s, { t: 'h', a: se.a, b: se.b })
+    else if (Math.abs(ax - bx) < 1e-6 * L && !s.cons.some((c) => c.t === 'v' && ((c.a === se.a && c.b === se.b) || (c.a === se.b && c.b === se.a)))) addCon(s, { t: 'v', a: se.a, b: se.b })
+  }
+  return { sketch: removeItems(s, {}), removed }
+}

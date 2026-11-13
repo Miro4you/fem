@@ -336,6 +336,9 @@ selbst starten.
 | 18e.20 | Extrudieren: in das Feld „Tiefe“ klicken, Mausrad drehen (mit Umschalt / Strg); `10+5` eintippen und Feld verlassen | ±1 mm je Raste (Umschalt 0,1, Strg 10); 15 steht im Feld; Vorschau folgt sofort | [ ] |
 | 18e.21 | Extrudieren: den blauen Punkt mit der Maßangabe im Bild nach oben/unten ziehen | Tiefe ändert sich in 1-mm-Schritten (Umschalt 0,1 mm), Feld und Vorschau laufen mit | [ ] |
 | 18e.22 | Skizze: Maß doppelklicken, `2*30` eingeben | Maß wird 60 | [ ] |
+| 18e.23 | Skizze: Maß (D) – untere Linie anklicken, dann obere Linie, Maß ablegen | Abstand der beiden Linien wird bemaßt (nicht die Länge der ersten); Klick ins Leere nach der ersten Linie = Länge | [ ] |
+| 18e.24 | Skizze: Linie quer durch ein Rechteck, Werkzeug Trimmen (T), über das Mittelstück fahren, klicken | Stück bis zu den Schnittpunkten wird rot gezeigt und entfernt; Kreis wird beim Trimmen zum Bogen | [ ] |
+| 18e.25 | Skizze: Linie anklicken | Leiste unten im Bild mit passenden Bedingungen (Waagrecht, Senkrecht, …, Fixieren, Löschen); Bedingungszeichen an den Linien gut sichtbar, bei großen Skizzen nur am Element unter dem Zeiger | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

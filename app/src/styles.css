@@ -780,8 +780,8 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-dim, .cad-glyph { position: absolute; transform: translate(-50%, -50%); z-index: 4; border: 1px solid transparent; cursor: pointer; font: inherit; }
 .cad-dim { padding: 1px 6px; font-size: 12px; border-radius: 5px; background: var(--panel); color: var(--text); border-color: var(--line); white-space: nowrap; }
 .cad-dim:hover, .cad-dim.on { border-color: var(--accent); color: var(--accent); }
-.cad-glyph { width: 16px; height: 16px; padding: 0; font-size: 11px; line-height: 14px; border-radius: 4px; background: rgba(100, 116, 139, 0.18); color: var(--muted); }
-.cad-glyph:hover, .cad-glyph.on { background: var(--accent); color: #fff; }
+.cad-glyph { width: 18px; height: 18px; padding: 0; font-size: 11px; font-weight: 700; line-height: 16px; border-radius: 5px; background: var(--panel); border-color: var(--line) !important; color: var(--accent); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.cad-glyph:hover, .cad-glyph.on, .cad-glyph.hot { background: var(--accent); color: #fff; border-color: var(--accent) !important; }
 .cad-dim-edit { position: absolute; transform: translate(-50%, -50%); z-index: 6; }
 .cad-dim-edit input { width: 90px; height: 28px; text-align: center; border: 2px solid var(--accent); border-radius: 6px; background: var(--panel); }
 .tile.cad-new svg { color: var(--accent); }
@@ -833,3 +833,10 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-handle.drag, .cad-handle:active { cursor: grabbing; }
 .cad-handle span { position: absolute; left: 22px; top: -3px; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--text);
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; pointer-events: none; }
+
+/* schwebende Bedingungsleiste im Skizzierer */
+.cad-conbar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 6; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 6px; max-width: min(860px, calc(100% - 32px)); padding: 6px 10px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.14); font-size: 12px; }
+.cad-conbar .muted { margin-right: 4px; }
+.cad-conbar-g { color: var(--accent); font-size: 12px; }

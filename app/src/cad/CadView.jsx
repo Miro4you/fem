@@ -18,12 +18,14 @@ import {
   addEnt,
   addCon,
   addPoint,
+  trimAt,
   distTo,
   dimFor,
   dimGeometry,
   measure,
   isDim,
   CON_GLYPH,
+  CON_LABEL,
   solved,
   entPoints,
   radiusOf,
@@ -613,6 +615,12 @@ export default function CadView({
         s.previewGroup.add(l)
       }
     }
+    if (skPlane && t?.cut?.length) {
+      const g = new THREE.BufferGeometry().setFromPoints(t.cut.map((q) => new THREE.Vector3(...to3d(skPlane, q))))
+      const l = new THREE.Line(g, front(new THREE.LineBasicMaterial({ color: 0xe5484d, linewidth: 3 })))
+      l.renderOrder = 28
+      s.previewGroup.add(l)
+    }
     if (skPlane && t?.snapAt) {
       const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...to3d(skPlane, t.snapAt))])
       const p = new THREE.Points(g, front(new THREE.PointsMaterial({ size: 11, sizeAttenuation: false, color: 0xf59e0b })))
@@ -653,6 +661,18 @@ export default function CadView({
       const glyphs = []
       const count = new Map()
       const ent = (id) => sk.ents.find((e) => e.id === id)
+      // zu welchen Elementen gehört eine Bedingung (zum Hervorheben und Filtern)
+      const entsOfPt = new Map()
+      for (const e of sk.ents) for (const p of entPoints(e)) entsOfPt.set(p, [...(entsOfPt.get(p) ?? []), e.id])
+      const entsOf = (c) => {
+        const out = new Set([c.e, c.e1, c.e2].filter(Boolean))
+        if ((c.t === 'h' || c.t === 'v') && c.a && c.b) {
+          const line = sk.ents.find((e) => e.t === 'line' && ((e.a === c.a && e.b === c.b) || (e.a === c.b && e.b === c.a)))
+          if (line) out.add(line.id)
+        }
+        if (!out.size) for (const p of [c.p, c.a, c.b]) for (const e of entsOfPt.get(p) ?? []) out.add(e)
+        return [...out]
+      }
       for (const c of sk.cons) {
         const g = CON_GLYPH[c.t]
         if (!g) continue
@@ -668,10 +688,11 @@ export default function CadView({
         const k = count.get(key) ?? 0
         count.set(key, k + 1)
         const [x, y] = scr(at)
-        glyphs.push({ id: c.id, x: x + 10 + 13 * k, y: y - 12, g, t: c.t })
+        const ents = entsOf(c)
+        glyphs.push({ id: c.id, x: x + 11 + 17 * k, y: y - 13, g, t: c.t, ents })
         if (c.e2) {
           const [x2, y2] = scr(midOf(sk, ent(c.e2)))
-          glyphs.push({ id: c.id + ':2', con: c.id, x: x2 + 10, y: y2 - 12, g, t: c.t })
+          glyphs.push({ id: c.id + ':2', con: c.id, x: x2 + 11, y: y2 - 13, g, t: c.t, ents })
         }
       }
       setOverlay((o) => ({ dims, glyphs, tick: o.tick }))
@@ -916,6 +937,14 @@ export default function CadView({
       t.cur = { at, hit }
       t.snapAt = hit ? hit.at : null
       t.preview = previewOf(sk.tool, t, data)
+      t.cut = null
+      if (sk.tool === 'trim') {
+        // Trimmen: das Stück unter dem Zeiger rot zeigen
+        const h = sketchHit(ev, data, sk.plane)
+        t.snapAt = null
+        const r = h?.ent ? trimAt(data, h.ent, q) : null
+        t.cut = r?.removed ?? null
+      }
       tmp.current = t
       if (sk.tool === 'dim') {
         const h = sketchHit(ev, data, sk.plane)
@@ -996,6 +1025,16 @@ export default function CadView({
         sk.onSel(next)
         return
       }
+      if (sk.tool === 'trim') {
+        const h = sketchHit(ev, data, plane)
+        if (!h?.ent) return sk.onMessage?.('Trimmen: das Stück einer Linie, eines Bogens oder Kreises anklicken, das weg soll')
+        const r = trimAt(data, h.ent, q)
+        if (!r) return
+        const sv = solved(r.sketch)
+        tmp.current = null
+        sk.onChange(sv.info.ok ? sv.sketch : r.sketch, sv.info)
+        return
+      }
       if (sk.tool === 'use') {
         // Bauteilkante in die Skizze übernehmen (fest)
         const h = pick3d(ev, { edges: true })
@@ -1033,15 +1072,19 @@ export default function CadView({
       if (sk.tool === 'dim') {
         const h = sketchHit(ev, data, plane)
         t.picks = t.picks ?? []
-        if ((h?.pt || h?.ent) && t.picks.length < 2 && !(t.picks.length && t.ready)) {
-          t.picks.push(h.pt ? { pt: h.pt } : { ent: h.ent })
+        // wie Onshape: erstes Element wählen; Klick auf ein zweites Element = Abstand/Winkel zwischen beiden,
+        // Klick ins Leere = Maß des einen Elements (Länge, Ø, R) dort ablegen
+        const same = (a, b) => (a.pt && a.pt === b.pt) || (a.ent && a.ent === b.ent)
+        const pick = h?.pt ? { pt: h.pt } : h?.ent ? { ent: h.ent } : null
+        if (pick && t.picks.length < 2 && !t.picks.some((x) => same(x, pick))) {
+          t.picks.push(pick)
           // ein Kreis oder eine einzelne Linie: gleich ablegbar; sonst auf das zweite Element warten
           const one = t.picks.length === 1 && h.ent && data.ents.find((e) => e.id === h.ent)?.t !== 'point'
           t.ready = one || t.picks.length === 2
           t.cur = { at: q }
           tmp.current = t
           setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
-          if (!(t.ready && t.picks.length === 2)) return
+          if (t.picks.length === 1) sk.onMessage?.(one ? 'Maß ablegen – oder ein zweites Element anklicken (Abstand, Winkel)' : 'Zweites Element anklicken')
           return
         }
         if (!t.picks.length) return
@@ -1346,21 +1389,35 @@ export default function CadView({
           </button>
         ))}
       {sketch &&
-        (sketch.showGlyphs ?? (sketch.data?.cons?.length ?? 0) <= 40) &&
-        overlay.glyphs.map((g) => (
-          <button
-            key={g.id}
-            className={'cad-glyph' + (sketch.sel?.cons?.includes(g.con ?? g.id) ? ' on' : '')}
-            style={{ left: g.x, top: g.y }}
-            title={'Bedingung – anklicken, Entf löscht'}
-            onClick={(e) => {
-              e.stopPropagation()
-              sketch.onSel({ pts: [], ents: [], cons: [g.con ?? g.id] })
-            }}
-          >
-            {g.g}
-          </button>
-        ))}
+        (() => {
+          // viele Bedingungen (z. B. aus Draftpad): nur die am Element unter dem Zeiger bzw. an den gewählten
+          const all = sketch.showGlyphs ?? (sketch.data?.cons?.length ?? 0) <= 40
+          const focus = new Set([...(sketch.sel?.ents ?? []), hover?.ent, ...(hover?.con ? [] : [])].filter(Boolean))
+          for (const p of sketch.sel?.pts ?? []) for (const e of sketch.data?.ents ?? []) if (entPoints(e).includes(p)) focus.add(e.id)
+          if (hover?.pt) for (const e of sketch.data?.ents ?? []) if (entPoints(e).includes(hover.pt)) focus.add(e.id)
+          const selCons = new Set(sketch.sel?.cons ?? [])
+          return overlay.glyphs
+            .filter((g) => all || selCons.has(g.con ?? g.id) || g.ents?.some((e) => focus.has(e)) || hover?.glyph === (g.con ?? g.id))
+            .map((g) => (
+              <button
+                key={g.id}
+                className={'cad-glyph' + (selCons.has(g.con ?? g.id) ? ' on' : '') + (hover?.glyph === (g.con ?? g.id) ? ' hot' : '')}
+                style={{ left: g.x, top: g.y }}
+                title={`${CON_LABEL[g.t] ?? 'Bedingung'} – anklicken wählt, Entf löscht`}
+                onMouseEnter={() => setHover({ ent: g.ents?.[0] ?? null, glyph: g.con ?? g.id })}
+                onMouseLeave={() => setHover(null)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const add = e.shiftKey || e.ctrlKey || e.metaKey
+                  const id = g.con ?? g.id
+                  const cur = sketch.sel ?? { pts: [], ents: [], cons: [] }
+                  sketch.onSel(add ? { ...cur, cons: cur.cons.includes(id) ? cur.cons.filter((x) => x !== id) : [...cur.cons, id] } : { pts: [], ents: [], cons: [id] })
+                }}
+              >
+                {g.g}
+              </button>
+            ))
+        })()}
       {edit && sketch && (
         <form
           className="cad-dim-edit"
