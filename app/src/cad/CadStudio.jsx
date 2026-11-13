@@ -46,6 +46,8 @@ import {
   Scissors,
   PackageOpen,
   ArrowRightToLine,
+  Route,
+  Layers2,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -84,6 +86,8 @@ const FEATURE_ICON = {
   removefaces: Eraser,
   moveface: Move,
   shell: PackageOpen,
+  sweep: Route,
+  loft: Layers2,
   refillet: SquareRoundCorner,
   rehole: CircleDot,
 }
@@ -110,6 +114,8 @@ const PART_TOOLS = [
   ['chamfer', 'Kanten fasen'],
   ['pattern', 'Linear oder im Kreis vervielfältigen'],
   ['mirror', 'An einer Ebene spiegeln'],
+  ['sweep', 'Sweep: Profil-Skizze entlang einer Pfad-Skizze (z. B. Rohr, Bügel)'],
+  ['loft', 'Loft: Übergang zwischen zwei oder mehr Skizzen'],
   ['shell', 'Schale: Körper aushöhlen, gewählte Flächen bleiben offen'],
   ['moveface', 'Ebene Fläche verschieben (z. B. Wand dicker)'],
   ['removefaces', 'Flächen entfernen (z. B. Bohrung oder Radius weg)'],
@@ -148,6 +154,11 @@ function matchFaces(tess, refs) {
   return out
 }
 const edgeRef = (c) => ({ mid: c.mid, dir: c.dir, kind: c.kind, ...(c.kind === 'circle' ? { center: c.center, axis: c.axis, radius: c.radius } : {}), length: c.length })
+/// Ebene parallel verschieben (Abstand entlang der Normalen)
+const shiftPlane = (plane, d) => (d ? { ...plane, origin: plane.origin.map((x, i) => x + basis(plane).n[i] * d) } : plane)
+/// Grundebene einer Skizze (ohne Abstand) aus ihrem Bezug
+const basePlaneOf = (sk) => (sk.planeRef?.std ? STD_PLANES[sk.planeRef.std] : sk.planeRef?.face?.normal ? planeFromFace(sk.planeRef.face) : null)
+
 const faceRef = (f) => ({ center: f.center, kind: f.kind, normal: f.normal, point: f.point, axis: f.axis, origin: f.origin, radius: f.radius })
 const nameOf = (r) =>
   r?.std ? `Ebene ${r.std}` : r?.axis ? `${r.axis}-Achse` : r?.edge ? (r.edge.kind === 'circle' ? 'Kreiskante' : 'Kante') : r?.face ? (r.face.kind === 'cylinder' ? 'Zylinderfläche' : 'Fläche') : '–'
@@ -554,8 +565,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       if (!plane) return note('Eine Hauptebene oder eine ebene Fläche anklicken')
       const ref = h.std ? { std: h.std } : { face: faceRef(h.face) }
       if (d.sketch) {
-        // Ebene einer vorhandenen Skizze tauschen: Geometrie bleibt in lokalen Koordinaten
-        setDraft({ sketch: { ...d.sketch, plane, planeRef: ref } })
+        // Ebene einer vorhandenen Skizze tauschen: Geometrie bleibt in lokalen Koordinaten (Abstand bleibt)
+        setDraft({ sketch: { ...d.sketch, plane: shiftPlane(plane, num(d.sketch.offset) || 0), planeRef: ref } })
       } else setDraft({ sketch: newSketch(plane, ref) })
       setSkInfo({ ok: true, dof: 0, free: new Set(), redundant: 0 })
       setPickFor(null)
@@ -1361,7 +1372,7 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
   const d = edit.draft
   const before = features.slice(0, edit.index)
   const sketches = before.filter((f) => f.type === 'sketch' && !f.suppressed)
-  const solids = before.filter((f) => ['extrude', 'revolve', 'hole'].includes(f.type) && !f.suppressed)
+  const solids = before.filter((f) => ['extrude', 'revolve', 'hole', 'sweep', 'loft'].includes(f.type) && !f.suppressed)
   const Icon = FEATURE_ICON[d.type] ?? Info
   const prob = problemOf(d, [...before, d])
   const sketchSel = (
@@ -1432,6 +1443,16 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
       {d.type === 'sketch' && (
         <>
           <PickButton active={pickFor === 'plane'} label="Ebene" value={sk ? (sk.planeRef?.std ? `Ebene ${sk.planeRef.std}` : 'Fläche') : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'plane' ? null : 'plane')} />
+          {sk && basePlaneOf(sk) && (
+            <Num
+              label="Abstand zur Ebene (z. B. für Loft)"
+              value={sk.offset ?? '0'}
+              onChange={(offset) => {
+                const v = num(offset)
+                setDraft({ sketch: { ...sk, offset, plane: Number.isFinite(v) ? shiftPlane(basePlaneOf(sk), v) : sk.plane } })
+              }}
+            />
+          )}
           {d.source?.kind === 'draftpad' && (
             <div className="notice small dp-source">
               <FileUp size={14} />
@@ -1664,6 +1685,59 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
             </div>
           </label>
           {d.plane?.face && <p className="hint">Ebene Fläche gewählt.</p>}
+        </>
+      )}
+
+      {d.type === 'sweep' && (
+        <>
+          <label className="field">
+            <span>Profil (Skizze quer zum Pfad, am Pfadanfang)</span>
+            <select value={d.sketch ?? ''} onChange={(e) => setDraft({ sketch: Number(e.target.value) || null })}>
+              <option value="">– wählen –</option>
+              {sketches.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Pfad (Skizze mit Linien/Bögen)</span>
+            <select value={d.path ?? ''} onChange={(e) => setDraft({ path: Number(e.target.value) || null })}>
+              <option value="">– wählen –</option>
+              {sketches.filter((s) => s.id !== d.sketch).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {modeSel}
+          <p className="hint">Löcher im Profil bleiben hohl – ein Kreisring ergibt ein Rohr.</p>
+        </>
+      )}
+
+      {d.type === 'loft' && (
+        <>
+          <span className="field-label">Skizzen in Reihenfolge (je die größte Fläche)</span>
+          {sketches.map((s) => {
+            const k = (d.sketches ?? []).indexOf(s.id)
+            return (
+              <label key={s.id} className="check">
+                <input
+                  type="checkbox"
+                  checked={k >= 0}
+                  onChange={(e) => setDraft({ sketches: e.target.checked ? [...(d.sketches ?? []), s.id] : d.sketches.filter((x) => x !== s.id) })}
+                />{' '}
+                {k >= 0 ? `${k + 1}. ` : ''}
+                {s.name}
+              </label>
+            )
+          })}
+          <label className="check">
+            <input type="checkbox" checked={!!d.ruled} onChange={(e) => setDraft({ ruled: e.target.checked })} /> Gerade Übergänge (statt weich)
+          </label>
+          {modeSel}
         </>
       )}
 

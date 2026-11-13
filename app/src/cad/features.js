@@ -13,6 +13,8 @@ export const FEATURE_LABEL = {
   removefaces: 'Flächen entfernen',
   moveface: 'Fläche verschieben',
   shell: 'Schale',
+  sweep: 'Sweep',
+  loft: 'Loft',
   refillet: 'Radius ändern',
   rehole: 'Bohrung ändern',
 }
@@ -130,6 +132,10 @@ export function defaults(type) {
       return { faces: [], distance: '2' }
     case 'shell':
       return { faces: [], thickness: '2' }
+    case 'sweep':
+      return { sketch: null, path: null, mode: 'add' }
+    case 'loft':
+      return { sketches: [], mode: 'add', ruled: false }
     default:
       return {}
   }
@@ -199,6 +205,11 @@ export function problemOf(f, features) {
       return f.faces.length ? null : 'Flächen im Bild wählen'
     case 'moveface':
       return !f.faces.length ? 'Ebene Flächen im Bild wählen' : num(f.distance) ? null : 'Abstand angeben'
+    case 'sweep':
+      if (!f.sketch) return 'Profil-Skizze wählen'
+      return f.path && f.path !== f.sketch ? null : 'Pfad-Skizze wählen (eine andere Skizze)'
+    case 'loft':
+      return (f.sketches ?? []).length >= 2 ? null : 'mindestens zwei Skizzen wählen'
     case 'shell':
       return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
     case 'refillet':
@@ -275,6 +286,10 @@ export function kernelFeature(f, features) {
       return { id: f.id, type: 'removefaces', faces: f.faces.map(faceHint) }
     case 'moveface':
       return { id: f.id, type: 'moveface', faces: f.faces.map(faceHint), distance: num(f.distance) }
+    case 'sweep':
+      return { id: f.id, type: 'sweep', sketch: f.sketch, path: f.path, mode: f.mode, bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false }
+    case 'loft':
+      return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false }
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
     case 'refillet':

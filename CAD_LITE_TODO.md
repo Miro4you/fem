@@ -143,7 +143,7 @@ wenn die Hinweise in der Praxis nicht reichen.
    (tangential fortgesetzte Kanten auf einmal).
 5. Verlauf: Rückrollbalken (Features unterhalb ausblenden), Ziehen zum Umsortieren, Fehler am Feature wie heute.
 
-## G4. Neue Features (Schale erledigt 13.11.)
+## G4. Neue Features (Schale, Sweep mit Hohlprofil, Loft, Skizzenebene mit Abstand erledigt 13.11.; offen: Boolesch zwischen Körpern, Formschräge, Ebene durch drei Punkte)
 
 Schale, Sweep (Profil entlang Pfad), Loft (zwischen Skizzen), Boolesch (vereinigen/abziehen/schneiden zwischen
 Körpern), Bohrung mit Senkung/Gewindekennzeichen, Ebene (versetzt, durch drei Punkte, senkrecht zu Kante),

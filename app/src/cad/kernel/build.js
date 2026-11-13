@@ -1,7 +1,7 @@
 // Neuer Geometriekern: OpenCASCADE (WebAssembly, über replicad) – führt die Feature-Liste aus wie cad.py
 // und liefert dieselbe Antwort ({ status, volume, bodies, bodies_info, tess, regions }).
 // Läuft im Web Worker (worker.js) und in Node (Tests). Vorher: setOC(oc) aus replicad.
-import { getOC, cast, makeLine, makeCircle, makeThreePointArc, makePolygon, basicFaceExtrusion, revolution, measureArea, measureShapeVolumeProperties, exportSTEP, Vector } from 'replicad'
+import { getOC, cast, makeLine, makeCircle, makeThreePointArc, makePolygon, basicFaceExtrusion, revolution, measureArea, measureShapeVolumeProperties, exportSTEP, Vector, assembleWire, genericSweep, loft } from 'replicad'
 import { arcAngles, entRadius, pruneOpen, crossings, insidePoly, interiorPoint, inFills, chainLoops } from './geom2d.js'
 
 export class Problem extends Error {}
@@ -388,7 +388,83 @@ function toolsHole(model, f, sketches) {
   })
 }
 
-const TOOLS = { extrude: toolsExtrude, revolve: toolsRevolve, hole: toolsHole }
+/// Pfad einer Skizze (Linien und Bögen, zusammenhängend) als Draht im Raum
+function pathWire(sk, what) {
+  const ents = (sk.ents ?? []).filter((e) => e.t === 'line' || e.t === 'arc')
+  if (!ents.length) throw new Problem(`${what}: Die Pfad-Skizze hat keine Linien oder Bögen`)
+  const B = planeBasis(sk.plane)
+  const key = (p) => p.map((v) => v.toFixed(4)).join(',')
+  const count = new Map()
+  for (const e of ents) for (const p of [e.a, e.b]) count.set(key(p), (count.get(key(p)) ?? 0) + 1)
+  // Anfang: ein Ende, das nur einmal vorkommt (offener Pfad), sonst irgendeins
+  let cur = ents.find((e) => count.get(key(e.a)) === 1)?.a ?? ents.find((e) => count.get(key(e.b)) === 1)?.b ?? ents[0].a
+  const left = [...ents]
+  const edges = []
+  while (left.length) {
+    const i = left.findIndex((e) => key(e.a) === key(cur) || key(e.b) === key(cur))
+    if (i < 0) throw new Problem(`${what}: Der Pfad muss zusammenhängen (eine Linie ohne Abzweigungen)`)
+    const e = left.splice(i, 1)[0]
+    const fwd = key(e.a) === key(cur)
+    const [p, q] = fwd ? [e.a, e.b] : [e.b, e.a]
+    if (e.t === 'line') edges.push(makeLine(to3(B, p), to3(B, q)))
+    else {
+      const [a0, a1] = arcAngles(e)
+      const r = entRadius(e)
+      const m = (a0 + a1) / 2
+      edges.push(makeThreePointArc(to3(B, p), to3(B, [e.c[0] + r * Math.cos(m), e.c[1] + r * Math.sin(m)]), to3(B, q)))
+    }
+    cur = q
+  }
+  return assembleWire(edges)
+}
+
+/// Sweep: Profil (Flächen der Skizze) entlang eines Pfads; Löcher im Profil bleiben hohl (Rohr)
+function toolsSweep(model, f, sketches) {
+  const sk = sketchOf(f, sketches, 'Sweep')
+  const pk = sketches.get(f.path)
+  if (!pk) throw new Problem('Sweep: Pfad-Skizze fehlt')
+  const faces = sketchFaces(sk, f.regions, 'Sweep', f.fills)
+  const out = []
+  for (const face of faces) {
+    const sweep = (w) => {
+      try {
+        return solidsOf(genericSweep(w, pathWire(pk, 'Sweep'), { frenet: true, transitionMode: 'round' }))[0]
+      } catch (ex) {
+        if (ex instanceof Problem) throw ex
+        throw new Problem('Sweep: Das Profil lässt sich nicht entlang des Pfads führen – Profil am Pfadanfang, quer zum Pfad zeichnen; enge Bögen vermeiden')
+      }
+    }
+    // outerWire()/innerWires() verbrauchen die Fläche (replicad): je eine Kopie
+    const inner = face.clone().innerWires()
+    let body = sweep(face.clone().outerWire())
+    if (!body) throw new Problem('Sweep: Es ist kein Körper entstanden')
+    for (const w of inner) {
+      const hole = sweep(w)
+      if (hole) body = solidsOf(body.cut(hole))[0] ?? body
+    }
+    out.push(body)
+  }
+  return out
+}
+
+/// Loft: Übergang zwischen den Umrissen mehrerer Skizzen (je Skizze die größte Fläche)
+function toolsLoft(model, f, sketches) {
+  const ids = f.sketches ?? []
+  if (ids.length < 2) throw new Problem('Loft: mindestens zwei Skizzen wählen')
+  const wires = ids.map((id) => {
+    const sk = sketches.get(id)
+    if (!sk) throw new Problem('Loft: eine gewählte Skizze fehlt (gelöscht oder unterdrückt?)')
+    const faces = sketchFaces(sk, null, 'Loft', false)
+    return faces.reduce((a, b) => (measureArea(b) > measureArea(a) ? b : a)).outerWire()
+  })
+  try {
+    return solidsOf(loft(wires, { ruled: !!f.ruled }))
+  } catch {
+    throw new Problem('Loft: Zwischen diesen Umrissen lässt sich kein Körper bilden (Skizzen sollten übereinander liegen und gleich viele Ecken haben)')
+  }
+}
+
+const TOOLS = { extrude: toolsExtrude, revolve: toolsRevolve, hole: toolsHole, sweep: toolsSweep, loft: toolsLoft }
 const modeOf = (f) => (f.type === 'hole' ? 'cut' : (f.mode ?? 'add'))
 
 // --- Kanten und Flächen ------------------------------------------------------------------------

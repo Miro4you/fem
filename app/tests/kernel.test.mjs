@@ -195,3 +195,32 @@ test('Schale: Kasten oben offen, Wand 2 mm', () => {
   const r2 = build({ features: [...features.slice(0, 2), { ...features[2], thickness: 25 }] })
   assert.match(r2.status[2].error, /Schale/)
 })
+
+test('Sweep: Rohr (Kreisring entlang Pfad mit Bogen) und Loft (Pyramidenstumpf)', () => {
+  const xzp = { origin: [0, 0, 0], normal: [0, -1, 0], u: [1, 0, 0] }
+  // gerader Pfad 100 mm in z
+  let r = build({ features: [
+    { id: 1, type: 'sketch', plane: xy, ents: [{ t: 'circle', c: [0, 0], r: 5 }, { t: 'circle', c: [0, 0], r: 4 }] },
+    { id: 2, type: 'sketch', plane: xzp, ents: [{ t: 'line', a: [0, 0], b: [0, 100] }] },
+    { id: 3, type: 'sweep', sketch: 1, path: 2, mode: 'add' },
+  ] })
+  allOk(r)
+  near(r.volume, PI * 9 * 100, 1e-6)
+  // Pfad mit 90°-Bogen R 30: Länge 50 + π/2·30 + 50
+  r = build({ features: [
+    { id: 1, type: 'sketch', plane: xy, ents: [{ t: 'circle', c: [0, 0], r: 5 }, { t: 'circle', c: [0, 0], r: 4 }] },
+    { id: 2, type: 'sketch', plane: xzp, ents: [{ t: 'line', a: [0, 0], b: [0, 50] }, { t: 'arc', c: [30, 50], a: [0, 50], b: [30, 80] }, { t: 'line', a: [30, 80], b: [80, 80] }].map((e) => (e.t === 'arc' ? { ...e, a: [30, 80], b: [0, 50] } : e)) },
+    { id: 3, type: 'sweep', sketch: 1, path: 2, mode: 'add' },
+  ] })
+  allOk(r)
+  near(r.volume, PI * 9 * (100 + (PI / 2) * 30), 1e-3)
+  // Loft
+  const top = { origin: [0, 0, 30], normal: [0, 0, 1], u: [1, 0, 0] }
+  r = build({ features: [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(-10, -10, 10, 10) },
+    { id: 2, type: 'sketch', plane: top, ents: rect(-5, -5, 5, 5) },
+    { id: 3, type: 'loft', sketches: [1, 2], ruled: true, mode: 'add' },
+  ] })
+  allOk(r)
+  near(r.volume, (30 / 3) * (400 + 100 + 200), 1e-6)
+})

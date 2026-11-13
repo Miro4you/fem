@@ -3,7 +3,7 @@ import * as api from '../../api.js'
 
 const KEY = 'projekt-fem.kern'
 /// Was der neue Kern schon kann (Rest: alter Kern auf dem Server)
-const SUPPORTED = new Set(['sketch', 'extrude', 'revolve', 'hole', 'fillet', 'chamfer', 'pattern', 'mirror', 'moveface', 'shell'])
+const SUPPORTED = new Set(['sketch', 'extrude', 'revolve', 'hole', 'fillet', 'chamfer', 'pattern', 'mirror', 'moveface', 'shell', 'sweep', 'loft'])
 
 /// Neuer Kern eingeschaltet? Standard ja; #kern=alt an der Adresse schaltet auf den alten (wird gemerkt, s. api.js)
 export function newKernelWanted() {
