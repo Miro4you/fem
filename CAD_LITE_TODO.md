@@ -149,7 +149,7 @@ Schale, Sweep (Profil entlang Pfad), Loft (zwischen Skizzen), Boolesch (vereinig
 Körpern), Bohrung mit Senkung/Gewindekennzeichen, Ebene (versetzt, durch drei Punkte, senkrecht zu Kante),
 Muster kreisförmig um Achse, Formschräge (wenn einfach).
 
-## G5. Messen und Schnitt (Konstruktion **und** FEM-Ansicht)
+## G5. Messen und Schnitt (Konstruktion **und** FEM-Ansicht) – Messen erledigt 13.11. (`app/src/measure.js`, über Flächendaten des Netzes bzw. Kerns); Schnittansicht offen
 
 1. Werkzeug „Messen“: Punkt/Kante/Fläche anklicken → Abstand, Länge, Ø/R einer Zylinderfläche, Winkel zwischen
    Flächen, Fläche, Volumen/Masse des Körpers. Ergebnis als Etikett im Bild, mehrere stehen lassen.

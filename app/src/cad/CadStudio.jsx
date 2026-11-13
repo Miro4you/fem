@@ -66,6 +66,7 @@ import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from 
 import { suggestParts, partFeatures } from './parts.js'
 import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
 import NumInput from './NumInput.jsx'
+import { describe as describePick, between as betweenPicks } from '../measure.js'
 import { cadBuildView, kernelReady, newKernelWanted, oldKernelReason } from './kernel/client.js'
 
 const FEATURE_ICON = {
@@ -499,8 +500,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // --- Auswahl im Bild (Ebenen, Flächen, Kanten) ------------------------------------------------------
   const shownTess = (edit ? preview?.tess : built?.tess) ?? (edit ? built?.tess : null)
+  // Messen: Flächen/Kanten anklicken (zwei für Abstände)
+  const [cmeasure, setCmeasure] = useState({ on: false, picks: [] })
   const pickWant = useMemo(() => {
     if (sketchEdit) return null
+    if (cmeasure.on) return { faces: true, edges: true }
     switch (pickFor) {
       case 'plane':
         return { std: true, planar: true }
@@ -520,9 +524,15 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       default:
         return null
     }
-  }, [pickFor, sketchEdit, edit?.draft.type])
+  }, [pickFor, sketchEdit, edit?.draft.type, cmeasure.on])
 
   const onPick = (h, ev) => {
+    if (cmeasure.on) {
+      if (!h?.point) return
+      const pick = { point: h.point, surf: h.face ?? null, edge: h.edge ?? null }
+      setCmeasure((m) => ({ ...m, picks: [...(m.picks.length >= 2 ? [] : m.picks), pick] }))
+      return
+    }
     if (!edit || !h) return
     const d = edit.draft
     if (pickFor === 'plane') {
@@ -611,6 +621,13 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const selected = useMemo(() => {
     const d = edit?.draft
     const out = { faces: new Set(), edges: new Set(), std: new Set() }
+    if (cmeasure.on) {
+      for (const p of cmeasure.picks) {
+        if (p.surf) out.faces.add(p.surf.tag)
+        if (p.edge) out.edges.add(p.edge.tag)
+      }
+      return out
+    }
     if (!d) return out
     if (d.edges) out.edges = matchEdges(viewTess, d.edges)
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
@@ -618,7 +635,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (d.type === 'mirror' && d.plane?.face) out.faces = matchFaces(viewTess, [d.plane.face])
     if ((d.type === 'refillet' || d.type === 'rehole') && d.surfaces) out.faces = matchFaces(viewTess, d.surfaces.map((c) => ({ center: c })))
     return out
-  }, [edit?.draft, viewTess])
+  }, [edit?.draft, viewTess, cmeasure])
 
   // Bereiche zum Anklicken (Extrudieren/Drehen) – direkt aus der Skizze, je Skizze einmal geholt
   const regionDraft = edit && (edit.draft.type === 'extrude' || edit.draft.type === 'revolve') ? edit.draft : null
@@ -1248,7 +1265,23 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           onSketchPick={onSketchPick}
           preview={!!edit && ['extrude', 'revolve', 'hole'].includes(edit.draft.type) && edit.draft.mode === 'cut'}
           handle={dragHandle}
+          measureTool={sketchEdit ? null : { on: cmeasure.on, onToggle: () => setCmeasure((m) => ({ on: !m.on, picks: [] })) }}
         />
+        {cmeasure.on && !sketchEdit && (
+          <div className="measure-panel">
+            <b>Messen</b>
+            {!cmeasure.picks.length && <span className="muted">Fläche oder Kante anklicken (Ø, Länge) – eine zweite für den Abstand</span>}
+            {cmeasure.picks.map((p, i) => (
+              <span key={i}>
+                <b className="measure-tag">{'AB'[i]}</b> {describePick(p)}
+              </span>
+            ))}
+            {cmeasure.picks.length === 2 && betweenPicks(cmeasure.picks[0], cmeasure.picks[1]).map((t) => <span key={t}>{t}</span>)}
+            <button className="btn small" onClick={() => setCmeasure({ on: false, picks: [] })}>
+              Fertig
+            </button>
+          </div>
+        )}
       </section>
     </div>
   )

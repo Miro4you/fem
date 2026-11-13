@@ -339,6 +339,7 @@ selbst starten.
 | 18e.23 | Skizze: Maß (D) – untere Linie anklicken, dann obere Linie, Maß ablegen | Abstand der beiden Linien wird bemaßt (nicht die Länge der ersten); Klick ins Leere nach der ersten Linie = Länge | [ ] |
 | 18e.24 | Skizze: Linie quer durch ein Rechteck, Werkzeug Trimmen (T), über das Mittelstück fahren, klicken | Stück bis zu den Schnittpunkten wird rot gezeigt und entfernt; Kreis wird beim Trimmen zum Bogen | [ ] |
 | 18e.25 | Skizze: Linie anklicken | Leiste unten im Bild mit passenden Bedingungen (Waagrecht, Senkrecht, …, Fixieren, Löschen); Bedingungszeichen an den Linien gut sichtbar, bei großen Skizzen nur am Element unter dem Zeiger | [ ] |
+| 18e.26 | Messen (Lineal-Knopf rechts oben im Bild) in der Konstruktion und im Modell (auch STEP/Onshape-Teil): Bohrung anklicken, dann zwei gegenüberliegende Flächen | Bohrung zeigt Ø und R; zwei parallele Flächen zeigen den Abstand, zwei Bohrungen den Achsabstand; „Fertig“ beendet | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { CadControls } from './CadControls.js'
 import { BANDS, cssBandColor, resultTexture } from '../colormap.js'
 import { IcHome, IcFit } from '../ui/icons.jsx'
+import { Ruler } from 'lucide-react'
 import { regionGrid } from '../region.js'
 
 const BASE = new THREE.Color('#b9c0c8')
@@ -52,12 +53,13 @@ export default function Viewport({
   look,
   hiddenSurfaces,
   bolts,
+  measure, // Messen: { picks: [{ point, label }], onPick({ tag, point }), onToggle, on }
   ref,
 }) {
   const host = useRef(null)
   const ctx = useRef(null)
   const cb = useRef({})
-  cb.current = { onPick, onProbe, pickable, mode, drawing, planeNormal, onDraw, aim, onAim }
+  cb.current = { onPick, onProbe, pickable, mode, drawing, planeNormal, onDraw, aim, onAim, measure }
   const [hoverTag, setHoverTag] = useState(null)
   const [labels, setLabels] = useState([])
   // Kamera-Achsen (rechts, oben, zum Betrachter) für Ansichtswürfel und Koordinatensystem
@@ -386,7 +388,11 @@ export default function Viewport({
       if (state.justDrew) return (state.justDrew = false)
       if (!down || Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) > 4) return
       const h = hit(ev)
-      const { mode, pickable, onPick, onProbe } = cb.current
+      const { mode, pickable, onPick, onProbe, measure: ms } = cb.current
+      if (ms?.on) {
+        if (h) ms.onPick({ tag: state.triSurface[h.faceIndex], point: h.point.toArray() })
+        return
+      }
       if (mode === 'setup' && pickable && h) onPick?.(state.triSurface[h.faceIndex])
       if (mode === 'result') {
         if (!h) return onProbe?.(null)
@@ -876,12 +882,16 @@ export default function Viewport({
   useEffect(() => {
     const s = ctx.current
     const scale = mode === 'result' && result ? result.scale : 0
-    s.labelNodes = (markers ?? []).map((m) => {
-      const pos = [0, 1, 2].map((k) => s.base[3 * m.node + k] + (scale ? scale * result.displacement[3 * m.node + k] : 0))
-      return { ...m, pos }
-    })
+    s.labelNodes = [
+      ...(markers ?? []).map((m) => {
+        const pos = [0, 1, 2].map((k) => s.base[3 * m.node + k] + (scale ? scale * result.displacement[3 * m.node + k] : 0))
+        return { ...m, pos }
+      }),
+      // Messpunkte (auf der unverformten Oberfläche)
+      ...(measure?.on ? measure.picks : []).map((m) => ({ label: m.label, pos: m.point, measure: true })),
+    ]
     s.dirty = true
-  }, [markers, mode, result])
+  }, [markers, mode, result, measure])
 
   // Blick aus Richtung `dir` (zum Betrachter hin), ganzes Bauteil im Bild
   function fitDir(dir, up = null) {
@@ -915,12 +925,17 @@ export default function Viewport({
             <button className="icon-btn" title="Alles zeigen" aria-label="Alles zeigen" onClick={() => fitDir(cam[2], cam[1])}>
               <IcFit />
             </button>
+            {measure && (
+              <button className={'icon-btn' + (measure.on ? ' on' : '')} title="Messen: Flächen anklicken (Ø, Abstand)" aria-label="Messen" onClick={measure.onToggle}>
+                <Ruler size={16} />
+              </button>
+            )}
           </div>
         </div>
       )}
       {mesh && <Triad cam={cam} onView={fitView} />}
       {labels.filter((l) => l.visible).map((l, i) => (
-        <div key={i} className="marker" style={{ left: l.x, top: l.y }}>
+        <div key={i} className={'marker' + (l.measure ? ' measure' : '')} style={{ left: l.x, top: l.y }}>
           <span className="marker-dot" />
           <span className="marker-label">{l.label}</span>
         </div>

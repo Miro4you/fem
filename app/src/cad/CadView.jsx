@@ -5,6 +5,7 @@ import { CadControls } from '../components/CadControls.js'
 import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
 import { IcHome, IcFit } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
+import { Ruler } from 'lucide-react'
 import { num } from './features.js'
 import {
   basis,
@@ -75,6 +76,7 @@ export default function CadView({
   preview, // { color } Körper halbdurchsichtig zeigen
   sketches, // Hintergrund-Skizzen [{ id, plane, data, active }]
   onSketchPick, // (id, open) – Klick/Doppelklick auf eine Hintergrund-Skizze
+  measureTool, // Messen { on, onToggle }
   handle, // Ziehgriff { origin, dir (Einheit), value (mm), onChange(v), label, min } – z. B. Extrusionstiefe
   ref,
 }) {
@@ -757,13 +759,13 @@ export default function CadView({
           prev = cur
         }
       }
-      if (best) return { edge: best.c }
+      if (best) return { edge: best.c, point: best.c.mid }
     }
     if (hit && (want.faces || want.planar || want.cyl)) {
       const t = cb.current.tess
       const tag = t.tri_surface[hit.faceIndex]
       const face = t.surfaces.find((f) => f.tag === tag)
-      if (face && (want.faces || (want.planar && face.kind === 'plane') || (want.cyl && face.kind === 'cylinder'))) return { face }
+      if (face && (want.faces || (want.planar && face.kind === 'plane') || (want.cyl && face.kind === 'cylinder'))) return { face, point: hit.point.toArray() }
     }
     if (want.std && s.stdPlanes?.length) {
       const hits = r.intersectObjects(s.stdPlanes.map((p) => p.mesh), false)
@@ -1358,6 +1360,11 @@ export default function CadView({
           <button className="icon-btn" title="Alles zeigen" aria-label="Alles zeigen" onClick={() => fitAll(cam[2], cam[1])}>
             <IcFit />
           </button>
+          {measureTool && (
+            <button className={'icon-btn' + (measureTool.on ? ' on' : '')} title="Messen: Flächen oder Kanten anklicken (Ø, Länge, Abstand)" aria-label="Messen" onClick={measureTool.onToggle}>
+              <Ruler size={16} />
+            </button>
+          )}
           {sketch && (
             <button className="icon-btn cad-normal-btn" title="Senkrecht auf die Skizze schauen" aria-label="Senkrecht auf die Skizze" onClick={() => lookAtPlane(sketch.plane, sketch.data)}>
               ⊥

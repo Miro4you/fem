@@ -24,6 +24,7 @@ import { buildReport } from './report.js'
 import { FrameSidebar, FrameView, newFrame, framePayload } from './FrameStudio.jsx'
 import { regionFromDrag, regionAnchor, regionNumbers, selectionCylinder, axisName, SHAPES, regionRefine } from './region.js'
 import { remapSurfaces } from './remap.js'
+import { surfFromMesh, describe as describePick, between as betweenPicks } from './measure.js'
 import CadStudio from './cad/CadStudio.jsx'
 import { kernelFeatures, featuresFromGeoOps, cadParams } from './cad/features.js'
 
@@ -314,6 +315,8 @@ export default function App() {
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
   const [probe, setProbe] = useState(null)
+  // Messen in der FEM-Ansicht: bis zu zwei angeklickte Flächen
+  const [measure, setMeasure] = useState({ on: false, picks: [] })
   const sidebar = useRef(null)
   // Neue Oberfläche: Startseite, Auswahl im Studienbaum, Dialoge, Darstellungsleiste
   const [home, setHome] = useState(false)
@@ -3143,7 +3146,35 @@ export default function App() {
                 look={look}
                 hiddenSurfaces={hiddenSurfaces}
                 bolts={view === 'frame' ? [] : boltGlyphs}
+                measure={
+                  view === 'frame'
+                    ? null
+                    : {
+                        ...measure,
+                        onToggle: () => setMeasure((m) => ({ on: !m.on, picks: [] })),
+                        onPick: ({ tag, point }) =>
+                          setMeasure((m) => {
+                            const picks = [...(m.picks.length >= 2 ? [] : m.picks), { point, tag, surf: surfFromMesh(surfaceInfo.get(tag)) }]
+                            return { ...m, picks: picks.map((x, i) => ({ ...x, label: 'AB'[i] })) }
+                          }),
+                      }
+                }
               />
+              {measure.on && view !== 'frame' && mesh && (
+                <div className="measure-panel">
+                  <b>Messen</b>
+                  {!measure.picks.length && <span className="muted">Fläche anklicken (Ø, Länge, Fläche) – eine zweite für den Abstand</span>}
+                  {measure.picks.map((p) => (
+                    <span key={p.label}>
+                      <b className="measure-tag">{p.label}</b> {describePick(p)}
+                    </span>
+                  ))}
+                  {measure.picks.length === 2 && betweenPicks(measure.picks[0], measure.picks[1]).map((t) => <span key={t}>{t}</span>)}
+                  <button className="btn small" onClick={() => setMeasure({ on: false, picks: [] })}>
+                    Fertig
+                  </button>
+                </div>
+              )}
               {aim && aimView && view === 'setup' && (
                 <div className="pick-hint aim-bar">
                   <Move3d size={15} />

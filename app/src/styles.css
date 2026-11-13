@@ -840,3 +840,12 @@ select.chip { padding-right: 26px; max-width: 120px; }
   border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.14); font-size: 12px; }
 .cad-conbar .muted { margin-right: 4px; }
 .cad-conbar-g { color: var(--accent); font-size: 12px; }
+
+/* Messen */
+.measure-panel { position: absolute; left: 16px; bottom: 16px; z-index: 6; display: flex; flex-direction: column; gap: 4px; max-width: min(520px, calc(100% - 32px));
+  padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.14); font-size: 13px; font-variant-numeric: tabular-nums; }
+.measure-panel .btn { align-self: flex-start; margin-top: 4px; }
+.measure-tag { display: inline-block; min-width: 18px; text-align: center; border-radius: 4px; background: #f59e0b; color: #111; margin-right: 4px; }
+.marker.measure .marker-dot { border-color: #f59e0b; background: #f59e0b; }
+.marker.measure .marker-label { background: #f59e0b; color: #111; font-weight: 700; }
+.icon-btn.on { background: var(--accent); color: #fff; }
