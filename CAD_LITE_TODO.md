@@ -59,7 +59,40 @@ unkomprimiert) → G0.
 **Fertig, wenn:** Neuaufbau einer Platte < 100 ms im Browser, Laden < 3 s beim zweiten Öffnen, 30 Teile flüssig drehbar.
 Sonst: zurück zur Alternative (volles OpenCASCADE über CadQuery in einem dauerhaft laufenden Prozess auf dem Server).
 
+### Stand G0 (13.11.2026) ✅
+
+Gebaut: `app/src/cad/kernel/` – `build.js` (Feature-Liste → Körper, gleiche Antwort wie `cad.py`), `geom2d.js`,
+`worker.js` (Web Worker), `client.js` (`cadBuildView`: neuer Kern, wenn eingeschaltet und alle Features bekannt,
+sonst Server). Einschalten: Adresse mit `#kern=neu` öffnen (bleibt gemerkt, `#kern=alt` schaltet zurück).
+Kann: Skizzenbereiche (Teiler von OpenCASCADE), Extrudieren (Dazu/Weg/Neuer Körper, symmetrisch, durch alles,
+Flächenwahl, Schraffuren), Drehen (Halbebene bei Schnittzeichnungen), Bohrung (Senkung, Spitze), Verrunden,
+Fase, Körpernamen, Überschneidung abziehen, STEP mit Teilenamen. Noch nicht: Muster, Spiegeln, Fläche
+verschieben/entfernen, Radius/Bohrung ändern → gehen automatisch an den alten Kern.
+Tests: `cd app && npm test` (die Kern-Tests aus `cad.rs` mit denselben Sollvolumen + planegcs-Vergleich).
+
+Gemessen (Chromium ohne Grafikkarte in der Cloud-Sitzung; auf einem normalen Rechner eher schneller):
+
+| | Zeit |
+|---|---|
+| WebAssembly übertragen | 7,2 MB (gzip, danach im Zwischenspeicher) |
+| Kern bereit | 1,6–4,5 s beim ersten Mal, ~1,7 s danach |
+| Platte 120×60 mit 4 Bohrungen, R5, Fase – Dicke ändern | 80–100 ms (Aufbau 50–65 ms + Netz) |
+| dasselbe ohne Änderung / nur Fase geändert | 1 ms / 46 ms |
+| Baugruppe 30 Teile komplett | 280 ms |
+| … ein Teil geändert | 14 ms |
+| Durchlauf aus Paket E (Platte → … → Rechnung → Studie) | gleiche Ergebnisse wie mit dem alten Kern |
+
+Löser (Wellenschnitt, 250 Punkte, 240 Bedingungen): unser Löser 2 ms (mit Freiheitsgraden ~50–80 ms), Maß ändern
+9–30 ms; planegcs 70–85 ms, Maß ändern 130–150 ms, liefert dafür benannte Widersprüche/Überbestimmungen.
+**Folgerung für G2:** unser Löser bleibt fürs Ziehen und Bemaßen (schnell genug, Ergebnisse gleich), planegcs
+(`app/src/cad/gcs.js`, Übersetzung fertig) nur zum Erklären von Widersprüchen – wenn nötig. Was Felix am
+Skizzieren stört, ist Bedienung (Bedingungen im Bild, Bemaßen zwischen Elementen, Trimmen), nicht der Löser.
+
 ## G1. Kern ablösen (Gleichstand mit heute)
+
+Offen aus G0: Muster, Spiegeln, Fläche verschieben/entfernen, Radius/Bohrung ändern, Ausgangsgeometrie (`base`,
+STEP einlesen), Übernehmen in die Rechnung (STEP aus dem Worker an den Server schicken statt `cad.py`), danach
+`#kern=neu` als Standard und `cad.py` entfernen.
 
 1. Alle heutigen Features im Worker: Skizze (Bereiche, Schraffuren als Material), Extrudieren (neu/zufügen/abziehen,
    symmetrisch, bis Fläche), Drehen (Achse aus der Skizze, Halbebene), Fase, Verrunden, Bohrung, Muster, Spiegeln,
@@ -74,7 +107,7 @@ Sonst: zurück zur Alternative (volles OpenCASCADE über CadQuery in einem dauer
 
 ## G2. Skizzierer
 
-1. Löser auf `planegcs` umstellen (Datenformat der Skizze bleibt, Übersetzung in `sketch.js`).
+1. Löser: unser eigener bleibt (siehe Stand G0); `planegcs` nur, um Widersprüche zu erklären.
 2. **Bedingungen im Bild**: kleine Zeichen neben den Elementen (waagrecht, senkrecht, parallel, tangential,
    gleich, deckungsgleich …), anklicken = wählen, Entf = löschen, beim Überfahren zugehörige Elemente hervorheben.
 3. **Bemaßen wie Onshape**: Werkzeug „Maß“ – zwei beliebige Elemente anklicken (Punkt–Punkt, Punkt–Linie,

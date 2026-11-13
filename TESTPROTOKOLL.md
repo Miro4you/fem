@@ -332,6 +332,7 @@ selbst starten.
 | 18e.16 | In Draftpad: Menü › „In Projekt-FEM nachweisen“ (beim ersten Mal Adresse, z. B. `http://nas:8790`) | Projekt-FEM öffnet sich mit neuem Teil und der Zeichnung | [ ] |
 | 18e.17 | Draftpad-Import: Vorschau im Dialog ansehen, „Lücken schließen bis“ von 0,3 auf 0,8 mm | Freihand/Texte blass, offene Enden rot mit Zähler; Zähler sinkt, wenn die Lücken kleiner als der Wert sind | [ ] |
 | 18e.18 | Draftpad-Zeichnung mit Maßen als Datei/Kopie übernehmen | Maße erscheinen als Skizzenmaße (gemessener Wert), überzählige (z. B. dieselbe Länge zweimal) fehlen; Meldung „… Maße aus Draftpad“ | [ ] |
+| 18e.19 | Neuer Kern (Test): Projekt-FEM mit `#kern=neu` hinten an der Adresse öffnen, Konstruktion › Platte skizzieren, extrudieren, Kante verrunden/fasen, Tiefe ändern | Körper erscheint ohne merkliche Wartezeit; unter „Rechnen“ steht „neuer Kern, … ms“; Volumen wie mit `#kern=alt` | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

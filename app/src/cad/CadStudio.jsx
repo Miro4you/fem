@@ -63,6 +63,7 @@ import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, 
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
 import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
+import { cadBuildView, kernelReady, newKernelWanted } from './kernel/client.js'
 
 const FEATURE_ICON = {
   sketch: Pencil,
@@ -190,7 +191,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       const id = ++reqRef.current
       setBuilding(true)
       try {
-        const r = await api.cadBuild({ base: cad.base ?? null, features: kernelFeatures(list, extra.upto ?? list.length), regions_of: extra.regionsOf ?? null })
+        const r = await cadBuildView({ base: cad.base ?? null, features: kernelFeatures(list, extra.upto ?? list.length), regions_of: extra.regionsOf ?? null })
         return id === reqRef.current ? r : null
       } catch (e) {
         if (id === reqRef.current) onError(String(e))
@@ -201,6 +202,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     },
     [cad.base, onError],
   )
+
+  // neuer Kern: WebAssembly gleich beim Öffnen laden
+  useEffect(() => {
+    if (newKernelWanted()) kernelReady()
+  }, [])
 
   const builtKey = JSON.stringify(kernelFeatures(features)) + (cad.base ?? '')
   useEffect(() => {
@@ -586,8 +592,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       return
     }
     let stop = false
-    api
-      .cadBuild({ base: cad.base ?? null, features: kernelFeatures(features, edit.index) })
+    cadBuildView({ base: cad.base ?? null, features: kernelFeatures(features, edit.index) })
       .then((r) => !stop && setBefore(r))
       .catch((e) => onError(String(e)))
     return () => {
@@ -622,8 +627,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (!regionKey || regionCache.has(regionKey)) return
     let stop = false
     const sk = JSON.parse(regionKey)
-    api
-      .cadBuild({ base: null, features: [sk], regions_of: sk.id, tess: false })
+    cadBuildView({ base: null, features: [sk], regions_of: sk.id, tess: false })
       .then((r) => !stop && setRegionCache((m) => new Map(m).set(regionKey, r.regions ?? [])))
       .catch((e) => !stop && onError(String(e)))
     return () => {
@@ -1014,6 +1018,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 {hasBody
                   ? `${built.bodies} Körper, Volumen ${fmtN(built.volume / 1000)} cm³.`
                   : 'Noch kein Körper.'}{' '}
+                {built?.kernel === 'neu' && built.timing && <small className="muted">(neuer Kern, {built.timing.total} ms) </small>}
                 {appliedNow ? 'Dieser Stand ist im Modell.' : hasBody ? 'Übernehmen vernetzt das Teil; Lager und Lasten werden auf die neuen Flächen übertragen.' : ''}
               </p>
               <button className={'btn wide' + (!appliedNow && hasBody ? ' primary' : '')} disabled={!hasBody || busy || building || errors.length > 0} onClick={() => onApply(builtKey)}>
