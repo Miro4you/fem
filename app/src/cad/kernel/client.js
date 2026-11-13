@@ -3,7 +3,7 @@ import * as api from '../../api.js'
 
 const KEY = 'projekt-fem.kern'
 /// Was der neue Kern schon kann (Rest: alter Kern auf dem Server)
-const SUPPORTED = new Set(['sketch', 'extrude', 'revolve', 'hole', 'fillet', 'chamfer'])
+const SUPPORTED = new Set(['sketch', 'extrude', 'revolve', 'hole', 'fillet', 'chamfer', 'pattern', 'mirror', 'moveface'])
 
 /// Neuer Kern eingeschaltet? Standard ja; #kern=alt an der Adresse schaltet auf den alten (wird gemerkt, s. api.js)
 export function newKernelWanted() {
@@ -86,3 +86,15 @@ export function cadBuildView(args) {
 
 // für Messungen und Browser-Tests
 if (typeof window !== 'undefined') window.__kernel = { kernelBuild, kernelReady, kernelInfo }
+
+/// STEP-Datei zum Rechnen/Speichern: mit dem neuen Kern im Browser bauen und dem Server nur die fertige Datei geben
+/// (gleiche Antwort wie api.cadBuild mit `step`: { status, volume, bodies, bodies_info, step: Pfad })
+export async function cadBuildStep(args) {
+  if (!newKernelWanted() || oldKernelReason(args)) return api.cadBuild(args)
+  const r = await kernelBuild({ ...args, step: true, tess: false })
+  const text = r.step_text
+  delete r.step_text
+  if (!text) return r
+  const saved = await api.cadBuild({ features: [], step: args.step, step_text: text, tess: false })
+  return { ...r, step: saved.step }
+}

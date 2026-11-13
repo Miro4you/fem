@@ -88,11 +88,23 @@ Löser (Wellenschnitt, 250 Punkte, 240 Bedingungen): unser Löser 2 ms (mit Frei
 (`app/src/cad/gcs.js`, Übersetzung fertig) nur zum Erklären von Widersprüchen – wenn nötig. Was Felix am
 Skizzieren stört, ist Bedienung (Bedingungen im Bild, Bemaßen zwischen Elementen, Trimmen), nicht der Löser.
 
-## G1. Kern ablösen (Gleichstand mit heute)
+## G1. Kern ablösen (Gleichstand mit heute) ✅ (bis auf Defeaturing, siehe Stand G1)
 
-Offen aus G0: Muster, Spiegeln, Fläche verschieben/entfernen, Radius/Bohrung ändern, Ausgangsgeometrie (`base`,
-STEP einlesen), Übernehmen in die Rechnung (STEP aus dem Worker an den Server schicken statt `cad.py`), danach
-`#kern=neu` als Standard und `cad.py` entfernen.
+### Stand G1 (13.11.2026)
+
+Erledigt: Muster (linear, zwei Richtungen, kreisförmig; Features oder ganzer Körper), Spiegeln (exakt über
+`gp_Trsf`, auch ganzer Körper), Fläche verschieben (nach außen/innen, Bezug über Art und Normale);
+Übernehmen/Speichern/Studie bauen die STEP-Datei im Browser (`cadBuildStep`), der Server speichert sie nur
+(`CadArgs.step_text`) und vernetzt; Teilenamen kommen bis ins Netz (Test `namen_aus_dem_browserkern`,
+Testdatei `crates/fem-core/tests/data/neuer-kern-baugruppe.step`). Neuer Kern ist Standard.
+Im Browser durchgespielt: Paket-E-Ablauf bis zur Studie und Paket-F-Baugruppe – alles im neuen Kern.
+Spiegeln des ganzen Körpers ist jetzt exakt das Doppelte (alter Kern verlor 29 mm³ beim Verschmelzen).
+
+Bleibt beim alten Kern (automatisch): Flächen entfernen, Radius/Bohrung ändern und Weiterkonstruieren an einem
+importierten STEP-Teil (`base`) – dafür fehlt `BRepAlgoAPI_Defeaturing` in der WebAssembly-Fassung von
+replicad. `cad.py` bleibt deshalb vorerst. Später: eigene opencascade.js-Fassung mit Defeaturing oder
+Bohrungen/Taschen gezielt füllen; stabile Namen über die Historie (`Modified/Generated`) statt Lagehinweisen,
+wenn die Hinweise in der Praxis nicht reichen.
 
 1. Alle heutigen Features im Worker: Skizze (Bereiche, Schraffuren als Material), Extrudieren (neu/zufügen/abziehen,
    symmetrisch, bis Fläche), Drehen (Achse aus der Skizze, Halbebene), Fase, Verrunden, Bohrung, Muster, Spiegeln,

@@ -22,7 +22,7 @@ const rect = (x0, y0, x1, y1) => {
 const near = (v, soll, rel, msg) => assert.ok(Math.abs(v - soll) <= rel * Math.abs(soll), `${msg ?? ''} ${v} statt ${soll}`)
 const allOk = (r) => assert.ok(r.status.every((s) => s.ok), JSON.stringify(r.status))
 
-test('Flansch: Ring, Bohrung, Nut, Verrundung', () => {
+test('Flansch: Ring, Bohrungen im Kreismuster, gespiegelte Nut, Verrundung', () => {
   clearCache()
   const top = { origin: [0, 0, 12], normal: [0, 0, 1], u: [1, 0, 0] }
   const features = [
@@ -30,18 +30,20 @@ test('Flansch: Ring, Bohrung, Nut, Verrundung', () => {
     { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 12, dir: 1 },
     { id: 3, type: 'sketch', plane: top, ents: [], pts: [[35, 0]] },
     { id: 4, type: 'hole', sketch: 3, diameter: 9, through: true },
+    { id: 5, type: 'pattern', kind: 'circular', features: [4], axis: { point: [0, 0, 0], dir: [0, 0, 1] }, count: 6, angle: 360 },
     { id: 6, type: 'sketch', plane: top, ents: rect(22, -3, 30, 3) },
     { id: 7, type: 'extrude', sketch: 6, mode: 'cut', depth: 4, dir: -1 },
+    { id: 8, type: 'mirror', features: [7], plane: { origin: [0, 0, 0], normal: [1, 0, 0] } },
     { id: 9, type: 'fillet', edges: [{ mid: [-50, 0, 12] }], radius: 2 },
   ]
   const r = build({ features })
   allOk(r)
-  const ring = PI * (2500 - 400) * 12 - PI * 4.5 * 4.5 * 12 - 8 * 6 * 4
+  const ring = PI * (2500 - 400) * 12 - 6 * PI * 4.5 * 4.5 * 12 - 2 * 8 * 6 * 4
   const fillet = (1 - PI / 4) * 4 * 2 * PI * (50 - 2 * (1 - (10 - 3 * PI) / (12 - 3 * PI)))
   near(r.volume, ring - fillet, 1e-3, 'Volumen')
   assert.equal(r.bodies, 1)
   const holes = r.tess.surfaces.filter((s) => s.kind === 'cylinder' && s.hole && Math.abs(s.radius - 4.5) < 1e-6)
-  assert.equal(holes.length, 1, 'eine Bohrung Ø9')
+  assert.equal(holes.length, 6, 'sechs Bohrungen Ø9')
   assert.ok(r.tess.surfaces.some((s) => s.kind === 'plane' && s.normal[2] > 0.999), 'Deckfläche mit Normale +z')
   assert.ok(r.tess.triangles.length > 0 && r.tess.curves.length > 0)
   // nur bis vor die Bohrung (aus dem Zwischenspeicher)
@@ -141,4 +143,42 @@ test('Bohrung mit Kegelsenkung und Spitze', () => {
   const hole = PI * 25 * (12 - h)
   const tip = (PI * 25 * (5 / Math.tan((59 * PI) / 180))) / 3
   near(r.volume, 3600 * 20 - sink - hole - tip, 1e-6)
+})
+
+test('Fläche verschieben und Fase überleben eine Änderung davor', () => {
+  const mk = (depth) => [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 60, 40) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth, dir: 1 },
+    { id: 3, type: 'moveface', faces: [{ center: [30, 20, 10], kind: 'plane', normal: [0, 0, 1] }], distance: 5 },
+    { id: 4, type: 'chamfer', edges: [{ mid: [30, 0, 15], dir: [1, 0, 0], kind: 'line', length: 60 }], distance: 1 },
+  ]
+  let r = build({ features: mk(10) })
+  allOk(r)
+  near(r.volume, 2400 * 15 - 30, 1e-9)
+  r = build({ features: mk(14) })
+  allOk(r)
+  near(r.volume, 2400 * 19 - 30, 1e-9)
+  // nach innen
+  const f = mk(10)
+  f[2].distance = -4
+  f[3].edges = [{ mid: [30, 0, 6], dir: [1, 0, 0], kind: 'line', length: 60 }]
+  r = build({ features: f })
+  allOk(r)
+  near(r.volume, 2400 * 6 - 30, 1e-9)
+})
+
+test('Muster linear in zwei Richtungen und Spiegeln des ganzen Körpers', () => {
+  const top = { origin: [0, 0, 10], normal: [0, 0, 1], u: [1, 0, 0] }
+  const features = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 100, 60) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1 },
+    { id: 3, type: 'sketch', plane: top, ents: [], pts: [[10, 10]] },
+    { id: 4, type: 'hole', sketch: 3, diameter: 6, through: true },
+    { id: 5, type: 'pattern', kind: 'linear', features: [4], dir: [1, 0, 0], spacing: 20, count: 5, dir2: [0, 1, 0], spacing2: 20, count2: 3 },
+    { id: 6, type: 'mirror', features: 'body', plane: { origin: [0, 0, 0], normal: [1, 0, 0] } },
+  ]
+  const r = build({ features })
+  allOk(r)
+  near(r.volume, 2 * (6000 * 10 - 15 * PI * 9 * 10), 1e-6)
+  assert.equal(r.bodies, 1, 'gespiegelt und verschmolzen')
 })

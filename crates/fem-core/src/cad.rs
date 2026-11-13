@@ -348,4 +348,22 @@ mod tests {
         assert!((r["volume"].as_f64().unwrap() - soll).abs() < 1e-6 * soll, "{}", r["volume"]);
         assert_eq!(r["regions"].as_array().unwrap().len(), 3);
     }
+
+    /// STEP-Datei aus dem Geometriekern im Browser (OpenCASCADE/replicad): Teilenamen kommen bis ins Netz
+    #[test]
+    fn namen_aus_dem_browserkern() {
+        if find_python().is_none() {
+            eprintln!("Gmsh-Python fehlt – Test übersprungen");
+            return;
+        }
+        let step = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/neuer-kern-baugruppe.step");
+        let mesh = crate::gmsh::mesh_step(&step, &crate::gmsh::MeshOptions { size: Some(4.0), ..Default::default() }).unwrap();
+        let mut names: Vec<String> = mesh.bodies().iter().map(|&b| mesh.body_name(b)).collect();
+        names.sort();
+        assert_eq!(names, vec!["Buchse Ø32", "Welle"]);
+        let pi = std::f64::consts::PI;
+        let soll = pi * 100.0 * 60.0 + pi * (256.0 - 100.0) * 20.0;
+        // grobes Netz (4 mm an r = 10): Tetraeder liegen innen an der Zylinderfläche
+        assert!((mesh.volume() - soll).abs() < 0.03 * soll, "{} statt {soll}", mesh.volume());
+    }
 }

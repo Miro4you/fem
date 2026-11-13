@@ -611,6 +611,9 @@ pub struct CadArgs {
     pub step: Option<String>,
     #[serde(default = "yes")]
     pub tess: bool,
+    /// fertige STEP-Datei aus dem Geometriekern im Browser: nur speichern (mit `step` als Name), nicht neu bauen
+    #[serde(default)]
+    pub step_text: Option<String>,
 }
 
 /// Features aufbauen; mit `step` (Dateiname) entsteht eine STEP-Datei im Temp-Ordner.
@@ -626,6 +629,15 @@ pub fn cad_build_impl(a: CadArgs) -> Result<serde_json::Value, String> {
             .collect();
         fem_core::cad::work_dir().join("teile").join(format!("{stamp}")).join(format!("{stem}.step"))
     });
+    if let Some(text) = &a.step_text {
+        let path = output.ok_or("Dateiname für die STEP-Datei fehlt")?;
+        if !text.trim_start().starts_with("ISO-10303-21") {
+            return Err("Keine STEP-Datei".into());
+        }
+        std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        std::fs::write(&path, text).map_err(|e| e.to_string())?;
+        return Ok(serde_json::json!({ "step": path }));
+    }
     fem_core::cad::build(&fem_core::cad::CadJob {
         base: a.base.map(PathBuf::from),
         features: a.features,

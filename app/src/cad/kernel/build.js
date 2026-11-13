@@ -476,6 +476,149 @@ function edgeOp(model, f, kind) {
   }
 }
 
+// --- Muster, Spiegeln, Fläche verschieben -------------------------------------------------------
+
+const gpPnt = (p) => new (oc().gp_Pnt)(p[0], p[1], p[2])
+const gpDir = (d) => new (oc().gp_Dir)(d[0], d[1], d[2])
+function trsfTranslate(v) {
+  const T = new (oc().gp_Trsf)()
+  T.SetTranslation(new (oc().gp_Vec)(v[0], v[1], v[2]))
+  return T
+}
+function trsfRotate(p, a, ang) {
+  const T = new (oc().gp_Trsf)()
+  T.SetRotation(new (oc().gp_Ax1)(gpPnt(p), gpDir(a)), ang)
+  return T
+}
+function trsfMirror(o, n) {
+  const T = new (oc().gp_Trsf)()
+  T.SetMirror(new (oc().gp_Ax2)(gpPnt(o), gpDir(n)))
+  return T
+}
+/// Kopie einer Form, abgebildet (Ebenen und Zylinder bleiben exakt, auch beim Spiegeln)
+function transformed(shape, T) {
+  const t = new (oc().BRepBuilderAPI_Transform)(shape.wrapped, T, true, false)
+  const r = cast(t.Shape())
+  t.delete()
+  return solidsOf(r)[0] ?? r
+}
+
+/// Abbildungen eines Musters (ohne das Original)
+function instances(f) {
+  const out = []
+  if (f.kind === 'linear') {
+    const n1 = Math.round(Number(f.count) || 1)
+    const n2 = f.dir2 ? Math.round(Number(f.count2) || 1) : 1
+    const d1 = mul(unit(f.dir), Number(f.spacing) || 0)
+    const d2 = f.dir2 ? mul(unit(f.dir2), Number(f.spacing2) || 0) : [0, 0, 0]
+    if (n1 < 1 || n2 < 1 || n1 * n2 < 2) throw new Problem('Muster: Anzahl muss mindestens 2 sein')
+    if (n1 * n2 > 400) throw new Problem('Muster: höchstens 400 Stück')
+    if (norm(d1) < 1e-9 && n1 > 1) throw new Problem('Muster: Abstand muss größer als 0 sein')
+    for (let i = 0; i < n1; i++) for (let j = 0; j < n2; j++) if (i || j) out.push(trsfTranslate(add(mul(d1, i), mul(d2, j))))
+  } else {
+    const n = Math.round(Number(f.count) || 1)
+    if (n < 2) throw new Problem('Muster: Anzahl muss mindestens 2 sein')
+    if (n > 400) throw new Problem('Muster: höchstens 400 Stück')
+    const total = ((Number(f.angle) || 360) * Math.PI) / 180
+    const step = Math.abs(total - 2 * Math.PI) < 1e-9 ? total / n : total / (n - 1)
+    if (!f.axis) throw new Problem('Muster: Achse fehlt')
+    for (let i = 1; i < n; i++) out.push(trsfRotate(f.axis.point, unit(f.axis.dir), i * step))
+  }
+  return out
+}
+
+function repeat(model, f, trsfs, sketches, byId, warn, what) {
+  const src = f.features
+  if (src === 'body') {
+    if (!model.bodies.length) throw new Problem(`${what}: Es gibt noch keinen Körper`)
+    const copies = model.bodies.flatMap((b) => trsfs.map((T) => transformed(b.shape, T)))
+    const name = model.bodies.find((b) => b.name)?.name ?? null
+    model.bodies = fuseAll([...model.shapes, ...copies]).map((s) => ({ shape: s, name }))
+    return
+  }
+  if (!src?.length) throw new Problem(`${what}: kein Feature gewählt`)
+  for (const fid of src) {
+    const g = byId.get(fid)
+    if (!g) throw new Problem(`${what}: Das gewählte Feature fehlt (gelöscht oder unterdrückt?)`)
+    if (!TOOLS[g.type]) throw new Problem(`${what}: geht für Extrudieren, Drehen und Bohrung – oder für den ganzen Körper`)
+    const tools = trsfs.flatMap((T) => TOOLS[g.type](model, g, sketches, []).map((x) => transformed(x, T)))
+    combine(model, modeOf(g), tools, warn)
+  }
+}
+
+function mirrorFeature(model, f, sketches, byId, warn) {
+  const pl = f.plane
+  if (!pl) throw new Problem('Spiegeln: Spiegelebene fehlt')
+  repeat(model, f, [trsfMirror(pl.origin, unit(pl.normal))], sketches, byId, warn, 'Spiegeln')
+}
+
+/// Art einer Fläche: { kind: 'plane', normal } | { kind: 'cylinder', axis, radius } | { kind: 'other' }
+function faceKind(face) {
+  const t = face.geomType
+  if (t === 'PLANE') return { kind: 'plane', normal: unit(tuple(face.normalAt())) }
+  if (t === 'CYLINDRE') {
+    const ad = new (oc().BRepAdaptor_Surface)(face.wrapped, true)
+    const cy = ad.Cylinder()
+    const d = cy.Axis().Direction()
+    const r = { kind: 'cylinder', axis: [d.X(), d.Y(), d.Z()], radius: cy.Radius() }
+    ad.delete()
+    return r
+  }
+  return { kind: 'other' }
+}
+
+/// Fläche wiederfinden: nächster Schwerpunkt; mit Hinweis (Art, Normale/Achse, Radius) auch weiter weg (wie find_surface)
+function findFace(model, ref, what) {
+  const cand = []
+  model.bodies.forEach((b, bi) => {
+    for (const face of b.shape.faces) cand.push({ d: dist3(tuple(face.center), ref.center), face, bi })
+  })
+  if (!cand.length) throw new Problem(`${what}: eine gewählte Fläche gibt es nicht mehr – im Feature neu wählen`)
+  cand.sort((x, y) => x.d - y.d)
+  const size = model.diag()
+  const near = Math.max(1, 0.02 * size)
+  if (!ref.kind) {
+    if (cand[0].d > near) throw new Problem(`${what}: eine gewählte Fläche gibt es nicht mehr – im Feature neu wählen`)
+    return cand[0]
+  }
+  const same = (face) => {
+    const k = faceKind(face)
+    if (ref.kind === 'plane' && k.kind === 'plane' && ref.normal) return Math.abs(dot(k.normal, unit(ref.normal))) > 0.9995
+    if (ref.kind === 'cylinder' && k.kind === 'cylinder' && ref.radius)
+      return (!ref.axis || Math.abs(dot(k.axis, unit(ref.axis))) > 0.9995) && Math.abs(k.radius - ref.radius) <= 1e-3 * Math.max(1, ref.radius)
+    return ref.kind === 'other' && k.kind === 'other'
+  }
+  for (const c of cand) {
+    if (c.d > 0.25 * size) break
+    if (same(c.face)) return c
+  }
+  if (cand[0].d <= near) return cand[0]
+  throw new Problem(`${what}: eine gewählte Fläche gibt es nicht mehr – im Feature neu wählen`)
+}
+
+function moveFace(model, f, warn) {
+  const d = Number(f.distance) || 0
+  if (d === 0) throw new Problem('Fläche verschieben: Abstand angeben (positiv = nach außen)')
+  if (!f.faces?.length) throw new Problem('Fläche verschieben: keine Fläche gewählt')
+  // erst alle Flächen finden, dann verschieben (sonst verschieben sich die Bezüge)
+  const picks = f.faces.map((ref) => findFace(model, ref, 'Fläche verschieben'))
+  const tools = []
+  for (const { face } of picks) {
+    if (face.geomType !== 'PLANE') throw new Problem('Fläche verschieben: geht nur für ebene Flächen')
+    const n = unit(tuple(face.normalAt()))
+    if (d > 0) tools.push({ mode: 'add', s: basicFaceExtrusion(face.clone(), new Vector(mul(n, d))) })
+    else {
+      const e = 1e-5 * model.diag()
+      tools.push({ mode: 'cut', s: basicFaceExtrusion(face.clone().translate(mul(n, e)), new Vector(mul(n, d - e))) })
+    }
+  }
+  for (const mode of ['add', 'cut']) {
+    const ts = tools.filter((t) => t.mode === mode).map((t) => t.s)
+    if (ts.length) combine(model, mode, ts, [])
+  }
+  void warn
+}
+
 // --- Darstellung ------------------------------------------------------------------------------
 
 /// Fläche beschreiben; Schwerpunkt und Inhalt kommen aus den Dreiecken (exakt genug zum Wiederfinden, viel schneller)
@@ -636,12 +779,15 @@ function tessellate(model, quality = 1) {
 const CACHE = []
 const CACHE_MAX = 40
 
-function runFeature(model, f, sketches, warn) {
+function runFeature(model, f, sketches, warn, byId) {
   const before = new Set(model.bodies)
   if (TOOLS[f.type]) {
     const tools = TOOLS[f.type](model, f, sketches, warn)
     combine(model, modeOf(f), tools, warn, f.mode === 'new' ? (f.bodyName ?? '').trim() || null : null)
   } else if (f.type === 'fillet' || f.type === 'chamfer') edgeOp(model, f, f.type)
+  else if (f.type === 'pattern') repeat(model, f, instances(f), sketches, byId, warn, 'Muster')
+  else if (f.type === 'mirror') mirrorFeature(model, f, sketches, byId, warn)
+  else if (f.type === 'moveface') moveFace(model, f, warn)
   else throw new Problem(`„${f.type}“ kann der neue Kern noch nicht`)
   if (!model.bodies.length) throw new Problem('Es ist kein Körper entstanden')
   if (f.mode === 'new' && (f.type === 'extrude' || f.type === 'revolve')) newBodies(model, f, before, warn)
@@ -691,6 +837,7 @@ export function build(job) {
       break
     }
   }
+  const byId = new Map(features.map((f) => [f.id, f]))
   const sketches = new Map(features.slice(0, start).filter((f) => f.type === 'sketch').map((f) => [f.id, f]))
   let failed = false
   for (let k = start; k < features.length; k++) {
@@ -707,7 +854,7 @@ export function build(job) {
     const warn = []
     const work = model.clone()
     try {
-      runFeature(work, f, sketches, warn)
+      runFeature(work, f, sketches, warn, byId)
       model = work
       status.push(warn.length ? { id: f.id, ok: true, warn } : { id: f.id, ok: true })
       CACHE.push({ key: keys[k], model: model.clone(), status: status.map((s) => ({ ...s })), used: performance.now() })

@@ -13,6 +13,7 @@ import logo from './ui/logo.svg'
 import { usePref, addRecent, NAV_DEFAULT, NAV_PRESETS, DISPLAY_DEFAULT, applyTheme } from './prefs.js'
 import Viewport from './components/Viewport.jsx'
 import Legend from './components/Legend.jsx'
+import { cadBuildStep } from './cad/kernel/client.js'
 import * as api from './api.js'
 import {
   MATERIALS, MATERIAL_GROUPS, materialFromPreset, materialPayload, INFILL_PATTERNS, DEFAULT_INFILL, infillFractions, shellThickness,
@@ -631,7 +632,7 @@ export default function App() {
     // neues Teil, noch nicht übernommen: STEP aus der Konstruktion bauen
     if (!cad.base && cad.features.length && (!path || cadApplied == null)) {
       try {
-        const r = await api.cadBuild({ base: null, features: kernelFeatures(cad.features), step: 'Konstruktion', tess: false })
+        const r = await cadBuildStep({ base: null, features: kernelFeatures(cad.features), step: 'Konstruktion', tess: false })
         if (!r.step) throw new Error('Die Konstruktion hat noch keinen Körper')
         path = r.step
       } catch (e) {
@@ -689,7 +690,7 @@ export default function App() {
       if (newPart && feats.length) {
         setBusy('Baue Konstruktion …')
         try {
-          const r = await api.cadBuild({ base: null, features: kernelFeatures(feats), step: 'Konstruktion', tess: false })
+          const r = await cadBuildStep({ base: null, features: kernelFeatures(feats), step: 'Konstruktion', tess: false })
           if (r.step) step = r.step
         } catch (e) {
           setNotice('Konstruktion ließ sich nicht neu bauen – gespeicherte Geometrie geladen: ' + String(e))
@@ -709,7 +710,7 @@ export default function App() {
       if (!newPart && kernelFeatures(feats).length) {
         setBusy('Passe Geometrie an …')
         try {
-          const r = await api.cadBuild({ base: d.step, features: kernelFeatures(feats), step: stemOf(d.step) + '_geaendert', tess: false })
+          const r = await cadBuildStep({ base: d.step, features: kernelFeatures(feats), step: stemOf(d.step) + '_geaendert', tess: false })
           const bad = r.status.find((x) => !x.ok && !x.skipped)
           if (bad) throw new Error(bad.error)
           const g = await api.openStep(r.step, d.meshSize ? Number(d.meshSize) : null, false, [])
@@ -1038,7 +1039,7 @@ export default function App() {
       if (cad.base && !kf.length) {
         warn = await swapGeometry(cad.base, null)
       } else {
-        const r = await api.cadBuild({ base: cad.base, features: kf, step: cad.base ? stemOf(cad.base) + '_geaendert' : 'Konstruktion', tess: false })
+        const r = await cadBuildStep({ base: cad.base, features: kf, step: cad.base ? stemOf(cad.base) + '_geaendert' : 'Konstruktion', tess: false })
         const bad = r.status.find((x) => !x.ok && !x.skipped)
         if (bad) throw new Error(bad.error)
         if (!r.step) throw new Error('Die Konstruktion hat noch keinen Körper')
@@ -1071,7 +1072,7 @@ export default function App() {
 
   async function onCadExport() {
     try {
-      const r = await api.cadBuild({ base: cad.base, features: kernelFeatures(cad.features), step: cad.base ? stemOf(cad.base) + '_geaendert' : 'Konstruktion', tess: false })
+      const r = await cadBuildStep({ base: cad.base, features: kernelFeatures(cad.features), step: cad.base ? stemOf(cad.base) + '_geaendert' : 'Konstruktion', tess: false })
       if (!r.step) throw new Error('Die Konstruktion hat noch keinen Körper')
       await api.exportStep(r.step, (cad.base ? stemOf(cad.base) + '_geaendert' : 'Konstruktion') + '.step')
     } catch (e) {
@@ -1230,7 +1231,7 @@ export default function App() {
           const solvedFeats = feats.map((f) => (f.type === 'sketch' && String(f.id) === fid ? { ...f, sketch: solved(f.sketch).sketch } : f))
           if (field === 'con' && solvedFeats.find((f) => String(f.id) === fid).sketch === feats.find((f) => String(f.id) === fid).sketch)
             throw new Error(`${meta.label} = ${fmt(v)}: Skizze nicht lösbar – Studie abgebrochen`)
-          const r = await api.cadBuild({ base: cad.base, features: kernelFeatures(solvedFeats), step: 'Studie', tess: false })
+          const r = await cadBuildStep({ base: cad.base, features: kernelFeatures(solvedFeats), step: 'Studie', tess: false })
           const bad = r.status.find((x) => !x.ok && !x.skipped)
           if (bad) throw new Error(`${meta.label} = ${fmt(v)}: ${bad.error}`)
           m = await api.openStep(r.step, Number(meshSize) || null, false, refine)
