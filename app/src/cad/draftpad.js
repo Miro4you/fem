@@ -247,6 +247,40 @@ export function importDraftpad(sk0, doc, opts) {
     else e = ent({ t: 'arc', c: pointFor(p.c, fixed, sid('_c')), a: pointFor(p.a, fixed, sid('_a')), b: pointFor(p.b, fixed, sid('_b')), cons: p.cons || undefined })
     made.push(e)
   }
+  // Feste Geometrie: Bögen exakt schließen. Draftpad speichert Koordinaten auf 0,001 mm gerundet,
+  // die Bogenenden ergeben sich aus Mitte + Winkel – nach dem Zusammenführen mit Linienenden liegen
+  // beide Enden um bis zu ~0,0005 mm unterschiedlich weit von der Mitte. Mit festen Punkten kann der
+  // Löser das nicht ausgleichen („Skizze lässt sich nicht lösen"). Darum die Mitte auf die
+  // Mittelsenkrechte der beiden Enden schieben (eigener Punkt, falls die Mitte geteilt ist).
+  if (fixed) {
+    const used = new Map()
+    for (const e of made) for (const id of e.t === 'line' ? [e.a, e.b] : e.t === 'arc' ? [e.c, e.a, e.b] : e.t === 'circle' ? [e.c] : []) used.set(id, (used.get(id) ?? 0) + 1)
+    for (const e of made) {
+      if (e.t !== 'arc') continue
+      const c = [s.pts[e.c].x, s.pts[e.c].y]
+      const a = [s.pts[e.a].x, s.pts[e.a].y]
+      const b = [s.pts[e.b].x, s.pts[e.b].y]
+      const mx = (a[0] + b[0]) / 2
+      const my = (a[1] + b[1]) / 2
+      const nx = -(b[1] - a[1])
+      const ny = b[0] - a[0]
+      const nl = nx * nx + ny * ny
+      if (nl < 1e-18) continue // Vollkreis-Bogen: Enden fallen zusammen
+      const t = ((c[0] - mx) * nx + (c[1] - my) * ny) / nl
+      const c2 = [mx + t * nx, my + t * ny]
+      if (dist(c, c2) < 1e-12) continue
+      if ((used.get(e.c) ?? 0) > 1) {
+        used.set(e.c, used.get(e.c) - 1)
+        e.c = addPoint(s, c2, true)
+        const ent = s.ents.find((x) => x.id === e.id)
+        if (ent) ent.c = e.c
+      } else {
+        s.pts[e.c].x = c2[0]
+        s.pts[e.c].y = c2[1]
+      }
+    }
+  }
+
   // zusammengeführte Punkte liegen etwas daneben: auf den Mittelwert setzen
   // (Mittelpunkt bleibt; bei Bögen erzwingt der Löser gleichen Abstand)
 
