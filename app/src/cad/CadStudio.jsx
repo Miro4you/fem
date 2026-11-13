@@ -1000,13 +1000,16 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (!st?.url) return note('Draftpad ist nicht verbunden')
     window.open(`${st.url}/?open=${encodeURIComponent(f.source.id)}`, '_blank')
   }
-  // Änderungen in Draftpad bemerken (alle 10 s und beim Zurückkehren ins Fenster)
+  // Änderungen in Draftpad bemerken (alle 4 s und beim Zurückkehren ins Fenster) und gleich übernehmen
   const linkedKey = features
     .filter((f) => f.type === 'sketch' && f.source?.kind === 'draftpad' && f.source.mode === 'linked' && !f.suppressed)
     .map((f) => `${f.id}:${f.source.id}:${f.source.updated}`)
     .join('|')
   const featuresRef = useRef(features)
   featuresRef.current = features
+  // neueste Fassungen für die Abfrage im Hintergrund (sonst sähe sie alte Features)
+  const autoRef = useRef(null)
+  autoRef.current = { refresh: refreshDraftpad, editing: !!edit }
   useEffect(() => {
     if (!linkedKey) return
     let stop = false
@@ -1016,14 +1019,18 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         try {
           const m = await api.draftpadMeta(f.source.id)
           if (stop) return
-          if (m?.updated && f.source.updated && m.updated > f.source.updated) setStale((s) => (s[f.id] === m.updated ? s : { ...s, [f.id]: m.updated }))
+          if (m?.updated && f.source.updated && m.updated > f.source.updated) {
+            // gleich übernehmen (wie live), außer während ein Feature bearbeitet wird – dann Hinweis
+            if (!autoRef.current.editing) await autoRef.current.refresh(f)
+            else setStale((s) => (s[f.id] === m.updated ? s : { ...s, [f.id]: m.updated }))
+          }
         } catch {
           /* Server gerade nicht erreichbar */
         }
       }
     }
     check()
-    const t = setInterval(check, 10000)
+    const t = setInterval(check, 4000)
     const onVis = () => document.visibilityState === 'visible' && check()
     document.addEventListener('visibilitychange', onVis)
     window.addEventListener('focus', check)
