@@ -182,3 +182,16 @@ test('Muster linear in zwei Richtungen und Spiegeln des ganzen Körpers', () => 
   near(r.volume, 2 * (6000 * 10 - 15 * PI * 9 * 10), 1e-6)
   assert.equal(r.bodies, 1, 'gespiegelt und verschmolzen')
 })
+
+test('Schale: Kasten oben offen, Wand 2 mm', () => {
+  const features = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 60, 40) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 30, dir: 1 },
+    { id: 3, type: 'shell', faces: [{ center: [30, 20, 30], kind: 'plane', normal: [0, 0, 1] }], thickness: 2 },
+  ]
+  const r = build({ features })
+  allOk(r)
+  near(r.volume, 60 * 40 * 30 - 56 * 36 * 28, 1e-6)
+  const r2 = build({ features: [...features.slice(0, 2), { ...features[2], thickness: 25 }] })
+  assert.match(r2.status[2].error, /Schale/)
+})

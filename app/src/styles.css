@@ -735,12 +735,12 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-stage { display: flex; flex-direction: column; }
 .cad-stage .cad-view { flex: 1; position: relative; }
 .cad-toolbar { position: absolute; top: 10px; left: 0; right: 0; margin: 0 auto; width: max-content; z-index: 5; display: flex; align-items: center; gap: 2px;
-  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 260px); flex-wrap: wrap; justify-content: center; row-gap: 2px; }
+  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 200px); flex-wrap: wrap; justify-content: center; row-gap: 2px; }
 .cad-tool { display: inline-flex; align-items: center; gap: 5px; height: 32px; min-width: 32px; padding: 0 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; cursor: pointer; color: var(--text); }
 .cad-tool:hover:not(:disabled) { background: var(--hover); }
 .cad-tool.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .cad-tool:disabled { opacity: 0.4; cursor: default; }
-.cad-tool.labeled { flex-direction: column; justify-content: center; gap: 1px; height: 46px; min-width: 54px; padding: 0 4px; }
+.cad-tool.labeled { flex-direction: column; justify-content: center; gap: 1px; height: 46px; min-width: 46px; padding: 0 3px; }
 .cad-tool.labeled span { font-size: 10px; line-height: 1.1; color: var(--muted); white-space: nowrap; }
 .cad-tool.labeled.on span, .cad-tool.labeled:hover span { color: inherit; }
 .cad-sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--line); }
@@ -849,3 +849,8 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .marker.measure .marker-dot { border-color: #f59e0b; background: #f59e0b; }
 .marker.measure .marker-label { background: #f59e0b; color: #111; font-weight: 700; }
 .icon-btn.on { background: var(--accent); color: #fff; }
+
+/* Schnittansicht in der Konstruktion */
+.cad-section { position: absolute; right: 16px; bottom: 16px; z-index: 6; display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.14); font-size: 12px; }
+.cad-section .slim-range { width: 160px; }

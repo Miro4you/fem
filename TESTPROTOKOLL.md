@@ -340,6 +340,8 @@ selbst starten.
 | 18e.24 | Skizze: Linie quer durch ein Rechteck, Werkzeug Trimmen (T), über das Mittelstück fahren, klicken | Stück bis zu den Schnittpunkten wird rot gezeigt und entfernt; Kreis wird beim Trimmen zum Bogen | [ ] |
 | 18e.25 | Skizze: Linie anklicken | Leiste unten im Bild mit passenden Bedingungen (Waagrecht, Senkrecht, …, Fixieren, Löschen); Bedingungszeichen an den Linien gut sichtbar, bei großen Skizzen nur am Element unter dem Zeiger | [ ] |
 | 18e.26 | Messen (Lineal-Knopf rechts oben im Bild) in der Konstruktion und im Modell (auch STEP/Onshape-Teil): Bohrung anklicken, dann zwei gegenüberliegende Flächen | Bohrung zeigt Ø und R; zwei parallele Flächen zeigen den Abstand, zwei Bohrungen den Achsabstand; „Fertig“ beendet | [ ] |
+| 18e.27 | Konstruktion: Kasten extrudieren, Schale (Werkzeug „Schale“), Deckfläche anklicken, Wand 2 mm | Kasten oben offen, Wand 2 mm; zu dicke Wand wird gemeldet | [ ] |
+| 18e.28 | Konstruktion: Schere-Knopf rechts oben (Schnittansicht), X/Y/Z, Schieber, Seite wechseln | Körper wird geschnitten, Schnittfläche orange | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

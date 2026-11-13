@@ -619,6 +619,44 @@ function moveFace(model, f, warn) {
   void warn
 }
 
+/// Schale: Körper aushöhlen, gewählte Flächen bleiben offen
+function shellOp(model, f) {
+  const t = Number(f.thickness) || 0
+  if (t <= 0) throw new Problem('Schale: Wandstärke muss größer als 0 sein')
+  if (!f.faces?.length) throw new Problem('Schale: mindestens eine Fläche wählen, die offen bleibt')
+  const per = new Map()
+  for (const ref of f.faces) {
+    const c = findFace(model, ref, 'Schale')
+    if (!per.has(c.bi)) per.set(c.bi, [])
+    per.get(c.bi).push(c.face)
+  }
+  const O = oc()
+  for (const [bi, faces] of per) {
+    const body = model.bodies[bi]
+    const list = new O.NCollection_List_TopoDS_Shape()
+    for (const x of faces) list.Append(x.wrapped)
+    const mk = new O.BRepOffsetAPI_MakeThickSolid()
+    let shape = null
+    try {
+      mk.MakeThickSolidByJoin(body.shape.wrapped, list, -t, 1e-3, O.BRepOffset_Mode.BRepOffset_Skin, false, false, O.GeomAbs_JoinType.GeomAbs_Arc, false)
+      mk.Build(new O.Message_ProgressRange())
+      if (mk.IsDone()) shape = cast(mk.Shape())
+    } catch {
+      shape = null
+    }
+    mk.delete()
+    let solid = shape && solidsOf(shape)[0]
+    // zu dicke Wand: OpenCASCADE gibt den Körper unverändert zurück
+    if (solid) {
+      const v0 = volumeOf(body.shape)
+      const v1 = volumeOf(solid)
+      if (!(v1 > 0) || Math.abs(v1 - v0) < 1e-6 * v0) solid = null
+    }
+    if (!solid) throw new Problem(`Schale: Wandstärke ${t} mm lässt sich hier nicht erzeugen – zu dick für den Körper oder für enge Radien?`)
+    model.bodies[bi] = { shape: solid, name: body.name }
+  }
+}
+
 // --- Darstellung ------------------------------------------------------------------------------
 
 /// Fläche beschreiben; Schwerpunkt und Inhalt kommen aus den Dreiecken (exakt genug zum Wiederfinden, viel schneller)
@@ -788,6 +826,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'pattern') repeat(model, f, instances(f), sketches, byId, warn, 'Muster')
   else if (f.type === 'mirror') mirrorFeature(model, f, sketches, byId, warn)
   else if (f.type === 'moveface') moveFace(model, f, warn)
+  else if (f.type === 'shell') shellOp(model, f)
   else throw new Problem(`„${f.type}“ kann der neue Kern noch nicht`)
   if (!model.bodies.length) throw new Problem('Es ist kein Körper entstanden')
   if (f.mode === 'new' && (f.type === 'extrude' || f.type === 'revolve')) newBodies(model, f, before, warn)

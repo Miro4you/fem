@@ -44,6 +44,7 @@ import {
   ExternalLink,
   Unlink,
   Scissors,
+  PackageOpen,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -80,6 +81,7 @@ const FEATURE_ICON = {
   mirror: FlipHorizontal2,
   removefaces: Eraser,
   moveface: Move,
+  shell: PackageOpen,
   refillet: SquareRoundCorner,
   rehole: CircleDot,
 }
@@ -105,6 +107,7 @@ const PART_TOOLS = [
   ['chamfer', 'Kanten fasen'],
   ['pattern', 'Linear oder im Kreis vervielfältigen'],
   ['mirror', 'An einer Ebene spiegeln'],
+  ['shell', 'Schale: Körper aushöhlen, gewählte Flächen bleiben offen'],
   ['moveface', 'Ebene Fläche verschieben (z. B. Wand dicker)'],
   ['removefaces', 'Flächen entfernen (z. B. Bohrung oder Radius weg)'],
 ]
@@ -288,7 +291,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (type === 'sketch') {
       setPickFor('plane')
       draft.sketch = null
-    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces' }[type] ?? null)
+    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces' }[type] ?? null)
   }
 
   const openEdit = (f) => {
@@ -595,7 +598,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // Stand vor dem bearbeiteten Feature (zum Wählen von Kanten/Flächen)
   const [before, setBefore] = useState(null)
-  const beforeKey = edit && ['fillet', 'chamfer', 'removefaces', 'moveface', 'refillet', 'rehole', 'pattern', 'mirror'].includes(edit.draft.type) ? `${edit.index}|${builtKey}` : null
+  const beforeKey = edit && ['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror'].includes(edit.draft.type) ? `${edit.index}|${builtKey}` : null
   useEffect(() => {
     if (!beforeKey) {
       setBefore(null)
@@ -1650,6 +1653,14 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
             </div>
           </label>
           {d.plane?.face && <p className="hint">Ebene Fläche gewählt.</p>}
+        </>
+      )}
+
+      {d.type === 'shell' && (
+        <>
+          <PickButton active={pickFor === 'faces'} label="Offene Flächen" value={d.faces.length ? `${d.faces.length} gewählt` : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'faces' ? null : 'faces')} />
+          <Num label="Wandstärke (nach innen)" value={d.thickness} onChange={(thickness) => setDraft({ thickness })} />
+          <p className="hint">Der Körper wird ausgehöhlt; die gewählten Flächen fallen weg (offene Seite), alle anderen werden zur Wand.</p>
         </>
       )}
 

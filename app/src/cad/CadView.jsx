@@ -3,7 +3,7 @@ import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { CadControls } from '../components/CadControls.js'
 import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
-import { IcHome, IcFit } from '../ui/icons.jsx'
+import { IcHome, IcFit, IcCut } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
 import { Ruler } from 'lucide-react'
 import { num } from './features.js'
@@ -92,6 +92,7 @@ export default function CadView({
   // Beschriftungen im Raum (Achsen X/Y/Z, Hauptebenen)
   const [labels3d, setLabels3d] = useState([])
   const tmp = useRef(null) // laufende Zeichenaktion
+  const [section, setSection] = useState({ on: false, axis: 0, pos: 50, flip: false }) // Schnittansicht
   const [handleScr, setHandleScr] = useState(null) // Ziehgriff auf dem Bild { o:[x,y], t:[x,y] }
   const handleRef = useRef(handle)
   handleRef.current = handle
@@ -301,6 +302,41 @@ export default function CadView({
     s.dirty = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tess])
+
+  // Schnittansicht: Körper an einer Ebene abschneiden; die Rückseiten zeigen die Schnittfläche (orange)
+  useEffect(() => {
+    const s = ctx.current
+    s.renderer.localClippingEnabled = true
+    if (s.cap) {
+      s.body.remove(s.cap)
+      s.cap.material.dispose()
+      s.cap = null
+    }
+    const planes = []
+    if (section.on && s.surf && tess?.bbox) {
+      const [lo, hi] = tess.bbox
+      const k = section.axis
+      const n = new THREE.Vector3(k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0)
+      const span = hi[k] - lo[k]
+      const at = lo[k] + ((span || 1) * section.pos) / 100
+      // sichtbar bleibt die Seite n·p ≤ at (bzw. ≥ at mit „Seite wechseln“)
+      if (section.flip) planes.push(new THREE.Plane(n, -at))
+      else planes.push(new THREE.Plane(n.clone().negate(), at))
+      s.cap = new THREE.Mesh(s.surf.geometry, new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.BackSide, clippingPlanes: planes }))
+      s.cap.raycast = () => {}
+      s.body.add(s.cap)
+    }
+    if (s.surf) {
+      s.surf.material.clippingPlanes = planes
+      s.surf.material.side = planes.length ? THREE.FrontSide : THREE.DoubleSide
+      s.surf.material.needsUpdate = true
+    }
+    if (s.edges) {
+      s.edges.material.clippingPlanes = planes
+      s.edges.material.needsUpdate = true
+    }
+    s.dirty = true
+  }, [section, tess])
 
   // Farben der Flächen und hervorgehobene Kanten
   useEffect(() => {
@@ -1324,6 +1360,22 @@ export default function CadView({
             {l.text}
           </span>
         ))}
+      {section.on && !sketch && tess?.triangles?.length > 0 && (
+        <div className="cad-section">
+          <span className="tb-label">Schnitt</span>
+          <div className="segmented small">
+            {['X', 'Y', 'Z'].map((a, k) => (
+              <button key={a} className={section.axis === k ? 'on' : ''} onClick={() => setSection({ ...section, axis: k })}>
+                {a}
+              </button>
+            ))}
+          </div>
+          <input type="range" className="slim-range" min={0} max={100} step={0.5} value={section.pos} aria-label="Lage der Schnittebene" onChange={(e) => setSection({ ...section, pos: Number(e.target.value) })} />
+          <button className="btn small" onClick={() => setSection({ ...section, flip: !section.flip })}>
+            ⇄ Seite
+          </button>
+        </div>
+      )}
       {handle && handleScr && (
         <>
           <svg className="cad-handle-line">
@@ -1360,6 +1412,11 @@ export default function CadView({
           <button className="icon-btn" title="Alles zeigen" aria-label="Alles zeigen" onClick={() => fitAll(cam[2], cam[1])}>
             <IcFit />
           </button>
+          {tess?.triangles?.length > 0 && !sketch && (
+            <button className={'icon-btn' + (section.on ? ' on' : '')} title="Schnittansicht" aria-label="Schnittansicht" onClick={() => setSection((x) => ({ ...x, on: !x.on }))}>
+              <IcCut />
+            </button>
+          )}
           {measureTool && (
             <button className={'icon-btn' + (measureTool.on ? ' on' : '')} title="Messen: Flächen oder Kanten anklicken (Ø, Länge, Abstand)" aria-label="Messen" onClick={measureTool.onToggle}>
               <Ruler size={16} />

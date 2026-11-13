@@ -12,6 +12,7 @@ export const FEATURE_LABEL = {
   mirror: 'Spiegeln',
   removefaces: 'Flächen entfernen',
   moveface: 'Fläche verschieben',
+  shell: 'Schale',
   refillet: 'Radius ändern',
   rehole: 'Bohrung ändern',
 }
@@ -127,6 +128,8 @@ export function defaults(type) {
       return { faces: [] }
     case 'moveface':
       return { faces: [], distance: '2' }
+    case 'shell':
+      return { faces: [], thickness: '2' }
     default:
       return {}
   }
@@ -196,6 +199,8 @@ export function problemOf(f, features) {
       return f.faces.length ? null : 'Flächen im Bild wählen'
     case 'moveface':
       return !f.faces.length ? 'Ebene Flächen im Bild wählen' : num(f.distance) ? null : 'Abstand angeben'
+    case 'shell':
+      return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
     case 'refillet':
       if (!f.surfaces?.length) return 'Radius- oder Bohrungsfläche im Bild wählen'
       return num(f.radius) >= 0 ? null : 'Radius angeben'
@@ -270,6 +275,8 @@ export function kernelFeature(f, features) {
       return { id: f.id, type: 'removefaces', faces: f.faces.map(faceHint) }
     case 'moveface':
       return { id: f.id, type: 'moveface', faces: f.faces.map(faceHint), distance: num(f.distance) }
+    case 'shell':
+      return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
     case 'refillet':
       return { id: f.id, type: 'refillet', surfaces: f.surfaces, axis: f.axis, radius: num(f.radius) }
     case 'rehole':
@@ -292,7 +299,7 @@ export function cadParams(features) {
   const out = []
   for (const f of features) {
     if (f.suppressed) continue
-    const field = { extrude: ['depth', 'Tiefe'], revolve: ['angle', 'Winkel'], hole: ['diameter', 'Ø'], fillet: ['radius', 'Radius'], chamfer: ['distance', 'Fase'], moveface: ['distance', 'Abstand'], refillet: ['radius', 'Radius'], rehole: ['diameter', 'Ø'] }[f.type]
+    const field = { extrude: ['depth', 'Tiefe'], revolve: ['angle', 'Winkel'], hole: ['diameter', 'Ø'], fillet: ['radius', 'Radius'], chamfer: ['distance', 'Fase'], moveface: ['distance', 'Abstand'], shell: ['thickness', 'Wandstärke'], refillet: ['radius', 'Radius'], rehole: ['diameter', 'Ø'] }[f.type]
     if (field && !(f.type === 'extrude' && f.through)) out.push({ key: `cad:${f.id}:${field[0]}`, label: `${f.name}: ${field[1]}`, unit: f.type === 'revolve' ? '°' : 'mm', value: num(f[field[0]]) })
     if (f.type === 'pattern') out.push({ key: `cad:${f.id}:count`, label: `${f.name}: Anzahl`, unit: '', value: num(f.count) })
     if (f.type === 'sketch')
