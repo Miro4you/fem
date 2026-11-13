@@ -45,6 +45,7 @@ import {
   Unlink,
   Scissors,
   PackageOpen,
+  ArrowRightToLine,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -62,6 +63,7 @@ import {
   num,
   fmtField,
 } from './features.js'
+import { offsetEnts } from './sketch.js'
 import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, CON_GLYPH, isDim, measure, kernelSketch, polyline, basis, to3d } from './sketch.js'
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
@@ -94,6 +96,7 @@ const SKETCH_TOOLS = [
   ['arc', 'Bogen (Mitte, Anfang, Ende – gegen den Uhrzeigersinn)', Spline, 'A'],
   ['point', 'Punkt (z. B. für Bohrungen)', Dot, 'P'],
   ['dim', 'Bemaßen: ein Element (Länge, Ø, R) oder zwei Elemente (Abstand, Winkel) anklicken, Maß ablegen, Wert eingeben', Ruler, 'D'],
+  ['extend', 'Verlängern: Linie nahe dem Ende anklicken – bis zum nächsten Element', ArrowRightToLine, 'E'],
   ['trim', 'Trimmen: Stück bis zum nächsten Schnittpunkt anklicken (rot = fällt weg)', Scissors, 'T'],
   ['use', 'Kante des Bauteils übernehmen', Diameter, 'U'],
 ]
@@ -438,6 +441,14 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (!r.info.ok) return note('Diese Bedingung widerspricht den vorhandenen')
     if (r.info.redundant > before) note('Das war schon so festgelegt – Bedingung nicht nötig')
     changeSketch(r.sketch, r.info, false)
+  }
+
+  const applyOffset = (d) => {
+    const s2 = offsetEnts(sketchEdit.sketch, sel.ents, d)
+    if (!s2) return note('Versatz: zusammenhängende Linien/Bögen oder Kreise wählen (Abstand kleiner als die Radien)')
+    const r = solved(s2)
+    changeSketch(r.info.ok ? r.sketch : s2, r.info, false)
+    note(`Versatz ${String(d).replace('.', ',')} mm angelegt (geschlossener Zug: + nach außen, − nach innen)`)
   }
 
   const toggleFix = () => {
@@ -1234,7 +1245,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           )}
         </div>
         {sketchEdit && (sel.pts.length > 0 || sel.ents.length > 0 || sel.cons.length > 0) && (
-          <ConBar sk={sketchEdit.sketch} sel={sel} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
+          <ConBar sk={sketchEdit.sketch} sel={sel} onOffset={applyOffset} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
         )}
         {(msg || pickFor || regionHint) && (
           <div className="cad-hint">
@@ -1726,9 +1737,11 @@ function DirPick({ label, value, flip, active, onPick, onAxis, onFlip }) {
 }
 
 // Schwebende Leiste im Bild: passende Bedingungen zur Auswahl (wie die Bedingungsleiste in Onshape)
-function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete }) {
+function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete, onOffset }) {
   const opts = applicableCons(sk, sel)
   const n = sel.pts.length + sel.ents.length
+  const [off, setOff] = useState('2')
+  const canOffset = sel.ents.some((id) => ['line', 'arc', 'circle'].includes(sk.ents.find((e) => e.id === id)?.t))
   return (
     <div className="cad-conbar" onPointerDown={(e) => e.stopPropagation()}>
       <span className="muted">{n ? `${n} gewählt` : `${sel.cons.length} Bedingung${sel.cons.length === 1 ? '' : 'en'}`}</span>
@@ -1746,6 +1759,14 @@ function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete 
         <button className={'btn small' + (construction ? ' on' : '')} onClick={onConstruction}>
           Hilfslinie
         </button>
+      )}
+      {canOffset && (
+        <span className="cad-conbar-off" title="Gewählte Linien parallel versetzt kopieren (geschlossener Zug: + nach außen, − nach innen)">
+          <NumInput value={off} onChange={setOff} className="cad-conbar-num" />
+          <button className="btn small" onClick={() => Number.isFinite(num(off)) && num(off) !== 0 && onOffset(num(off))}>
+            Versatz
+          </button>
+        </span>
       )}
       <button className="btn small" title="Entf" onClick={onDelete}>
         <Trash2 size={13} /> Löschen

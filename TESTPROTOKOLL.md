@@ -342,6 +342,8 @@ selbst starten.
 | 18e.26 | Messen (Lineal-Knopf rechts oben im Bild) in der Konstruktion und im Modell (auch STEP/Onshape-Teil): Bohrung anklicken, dann zwei gegenüberliegende Flächen | Bohrung zeigt Ø und R; zwei parallele Flächen zeigen den Abstand, zwei Bohrungen den Achsabstand; „Fertig“ beendet | [ ] |
 | 18e.27 | Konstruktion: Kasten extrudieren, Schale (Werkzeug „Schale“), Deckfläche anklicken, Wand 2 mm | Kasten oben offen, Wand 2 mm; zu dicke Wand wird gemeldet | [ ] |
 | 18e.28 | Konstruktion: Schere-Knopf rechts oben (Schnittansicht), X/Y/Z, Schieber, Seite wechseln | Körper wird geschnitten, Schnittfläche orange | [ ] |
+| 18e.29 | Skizze: Rechteck, alle vier Linien mit ⇧ wählen, in der Leiste unten Versatz −3 → „Versatz“ | inneres Rechteck 3 mm kleiner; extrudiert = Rahmen | [ ] |
+| 18e.30 | Skizze: kurze Linie, Werkzeug Verlängern (E), nahe einem Ende klicken | Linie wird bis zum nächsten Element verlängert und hängt dort an | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

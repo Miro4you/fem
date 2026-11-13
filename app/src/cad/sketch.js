@@ -684,3 +684,160 @@ export function trimAt(sk, entId, at) {
   }
   return { sketch: removeItems(s, {}), removed }
 }
+
+// --- Verlängern -------------------------------------------------------------------------------
+
+/// Linie am Ende nahe `at` bis zum nächsten Schnitt mit einem anderen Element verlängern. → neue Skizze oder null
+export function extendAt(sk, entId, at) {
+  const e = sk.ents.find((x) => x.id === entId)
+  if (!e || e.t !== 'line') return null
+  const A = P(sk, e.a)
+  const B = P(sk, e.b)
+  const endIsB = Math.hypot(at[0] - B[0], at[1] - B[1]) < Math.hypot(at[0] - A[0], at[1] - A[1])
+  const [from, to] = endIsB ? [A, B] : [B, A]
+  const endId = endIsB ? e.b : e.a
+  const L = Math.hypot(to[0] - from[0], to[1] - from[1])
+  if (!L) return null
+  // weit verlängerte Hilfslinie, Schnitte jenseits des Endes suchen
+  const t = structuredClone(sk)
+  const far = [to[0] + ((to[0] - from[0]) / L) * 1e5, to[1] + ((to[1] - from[1]) / L) * 1e5]
+  t.pts.__x = { x: to[0], y: to[1] }
+  t.pts.__y = { x: far[0], y: far[1] }
+  const ray = { id: '__ray', t: 'line', a: '__x', b: '__y' }
+  let best = null
+  for (const f of t.ents) {
+    if (f.id === e.id || f.t === 'point' || f.cons) continue
+    for (const q of intersectEnts(t, ray, f)) {
+      const d = Math.hypot(q[0] - to[0], q[1] - to[1])
+      if (d > 1e-6 && (!best || d < best.d)) best = { d, q, by: f.id }
+    }
+  }
+  if (!best) return null
+  const s = structuredClone(sk)
+  const used = s.ents.filter((x) => x.id !== e.id && entPoints(x).includes(endId)).length
+  const se = s.ents.find((x) => x.id === e.id)
+  if (used) {
+    // Ende hängt an anderen Elementen: neuen Endpunkt anlegen (die anderen bleiben, wo sie sind)
+    const id = addPoint(s, best.q)
+    if (endIsB) se.b = id
+    else se.a = id
+    addCon(s, { t: 'on', p: id, e: best.by })
+  } else {
+    s.pts[endId].x = best.q[0]
+    s.pts[endId].y = best.q[1]
+    addCon(s, { t: 'on', p: endId, e: best.by })
+  }
+  // Längenmaße dieser Linie passen nicht mehr
+  s.cons = s.cons.filter((c) => !(['dist', 'dx', 'dy'].includes(c.t) && [c.a, c.b].includes(e.a) && [c.a, c.b].includes(e.b)))
+  return s
+}
+
+// --- Versatz ----------------------------------------------------------------------------------
+
+/// Gewählte Linien/Bögen/Kreise um `d` versetzt kopieren. Zusammenhängende Elemente bleiben verbunden (Ecken neu
+/// geschnitten). Geschlossener Zug: d > 0 nach außen; offener Zug: d > 0 nach links (in Zeichenrichtung).
+export function offsetEnts(sk, ids, d) {
+  const ents = ids.map((id) => sk.ents.find((e) => e.id === id)).filter((e) => e && ['line', 'arc', 'circle'].includes(e.t))
+  if (!ents.length || !d) return null
+  const s = structuredClone(sk)
+  const pt = (id) => P(sk, id)
+  // einzelne Kreise
+  for (const e of ents.filter((x) => x.t === 'circle')) {
+    if (e.r + d <= 0) return null
+    addEnt(s, { t: 'circle', c: e.c, r: e.r + d })
+  }
+  const segs = ents.filter((x) => x.t !== 'circle')
+  if (!segs.length) return s
+  // Kette bilden: Reihenfolge und Richtung je Element
+  const chain = []
+  const left = [...segs]
+  const first = left.shift()
+  chain.push({ e: first, fwd: true })
+  const endOf = (c) => (c.fwd ? c.e.b : c.e.a)
+  const startOf = (c) => (c.fwd ? c.e.a : c.e.b)
+  for (let grew = true; grew && left.length; ) {
+    grew = false
+    for (let i = 0; i < left.length; i++) {
+      const x = left[i]
+      const tail = endOf(chain[chain.length - 1])
+      const head = startOf(chain[0])
+      if (x.a === tail) chain.push({ e: x, fwd: true })
+      else if (x.b === tail) chain.push({ e: x, fwd: false })
+      else if (x.b === head) chain.unshift({ e: x, fwd: true })
+      else if (x.a === head) chain.unshift({ e: x, fwd: false })
+      else continue
+      left.splice(i, 1)
+      grew = true
+      break
+    }
+  }
+  if (left.length) return null // nicht zusammenhängend: nur eine Kette auf einmal
+  const closed = chain.length > 1 && endOf(chain[chain.length - 1]) === startOf(chain[0])
+  // Umlaufsinn des geschlossenen Zugs (Fläche > 0 = gegen den Uhrzeigersinn) → „nach außen“ = rechts bei CCW
+  let side = 1
+  if (closed) {
+    let A = 0
+    for (const c of chain) {
+      const p = pt(startOf(c))
+      const q = pt(endOf(c))
+      A += p[0] * q[1] - q[0] * p[1]
+    }
+    side = A > 0 ? -1 : 1
+  }
+  const dd = d * side // nach links um dd
+  // versetzte Geometrie je Element: Anfangs- und Endpunkt, bei Bögen Mitte und Radius
+  const off = chain.map((c) => {
+    const e = c.e
+    const a = pt(startOf(c))
+    const b = pt(endOf(c))
+    if (e.t === 'line') {
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+      const n = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L]
+      return { t: 'line', a: [a[0] + n[0] * dd, a[1] + n[1] * dd], b: [b[0] + n[0] * dd, b[1] + n[1] * dd], dir: [(b[0] - a[0]) / L, (b[1] - a[1]) / L] }
+    }
+    // Bogen: vorwärts = gegen den Uhrzeigersinn, links = zur Mitte hin
+    const ctr = pt(e.c)
+    const r = Math.hypot(a[0] - ctr[0], a[1] - ctr[1])
+    const r2 = c.fwd ? r - dd : r + dd
+    if (r2 <= 0) return null
+    const k = r2 / r
+    return { t: 'arc', c: e.c, ctr, a: [ctr[0] + (a[0] - ctr[0]) * k, ctr[1] + (a[1] - ctr[1]) * k], b: [ctr[0] + (b[0] - ctr[0]) * k, ctr[1] + (b[1] - ctr[1]) * k], fwd: c.fwd }
+  })
+  if (off.some((o) => !o)) return null
+  // Ecken: zwei Linien → Schnittpunkt der Geraden; sonst Mittel der beiden versetzten Endpunkte (tangentiale Übergänge)
+  const n = off.length
+  const corner = (i, j) => {
+    const p = off[i]
+    const q = off[j]
+    if (p.t === 'line' && q.t === 'line') {
+      const den = p.dir[0] * q.dir[1] - p.dir[1] * q.dir[0]
+      if (Math.abs(den) > 1e-9) {
+        const w = [q.a[0] - p.b[0], q.a[1] - p.b[1]]
+        const tt = (w[0] * q.dir[1] - w[1] * q.dir[0]) / den
+        return [p.b[0] + p.dir[0] * tt, p.b[1] + p.dir[1] * tt]
+      }
+    }
+    return [(p.b[0] + q.a[0]) / 2, (p.b[1] + q.a[1]) / 2]
+  }
+  const joints = []
+  for (let i = 0; i < n - 1; i++) joints.push(addPoint(s, corner(i, i + 1)))
+  let startId
+  let endId
+  if (closed) {
+    const j = addPoint(s, corner(n - 1, 0))
+    startId = j
+    endId = j
+  } else {
+    startId = addPoint(s, off[0].a)
+    endId = addPoint(s, off[n - 1].b)
+  }
+  off.forEach((o, i) => {
+    const a = i === 0 ? startId : joints[i - 1]
+    const b = i === n - 1 ? endId : joints[i]
+    if (o.t === 'line') {
+      const ne = addEnt(s, { t: 'line', a, b })
+      addCon(s, { t: 'par', e1: chain[i].e.id, e2: ne.id })
+    } else addEnt(s, o.fwd ? { t: 'arc', c: o.c, a, b } : { t: 'arc', c: o.c, a: b, b: a })
+  })
+  return s
+}

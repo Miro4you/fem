@@ -854,3 +854,6 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-section { position: absolute; right: 16px; bottom: 16px; z-index: 6; display: flex; align-items: center; gap: 8px; padding: 6px 10px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.14); font-size: 12px; }
 .cad-section .slim-range { width: 160px; }
+
+.cad-conbar-off { display: inline-flex; align-items: center; gap: 4px; }
+.cad-conbar-num { width: 52px; height: 26px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }

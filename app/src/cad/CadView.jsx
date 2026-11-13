@@ -20,6 +20,7 @@ import {
   addCon,
   addPoint,
   trimAt,
+  extendAt,
   distTo,
   dimFor,
   dimGeometry,
@@ -1061,6 +1062,18 @@ export default function CadView({
         const has = cur[key].includes(id)
         const next = add ? { ...cur, [key]: has ? cur[key].filter((x) => x !== id) : [...cur[key], id] } : { pts: [], ents: [], cons: [], [key]: [id] }
         sk.onSel(next)
+        return
+      }
+      if (sk.tool === 'extend') {
+        const h0 = sketchHit(ev, data, plane)
+        // Klick auf den Endpunkt: die Linie, die dort endet
+        const h = h0?.pt && !h0.ent ? { ent: data.ents.find((e) => e.t === 'line' && !e.cons && (e.a === h0.pt || e.b === h0.pt))?.id } : h0
+        if (!h?.ent) return sk.onMessage?.('Verlängern: eine Linie nahe dem Ende anklicken, das verlängert werden soll')
+        const s2 = extendAt(data, h.ent, q)
+        if (!s2) return sk.onMessage?.('Verlängern: in dieser Richtung liegt kein anderes Element')
+        const sv = solved(s2)
+        tmp.current = null
+        sk.onChange(sv.info.ok ? sv.sketch : s2, sv.info)
         return
       }
       if (sk.tool === 'trim') {
