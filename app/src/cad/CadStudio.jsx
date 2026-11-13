@@ -702,7 +702,48 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   // Ziehgriff für die Extrusionstiefe: an der Mitte der gewählten Flächen, in Extrusionsrichtung
   const dragHandle = useMemo(() => {
     const d = edit?.draft
-    if (!d || d.type !== 'extrude' || d.through || pickFor) return null
+    if (!d) return null
+    // Verrunden/Fase: Griff an der ersten Kante, nach außen (zwischen den Normalen der Nachbarflächen)
+    if ((d.type === 'fillet' || d.type === 'chamfer') && d.edges?.length && (!pickFor || pickFor === 'edges') && shownTessBefore) {
+      const tag = [...matchEdges(shownTessBefore, [d.edges[0]])][0]
+      const c = shownTessBefore.curves.find((x) => x.tag === tag)
+      if (!c) return null
+      const ns = c.surfaces.map((t) => shownTessBefore.surfaces.find((f) => f.tag === t)?.normal).filter(Boolean)
+      if (!ns.length) return null
+      const sum = ns.reduce((a, n) => a.map((x, i) => x + n[i]), [0, 0, 0])
+      const L = Math.hypot(...sum)
+      if (L < 1e-9) return null
+      const key = d.type === 'fillet' ? 'radius' : 'distance'
+      const v = num(d[key])
+      if (!Number.isFinite(v)) return null
+      return {
+        origin: c.mid,
+        dir: sum.map((x) => x / L),
+        value: v,
+        min: 0.1,
+        label: `${d.type === 'fillet' ? 'R' : ''}${fmtField(v)} mm`,
+        onChange: (x) => setDraft({ [key]: fmtField(x) }),
+      }
+    }
+    // Bohrung: Tiefe am ersten Bohrpunkt, in das Material hinein
+    if (d.type === 'hole' && !d.through && !pickFor) {
+      const skF = features.find((f) => f.id === d.sketch && f.type === 'sketch')
+      const p0 = skF && skF.sketch.ents.find((e) => e.t === 'point')
+      const pt = p0 ? skF.sketch.pts[p0.p] : skF && Object.values(skF.sketch.pts)[0]
+      const depth = num(d.depth)
+      if (!pt || !Number.isFinite(depth)) return null
+      const B = basis(skF.sketch.plane)
+      const k = d.flip ? 1 : -1
+      return {
+        origin: to3d(skF.sketch.plane, [pt.x, pt.y]),
+        dir: B.n.map((x) => x * k),
+        value: depth,
+        min: 0.1,
+        label: `Tiefe ${fmtField(depth)} mm`,
+        onChange: (x) => setDraft({ depth: fmtField(x) }),
+      }
+    }
+    if (d.type !== 'extrude' || d.through || pickFor) return null
     const skF = features.find((f) => f.id === d.sketch && f.type === 'sketch')
     if (!skF) return null
     const depth = num(d.depth)
@@ -723,7 +764,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       onChange: (v) => setDraft({ depth: fmtField(sym ? 2 * v : v) }),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edit?.draft, features, regionInfo, regionState, pickFor])
+  }, [edit?.draft, features, regionInfo, regionState, pickFor, shownTessBefore])
   // neues Feature, Skizze mit vielen Flächen: nichts vorwählen (sonst wird alles auf einmal extrudiert)
   const preChecked = useRef(null)
   useEffect(() => {

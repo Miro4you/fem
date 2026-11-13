@@ -346,6 +346,7 @@ selbst starten.
 | 18e.30 | Skizze: kurze Linie, Werkzeug Verlängern (E), nahe einem Ende klicken | Linie wird bis zum nächsten Element verlängert und hängt dort an | [ ] |
 | 18e.31 | Sweep: Skizze 1 auf XY mit zwei Kreisen (Ø10/Ø8), Skizze 2 auf XZ mit einer Linie nach oben und einem Bogen; Sweep, Profil = Skizze 1, Pfad = Skizze 2 | gebogenes Rohr entsteht | [ ] |
 | 18e.32 | Loft: Skizze 1 Rechteck auf XY, Skizze 2 auf XY mit „Abstand zur Ebene“ 30 und Kreis; Loft, beide Skizzen anhaken | Übergang Rechteck → Kreis über 30 mm | [ ] |
+| 18e.33 | Fase/Verrunden: Kante wählen, blauen Griff an der Kante ziehen; Bohrung (nicht durch alles): Griff am Bohrpunkt ziehen | Wert ändert sich in 1-mm-Schritten, Vorschau folgt | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

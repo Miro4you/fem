@@ -133,7 +133,7 @@ wenn die Hinweise in der Praxis nicht reichen.
    Widerspruch rot (wie heute, aber über planegcs).
 7. **Skizze auf einer Körperfläche** anlegen.
 
-## G3. Bedienung der Features (1–3 erledigt 13.11.: Vorschau 60 ms nach jeder Eingabe, Ziehgriff Extrusionstiefe, `NumInput` mit Mausrad/Pfeilen/Rechnen – auch Skizzenmaße)
+## G3. Bedienung der Features (1–3 erledigt 13.11.: Vorschau 60 ms nach jeder Eingabe, Ziehgriffe für Extrusionstiefe, Fase, Verrundung, Bohrungstiefe, `NumInput` mit Mausrad/Pfeilen/Rechnen – auch Skizzenmaße)
 
 1. **Live-Vorschau** für jedes Feature während der Dialog offen ist (Worker rechnet bei jeder Eingabe, entprellt).
 2. **Ziehpfeil** beim Extrudieren (und Bohrungstiefe, Fase, Verrundung): im Bild ziehen, rastet auf 1 mm
