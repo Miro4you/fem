@@ -63,7 +63,7 @@ Sonst: zurück zur Alternative (volles OpenCASCADE über CadQuery in einem dauer
 
 Gebaut: `app/src/cad/kernel/` – `build.js` (Feature-Liste → Körper, gleiche Antwort wie `cad.py`), `geom2d.js`,
 `worker.js` (Web Worker), `client.js` (`cadBuildView`: neuer Kern, wenn eingeschaltet und alle Features bekannt,
-sonst Server). Einschalten: Adresse mit `#kern=neu` öffnen (bleibt gemerkt, `#kern=alt` schaltet zurück).
+sonst Server). Standard seit 13.11.; `#kern=alt` an der Adresse schaltet auf den alten Kern (bleibt gemerkt, `#kern=neu` zurück).
 Kann: Skizzenbereiche (Teiler von OpenCASCADE), Extrudieren (Dazu/Weg/Neuer Körper, symmetrisch, durch alles,
 Flächenwahl, Schraffuren), Drehen (Halbebene bei Schnittzeichnungen), Bohrung (Senkung, Spitze), Verrunden,
 Fase, Körpernamen, Überschneidung abziehen, STEP mit Teilenamen. Noch nicht: Muster, Spiegeln, Fläche

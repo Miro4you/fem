@@ -5,14 +5,12 @@ const KEY = 'projekt-fem.kern'
 /// Was der neue Kern schon kann (Rest: alter Kern auf dem Server)
 const SUPPORTED = new Set(['sketch', 'extrude', 'revolve', 'hole', 'fillet', 'chamfer'])
 
-/// Neuer Kern eingeschaltet? (#kern=neu bzw. #kern=alt in der Adresse merkt sich die Wahl)
+/// Neuer Kern eingeschaltet? Standard ja; #kern=alt an der Adresse schaltet auf den alten (wird gemerkt, s. api.js)
 export function newKernelWanted() {
   try {
-    const m = /[#&]kern=(neu|alt)\b/.exec(location.hash)
-    if (m) localStorage.setItem(KEY, m[1])
-    return localStorage.getItem(KEY) === 'neu'
+    return localStorage.getItem(KEY) !== 'alt'
   } catch {
-    return false
+    return true
   }
 }
 
