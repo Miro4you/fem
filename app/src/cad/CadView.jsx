@@ -4,6 +4,8 @@ import * as THREE from 'three'
 import { CadControls } from '../components/CadControls.js'
 import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
 import { IcHome, IcFit } from '../ui/icons.jsx'
+import NumInput from './NumInput.jsx'
+import { num } from './features.js'
 import {
   basis,
   to3d,
@@ -71,6 +73,7 @@ export default function CadView({
   preview, // { color } Körper halbdurchsichtig zeigen
   sketches, // Hintergrund-Skizzen [{ id, plane, data, active }]
   onSketchPick, // (id, open) – Klick/Doppelklick auf eine Hintergrund-Skizze
+  handle, // Ziehgriff { origin, dir (Einheit), value (mm), onChange(v), label, min } – z. B. Extrusionstiefe
   ref,
 }) {
   const host = useRef(null)
@@ -85,6 +88,10 @@ export default function CadView({
   // Beschriftungen im Raum (Achsen X/Y/Z, Hauptebenen)
   const [labels3d, setLabels3d] = useState([])
   const tmp = useRef(null) // laufende Zeichenaktion
+  const [handleScr, setHandleScr] = useState(null) // Ziehgriff auf dem Bild { o:[x,y], t:[x,y] }
+  const handleRef = useRef(handle)
+  handleRef.current = handle
+  const dragRef = useRef(null)
 
   useImperativeHandle(ref, () => ({
     fit: () => fitAll(),
@@ -174,6 +181,18 @@ export default function CadView({
         const p = l.pos.clone().project(camera)
         return { ...l, x: ((p.x + 1) / 2) * w, y: ((1 - p.y) / 2) * h, visible: p.z < 1 && p.z > -1 }
       })
+      // Ziehgriff aufs Bild
+      const hd = handleRef.current
+      if (hd) {
+        const pr = (q) => {
+          const v = new THREE.Vector3(...q).project(camera)
+          return [((v.x + 1) / 2) * w, ((1 - v.y) / 2) * h]
+        }
+        const tip = hd.origin.map((x, i) => x + hd.dir[i] * hd.value)
+        const o = pr(hd.origin)
+        const t = pr(tip)
+        setHandleScr((old) => (old && Math.hypot(old.o[0] - o[0], old.o[1] - o[1]) < 0.3 && Math.hypot(old.t[0] - t[0], old.t[1] - t[1]) < 0.3 ? old : { o, t }))
+      } else setHandleScr((old) => (old ? null : old))
       setLabels3d((old) => (old.length === lb.length && old.every((o, i) => Math.abs(o.x - lb[i].x) < 0.5 && Math.abs(o.y - lb[i].y) < 0.5 && o.text === lb[i].text && o.visible === lb[i].visible) ? old : lb))
     }
     loop()
@@ -190,6 +209,30 @@ export default function CadView({
   useEffect(() => {
     if (nav) ctx.current.controls.setConfig(nav)
   }, [nav])
+
+  const handleKey = handle ? `${handle.origin}|${handle.dir}|${handle.value}` : ''
+  useEffect(() => {
+    ctx.current.dirty = true
+  }, [handleKey])
+
+  // Ziehgriff: Zeiger auf die Linie origin + dir·t abbilden (nächster Punkt zum Sehstrahl), auf 1 mm rasten
+  function handleDrag(e) {
+    const hd = handleRef.current
+    const s = ctx.current
+    if (!hd || !dragRef.current) return
+    const ray = s.setRay(e.clientX, e.clientY).ray
+    const D = new THREE.Vector3(...hd.dir).normalize()
+    const B = ray.direction.clone().normalize()
+    const w0 = new THREE.Vector3(...hd.origin).sub(ray.origin)
+    const b = D.dot(B)
+    const den = 1 - b * b
+    if (den < 1e-6) return // Blick genau entlang der Richtung
+    let t = (b * B.dot(w0) - D.dot(w0)) / den
+    const st = e.shiftKey ? 0.1 : e.ctrlKey || e.altKey ? 10 : 1
+    t = Math.round(t / st) * st
+    t = Math.max(hd.min ?? st, t)
+    if (Math.abs(t - hd.value) > 1e-9) hd.onChange(Math.round(t * 1e6) / 1e6)
+  }
 
   // --- Körper -------------------------------------------------------------------------------------
   useEffect(() => {
@@ -1214,7 +1257,7 @@ export default function CadView({
   function applyDim(id, text) {
     const sk = sketch
     if (!sk) return
-    const v = Number(String(text).replace(',', '.'))
+    const v = num(text)
     if (!(v > 0) && !(v === 0 && sk.data.cons.find((c) => c.id === id)?.t === 'ang')) return sk.onMessage?.('Bitte eine Zahl > 0 eingeben')
     const s2 = structuredClone(sk.data)
     const c = s2.cons.find((x) => x.id === id)
@@ -1236,6 +1279,33 @@ export default function CadView({
             {l.text}
           </span>
         ))}
+      {handle && handleScr && (
+        <>
+          <svg className="cad-handle-line">
+            <line x1={handleScr.o[0]} y1={handleScr.o[1]} x2={handleScr.t[0]} y2={handleScr.t[1]} />
+          </svg>
+          <div
+            className={'cad-handle' + (dragRef.current ? ' drag' : '')}
+            style={{ left: handleScr.t[0], top: handleScr.t[1] }}
+            title="Ziehen: Tiefe in 1-mm-Schritten (Umschalt 0,1 mm, Strg 10 mm)"
+            onPointerDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              e.currentTarget.setPointerCapture(e.pointerId)
+              dragRef.current = true
+              ctx.current.controls.enabled = false
+            }}
+            onPointerMove={handleDrag}
+            onPointerUp={(e) => {
+              dragRef.current = null
+              ctx.current.controls.enabled = true
+              e.currentTarget.releasePointerCapture?.(e.pointerId)
+            }}
+          >
+            <span>{handle.label}</span>
+          </div>
+        </>
+      )}
       <div className="view-nav">
         <ViewCube cam={cam} onView={fitView} />
         <div className="view-buttons">
@@ -1301,16 +1371,15 @@ export default function CadView({
             setEdit(null)
           }}
         >
-          <input
+          <NumInput
             autoFocus
             value={edit.value}
-            onFocus={(e) => e.target.select()}
-            onChange={(e) => setEdit({ ...edit, value: e.target.value })}
+            onChange={(v) => setEdit((x) => (x ? { ...x, value: v } : x))}
             onBlur={() => {
               applyDim(edit.id, edit.value)
               setEdit(null)
             }}
-            onKeyDown={(e) => e.key === 'Escape' && setEdit(null)}
+            onEscape={() => setEdit(null)}
           />
         </form>
       )}

@@ -29,11 +29,66 @@ export const HOLE_SIZES = [
   { name: 'M20', d: 22, cb: 33, cbT: 20.6, cs: 41.5 },
 ]
 
+/// Zahl aus einem Eingabefeld; auch einfache Rechnungen wie `10+5`, `2*12`, `(40-8)/2` (Komma oder Punkt)
 export const num = (v) => {
   if (typeof v === 'number') return v
-  const n = Number(String(v ?? '').replace(',', '.'))
-  return Number.isFinite(n) ? n : NaN
+  const s = String(v ?? '').trim().replace(/,/g, '.')
+  const n = Number(s)
+  if (s !== '' && Number.isFinite(n)) return n
+  const r = evalExpr(s)
+  return Number.isFinite(r) ? r : NaN
 }
+
+/// + − × ÷ und Klammern, sonst nichts (kein eval)
+export function evalExpr(s) {
+  const t = s.replace(/\s+/g, '').replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-')
+  let i = 0
+  const peek = () => t[i]
+  const number = () => {
+    const m = /^\d*\.?\d+(?:e[+-]?\d+)?/i.exec(t.slice(i))
+    if (!m) throw new Error('Zahl erwartet')
+    i += m[0].length
+    return Number(m[0])
+  }
+  const factor = () => {
+    if (peek() === '-') {
+      i++
+      return -factor()
+    }
+    if (peek() === '+') {
+      i++
+      return factor()
+    }
+    if (peek() === '(') {
+      i++
+      const v = expr()
+      if (peek() !== ')') throw new Error(') fehlt')
+      i++
+      return v
+    }
+    return number()
+  }
+  const term = () => {
+    let v = factor()
+    while (peek() === '*' || peek() === '/') v = t[i++] === '*' ? v * factor() : v / factor()
+    return v
+  }
+  const expr = () => {
+    let v = term()
+    while (peek() === '+' || peek() === '-') v = t[i++] === '+' ? v + term() : v - term()
+    return v
+  }
+  try {
+    if (!t) return NaN
+    const v = expr()
+    return i === t.length ? v : NaN
+  } catch {
+    return NaN
+  }
+}
+
+/// Zahl für ein Eingabefeld (deutsches Komma, ohne überflüssige Stellen)
+export const fmtField = (v) => String(Math.round(v * 1e6) / 1e6).replace('.', ',')
 
 let counter = 1
 export const featureId = (features) => {

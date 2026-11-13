@@ -58,11 +58,13 @@ import {
   dirOf,
   axisOf,
   num,
+  fmtField,
 } from './features.js'
-import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure, kernelSketch, polyline } from './sketch.js'
+import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, isDim, measure, kernelSketch, polyline, basis, to3d } from './sketch.js'
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
 import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
+import NumInput from './NumInput.jsx'
 import { cadBuildView, kernelReady, newKernelWanted, oldKernelReason } from './kernel/client.js'
 
 const FEATURE_ICON = {
@@ -237,7 +239,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         run(isSk ? features.slice(0, edit.index) : list, { regionsOf }).then((r) => {
           if (!stop && r) setPreview(r)
         }),
-      isSk ? 0 : 250,
+      isSk ? 0 : newKernelWanted() ? 60 : 250,
     )
     return () => {
       stop = true
@@ -653,6 +655,31 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     return regionInfo.map((r) => ({ on: onOf(regionDraft, r), used: others.find((f) => onOf(f, r))?.name ?? null }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regionInfo, regionDraft, features, anyFill])
+  // Ziehgriff für die Extrusionstiefe: an der Mitte der gewählten Flächen, in Extrusionsrichtung
+  const dragHandle = useMemo(() => {
+    const d = edit?.draft
+    if (!d || d.type !== 'extrude' || d.through || pickFor) return null
+    const skF = features.find((f) => f.id === d.sketch && f.type === 'sketch')
+    if (!skF) return null
+    const depth = num(d.depth)
+    if (!Number.isFinite(depth)) return null
+    let pts = regionInfo && regionState ? regionInfo.filter((_, k) => regionState[k]?.on).map((r) => r.pt) : []
+    if (!pts.length) pts = Object.values(skF.sketch.pts).map((p) => [p.x, p.y])
+    if (!pts.length) return null
+    const c = [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length]
+    const B = basis(skF.sketch.plane)
+    const k = d.flip ? -1 : 1
+    const sym = !!d.symmetric
+    return {
+      origin: to3d(skF.sketch.plane, c),
+      dir: B.n.map((x) => x * k),
+      value: sym ? depth / 2 : depth,
+      min: sym ? 0.05 : 0.1,
+      label: `${fmtField(depth)} mm`,
+      onChange: (v) => setDraft({ depth: fmtField(sym ? 2 * v : v) }),
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edit?.draft, features, regionInfo, regionState, pickFor])
   // neues Feature, Skizze mit vielen Flächen: nichts vorwählen (sonst wird alles auf einmal extrudiert)
   const preChecked = useRef(null)
   useEffect(() => {
@@ -1215,6 +1242,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           sketches={bgSketches}
           onSketchPick={onSketchPick}
           preview={!!edit && ['extrude', 'revolve', 'hole'].includes(edit.draft.type) && edit.draft.mode === 'cut'}
+          handle={dragHandle}
         />
       </section>
     </div>
@@ -1245,12 +1273,12 @@ function SketchStatus({ info }) {
 
 // --- Dialoge der Features -------------------------------------------------------------------------
 
-function Num({ label, value, onChange, unit = 'mm', disabled }) {
+function Num({ label, value, onChange, unit = 'mm', disabled, min }) {
   return (
     <label className="field">
       <span>{label}</span>
       <div className="input-unit">
-        <input value={value} disabled={disabled} inputMode="decimal" onChange={(e) => onChange(e.target.value)} onFocus={(e) => e.target.select()} />
+        <NumInput value={value} disabled={disabled} onChange={onChange} min={min} />
         {unit && <em>{unit}</em>}
       </div>
     </label>
@@ -1964,7 +1992,7 @@ function PartsDialog({ parts, setParts, sketch, onCreate }) {
             />
             {r.kind === 'extrude' ? (
               <div className="input-unit mini">
-                <input value={r.depth} inputMode="decimal" title="Tiefe (symmetrisch zur Skizze)" onChange={(e) => upd(i, { depth: e.target.value })} />
+                <NumInput value={r.depth} title="Tiefe (symmetrisch zur Skizze) – Mausrad ±1 mm" onChange={(v) => upd(i, { depth: v })} />
                 <em>mm</em>
               </div>
             ) : (

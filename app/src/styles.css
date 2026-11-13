@@ -824,3 +824,12 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-kern { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .cad-kern.neu { background: #e3f5e8; color: var(--good); }
 .cad-kern.alt { background: var(--warn-bg); color: var(--warn-text); }
+
+/* Ziehgriff im 3D-Bild (z. B. Extrusionstiefe) */
+.cad-handle-line { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.cad-handle-line line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; }
+.cad-handle { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--accent);
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); cursor: grab; touch-action: none; z-index: 3; }
+.cad-handle.drag, .cad-handle:active { cursor: grabbing; }
+.cad-handle span { position: absolute; left: 22px; top: -3px; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--text);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; pointer-events: none; }
