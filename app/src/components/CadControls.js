@@ -7,6 +7,48 @@ import * as THREE from 'three'
 //  fu      – Fusion: ⇧ + Mitte drehen, Mitte verschieben, Rad zoomen
 //  classic – links drehen, rechts/Mitte (oder ⇧ + links) verschieben, Rad zoomen
 // Gedreht wird um den Punkt unter dem Zeiger, gezoomt zum Zeiger hin (abschaltbar).
+// --- Kamera: Parallelprojektion (Standard, wie in CAD-Programmen) oder Perspektive -------------------
+
+/// Kamera für Bauteilansichten. Parallelprojektion: Blick von vorne zeigt keine Seitenflächen.
+export function createViewCamera(ortho = true) {
+  if (!ortho) return new THREE.PerspectiveCamera(30, 1, 0.1, 1e6)
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, -1e6, 1e6)
+  cam.userData.halfH = 100
+  cam.userData.aspect = 1
+  return cam
+}
+
+/// Seitenverhältnis nach einer Größenänderung
+export function setCameraAspect(cam, aspect) {
+  if (cam.isOrthographicCamera) {
+    cam.userData.aspect = aspect
+    const h = cam.userData.halfH ?? 100
+    cam.top = h
+    cam.bottom = -h
+    cam.left = -h * aspect
+    cam.right = h * aspect
+  } else cam.aspect = aspect
+  cam.updateProjectionMatrix()
+}
+
+/// Weltmaß je Bildpunkt in der Tiefe `depth` (Abstand entlang der Blickrichtung)
+export function worldPerPx(cam, depth, heightPx) {
+  if (cam.isOrthographicCamera) return (cam.top - cam.bottom) / (cam.zoom || 1) / Math.max(heightPx, 1)
+  return (2 * Math.max(depth, 1e-6) * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))) / Math.max(heightPx, 1)
+}
+
+/// Kamera so einstellen, dass eine Kugel mit `radius` ins Bild passt → Abstand der Kamera zum Mittelpunkt
+export function fitCamera(cam, radius, margin = 1.15) {
+  if (cam.isOrthographicCamera) {
+    const aspect = cam.userData.aspect || 1
+    cam.userData.halfH = (radius * margin) / Math.min(aspect, 1)
+    cam.zoom = 1
+    setCameraAspect(cam, aspect)
+    return radius * 4
+  }
+  return (radius / Math.sin(THREE.MathUtils.degToRad(cam.fov / 2))) * margin
+}
+
 export class CadControls extends EventTarget {
   constructor(camera, dom, pickPoint) {
     super()
@@ -70,8 +112,14 @@ export class CadControls extends EventTarget {
   // Nah-/Fernebene an den Abstand anpassen, damit beim Heranzoomen nichts abgeschnitten wird
   updateClipping() {
     const dist = this.camera.position.distanceTo(this.target)
-    this.camera.near = Math.max(dist / 1000, 1e-4)
-    this.camera.far = dist * 1000 + 1
+    if (this.camera.isOrthographicCamera) {
+      // Parallelprojektion: auch hinter der Kamera liegende Teile zeigen (beim Drehen um einen Randpunkt)
+      this.camera.near = -dist * 50 - 1
+      this.camera.far = dist * 50 + 1
+    } else {
+      this.camera.near = Math.max(dist / 1000, 1e-4)
+      this.camera.far = dist * 1000 + 1
+    }
     this.camera.updateProjectionMatrix()
   }
 
@@ -176,7 +224,7 @@ export class CadControls extends EventTarget {
   pan(dx, dy, pivot) {
     const cam = this.camera
     const depth = pivot.clone().sub(cam.position).dot(cam.getWorldDirection(new THREE.Vector3()))
-    const perPx = (2 * depth * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))) / this.dom.clientHeight
+    const perPx = worldPerPx(cam, depth, this.dom.clientHeight)
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion)
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion)
     const shift = right.multiplyScalar(-dx * perPx).add(up.multiplyScalar(dy * perPx))
@@ -189,8 +237,19 @@ export class CadControls extends EventTarget {
     const p = this.config.zoomToCursor && e ? this.pointAt(e) : this.target.clone()
     const cam = this.camera
     const f = Math.max(Math.min(s, 0.9), -4)
-    cam.position.addScaledVector(p.clone().sub(cam.position), f)
-    this.target.addScaledVector(p.clone().sub(this.target), f)
+    if (cam.isOrthographicCamera) {
+      // Maßstab ändern; der Punkt unter dem Zeiger bleibt, wo er ist
+      const n = cam.getWorldDirection(new THREE.Vector3())
+      const d = p.clone().sub(this.target)
+      d.addScaledVector(n, -d.dot(n))
+      cam.position.addScaledVector(d, f)
+      this.target.addScaledVector(d, f)
+      cam.zoom = Math.min(Math.max(cam.zoom / (1 - f), 1e-4), 1e6)
+      cam.updateProjectionMatrix()
+    } else {
+      cam.position.addScaledVector(p.clone().sub(cam.position), f)
+      this.target.addScaledVector(p.clone().sub(this.target), f)
+    }
     this.changed()
   }
 

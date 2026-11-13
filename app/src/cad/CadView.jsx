@@ -1,7 +1,7 @@
 // 3D-Ansicht der Konstruktion: Körper, Hauptebenen, Auswahl von Flächen/Kanten und der Skizzierer.
 import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { CadControls } from '../components/CadControls.js'
+import { CadControls, createViewCamera, setCameraAspect, worldPerPx, fitCamera } from '../components/CadControls.js'
 import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
 import { IcHome, IcFit, IcCut } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
@@ -116,7 +116,7 @@ export default function CadView({
     renderer.setPixelRatio(window.devicePixelRatio)
     el.appendChild(renderer.domElement)
     const scene = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 1e6)
+    const camera = createViewCamera(true)
     camera.up.set(0, 0, 1)
     scene.add(camera)
     scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 1.6))
@@ -162,8 +162,7 @@ export default function CadView({
     const resize = () => {
       const { clientWidth: w, clientHeight: h } = el
       renderer.setSize(w, h)
-      camera.aspect = w / Math.max(h, 1)
-      camera.updateProjectionMatrix()
+      setCameraAspect(camera, w / Math.max(h, 1))
       s.dirty = true
     }
     const ro = new ResizeObserver(resize)
@@ -742,12 +741,31 @@ export default function CadView({
     ctx.current.dirty = true
   }, [sketch?.data, sketch?.plane])
 
+  // Testhilfe: Skizzenkoordinaten → Bildschirmpunkt (für automatische Browser-Tests)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.__sketchToScreen = (x, y) => {
+      const s = ctx.current
+      const plane = cb.current.sketch?.plane
+      if (!plane || !host.current) return null
+      const p = new THREE.Vector3(...to3d(plane, [x, y])).project(s.camera)
+      const r = host.current.getBoundingClientRect()
+      return [r.left + ((p.x + 1) / 2) * r.width, r.top + ((1 - p.y) / 2) * r.height]
+    }
+    window.__worldToScreen = (q) => {
+      const s = ctx.current
+      const p = new THREE.Vector3(...q).project(s.camera)
+      const r = host.current.getBoundingClientRect()
+      return [r.left + ((p.x + 1) / 2) * r.width, r.top + ((1 - p.y) / 2) * r.height]
+    }
+  }, [])
+
   // --- Hilfen: Pixelgröße, Ebenentreffer ----------------------------------------------------------
   function mmPerPx(plane) {
     const s = ctx.current
     const o = plane ? new THREE.Vector3(...plane.origin) : s.controls.target
     const depth = Math.max(o.clone().sub(s.camera.position).dot(s.camera.getWorldDirection(new THREE.Vector3())), 1e-6)
-    return (2 * depth * Math.tan(THREE.MathUtils.degToRad(s.camera.fov / 2))) / Math.max(host.current.clientHeight, 1)
+    return worldPerPx(s.camera, depth, host.current.clientHeight)
   }
   function onPlane(ev, plane) {
     const s = ctx.current
@@ -781,7 +799,8 @@ export default function CadView({
         let prev = null
         for (let k = 0; k < c.pts.length; k += 3) {
           v.set(c.pts[k], c.pts[k + 1], c.pts[k + 2])
-          const dist = v.distanceTo(s.camera.position)
+          // Tiefe entlang des Sehstrahls (gleich wie die Trefferentfernung, auch bei Parallelprojektion)
+          const dist = v.clone().sub(r.ray.origin).dot(r.ray.direction)
           v.project(s.camera)
           const cur = [((v.x + 1) / 2) * el.clientWidth, ((1 - v.y) / 2) * el.clientHeight, dist]
           if (prev) {
@@ -1315,7 +1334,7 @@ export default function CadView({
     const center = box.isEmpty() ? s.center.clone() : box.getCenter(new THREE.Vector3())
     const radius = box.isEmpty() ? s.size / 2 : Math.max(box.getSize(new THREE.Vector3()).length() / 2, 5)
     s.lastFit = radius
-    const dist = (radius / Math.sin(THREE.MathUtils.degToRad(s.camera.fov / 2))) * 1.15
+    const dist = fitCamera(s.camera, radius)
     s.controls.setView(center, new THREE.Vector3(...dir).normalize(), dist, new THREE.Vector3(...up))
     s.dirty = true
   }
@@ -1330,7 +1349,7 @@ export default function CadView({
     // Mitte des Bauteils in die Ebene projizieren
     const n = new THREE.Vector3(...b.n)
     let target = c.sub(n.clone().multiplyScalar(c.clone().sub(o).dot(n)))
-    let radius = Math.max(s.size / 2, 20)
+    let radius = Math.max(s.size / 2, 50)
     const ps = sk ? Object.values(sk.pts) : []
     if (ps.length) {
       // auf die Skizze einpassen
@@ -1339,10 +1358,10 @@ export default function CadView({
       const lo = [Math.min(...xs), Math.min(...ys)]
       const hi = [Math.max(...xs), Math.max(...ys)]
       target = new THREE.Vector3(...to3d(plane, [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2]))
-      const aspect = s.camera.aspect || 1
+      const aspect = s.camera.userData?.aspect ?? s.camera.aspect ?? 1
       radius = Math.max(((hi[0] - lo[0]) / 2) / Math.min(aspect, 1.6), (hi[1] - lo[1]) / 2, 10)
     }
-    const dist = (radius / Math.sin(THREE.MathUtils.degToRad(s.camera.fov / 2))) * 1.15
+    const dist = fitCamera(s.camera, radius)
     s.controls.setView(target, n, dist, new THREE.Vector3(...b.v))
     s.dirty = true
   }

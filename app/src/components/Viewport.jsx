@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { CadControls } from './CadControls.js'
+import { CadControls, createViewCamera, setCameraAspect, worldPerPx, fitCamera } from './CadControls.js'
 import { BANDS, cssBandColor, resultTexture } from '../colormap.js'
 import { IcHome, IcFit } from '../ui/icons.jsx'
 import { Ruler } from 'lucide-react'
@@ -190,7 +190,7 @@ export default function Viewport({
     el.appendChild(renderer.domElement)
 
     const scene = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 1e6)
+    const camera = createViewCamera(true)
     camera.up.set(0, 0, 1)
     scene.add(camera)
     scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 1.6))
@@ -309,7 +309,8 @@ export default function Viewport({
     scene.add(pivotMarker)
     controls.addEventListener('rotatestart', (e) => {
       pivotMarker.position.copy(e.pivot)
-      pivotMarker.scale.setScalar(camera.position.distanceTo(e.pivot) * 0.006)
+      const depth = e.pivot.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()))
+      pivotMarker.scale.setScalar(worldPerPx(camera, depth, el.clientHeight) * 5)
       pivotMarker.visible = true
       state.dirty = true
     })
@@ -341,8 +342,7 @@ export default function Viewport({
     const resize = () => {
       const { clientWidth: w, clientHeight: h } = el
       renderer.setSize(w, h)
-      camera.aspect = w / Math.max(h, 1)
-      camera.updateProjectionMatrix()
+      setCameraAspect(camera, w / Math.max(h, 1))
       state.dirty = true
     }
     const ro = new ResizeObserver(resize)
@@ -900,7 +900,7 @@ export default function Viewport({
     const [lo, hi] = mesh.bbox
     const center = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2)
     const radius = new THREE.Vector3(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]).length() / 2
-    const dist = (radius / Math.sin(THREE.MathUtils.degToRad(s.camera.fov / 2))) * 1.08
+    const dist = fitCamera(s.camera, radius, 1.08)
     const d = new THREE.Vector3(...dir).normalize()
     let u = up ? new THREE.Vector3(...up) : new THREE.Vector3(0, 0, 1)
     if (Math.abs(u.clone().normalize().dot(d)) > 0.98) u = new THREE.Vector3(0, 1, 0)

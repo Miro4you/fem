@@ -186,7 +186,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const [skInfo, setSkInfo] = useState(null)
   const [pickFor, setPickFor] = useState(null) // welches Feld gerade per Klick gewählt wird
   const [msg, setMsg] = useState(null)
-  const [showStd, setShowStd] = useState(true) // Hauptebenen immer zeigen
+  const [showStd, setShowStd] = useState(false) // Hauptebenen immer zeigen
   const [showSketches, setShowSketches] = useState(true) // fertige Skizzen im Hintergrund zeigen
   const [selSketch, setSelSketch] = useState(null) // im Bild angeklickte Skizze (im Verlauf markiert)
   const [showGlyphs, setShowGlyphs] = useState(null) // Bedingungszeichen: null = automatisch (bis 40)
