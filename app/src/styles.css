@@ -819,3 +819,8 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .dp-preview .dp-note { fill: none; stroke: var(--muted); opacity: 0.45; stroke-linecap: round; stroke-linejoin: round; }
 .dp-preview .dp-note-text { fill: var(--muted); opacity: 0.55; font-family: inherit; }
 .dp-preview .dp-open { fill: #e5484d; stroke: #fff; stroke-width: 0; }
+
+/* Anzeige, welcher Geometriekern rechnet */
+.cad-kern { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+.cad-kern.neu { background: #e3f5e8; color: var(--good); }
+.cad-kern.alt { background: var(--warn-bg); color: var(--warn-text); }

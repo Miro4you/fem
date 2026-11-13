@@ -72,9 +72,17 @@ export function kernelBuild(job) {
   })
 }
 
+/// Warum der alte Kern rechnet (null = neuer Kern zuständig)
+const NAMES = { pattern: 'Muster', mirror: 'Spiegeln', moveface: 'Fläche verschieben', removefaces: 'Flächen entfernen', refillet: 'Radius ändern', rehole: 'Bohrung ändern' }
+export function oldKernelReason(args) {
+  if (args.base) return 'Ausgangsteil aus STEP'
+  const missing = [...new Set((args.features ?? []).filter((f) => !SUPPORTED.has(f.type)).map((f) => NAMES[f.type] ?? f.type))]
+  return missing.length ? `${missing.join(', ')} kann der neue Kern noch nicht` : null
+}
+
 /// Für die Anzeige in der Konstruktion: neuer Kern, wenn eingeschaltet und alle Features unterstützt – sonst Server
 export function cadBuildView(args) {
-  const ok = newKernelWanted() && !args.base && !args.step && (args.features ?? []).every((f) => SUPPORTED.has(f.type))
+  const ok = newKernelWanted() && !args.step && !oldKernelReason(args)
   return ok ? kernelBuild(args) : api.cadBuild(args)
 }
 

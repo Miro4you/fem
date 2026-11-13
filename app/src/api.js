@@ -19,9 +19,18 @@ if (!isDesktop && typeof window !== 'undefined') {
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const k = hash.get('k')
   const dp = hash.get('draftpad')
+  // #kern=neu / #kern=alt: Geometriekern der Konstruktion wählen (wird gemerkt)
+  const kern = hash.get('kern')
+  if (kern === 'neu' || kern === 'alt') {
+    try {
+      localStorage.setItem('projekt-fem.kern', kern)
+    } catch {
+      /* ohne Speicher: bleibt beim alten Kern */
+    }
+  }
   if (k && /^[a-z0-9]+$/i.test(k)) storage.set(KEY_STORE, k)
   if (dp && /^[a-z0-9][a-z0-9-]{0,63}$/.test(dp)) startDraftpad = dp
-  if (k || dp) history.replaceState(null, '', window.location.pathname)
+  if (k || dp || kern) history.replaceState(null, '', window.location.pathname)
 }
 
 // eigene Sitzung je Browser-Tab (eigenes Modell auf dem Server)

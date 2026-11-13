@@ -63,7 +63,7 @@ import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, 
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
 import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
-import { cadBuildView, kernelReady, newKernelWanted } from './kernel/client.js'
+import { cadBuildView, kernelReady, newKernelWanted, oldKernelReason } from './kernel/client.js'
 
 const FEATURE_ICON = {
   sketch: Pencil,
@@ -938,6 +938,14 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             <section className="section">
               <h2>
                 <Hash size={15} /> Verlauf
+                {newKernelWanted() && (
+                  <span
+                    className={'cad-kern ' + (built?.kernel === 'neu' ? 'neu' : 'alt')}
+                    title={built?.kernel === 'neu' ? 'Neuer Geometriekern im Browser (zurück: #kern=alt an der Adresse)' : (oldKernelReason({ base: cad.base, features: kernelFeatures(features) }) ?? '')}
+                  >
+                    {built?.kernel === 'neu' ? `neuer Kern · ${built.timing?.total ?? '–'} ms` : 'alter Kern'}
+                  </span>
+                )}
               </h2>
               {cad.base && (
                 <div className="cad-feat base" title={cad.base}>
