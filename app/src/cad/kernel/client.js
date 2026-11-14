@@ -115,3 +115,12 @@ export async function cadBuildStep(args) {
   const saved = await api.cadBuild({ features: [], step: args.step, step_text: text, tess: false })
   return { ...r, step: saved.step }
 }
+
+/// STL-Datei (Blob) der Konstruktion für den 3D-Druck
+export async function cadBuildStl(args) {
+  const r = await kernelBuild({ ...args, stl: true, tess: false })
+  const bad = r.status?.find((x) => !x.ok && !x.skipped)
+  if (bad) throw new Error(bad.error)
+  if (!r.stlBlob) throw new Error('Die Konstruktion hat noch keinen Körper')
+  return r.stlBlob
+}

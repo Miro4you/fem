@@ -1,7 +1,7 @@
 // Neuer Geometriekern: OpenCASCADE (WebAssembly, über replicad) – führt die Feature-Liste aus wie cad.py
 // und liefert dieselbe Antwort ({ status, volume, bodies, bodies_info, tess, regions }).
 // Läuft im Web Worker (worker.js) und in Node (Tests). Vorher: setOC(oc) aus replicad.
-import { getOC, cast, makeLine, makeCircle, makeThreePointArc, makePolygon, basicFaceExtrusion, revolution, measureArea, measureShapeVolumeProperties, measureDistanceBetween, exportSTEP, Vector, assembleWire, genericSweep, loft } from 'replicad'
+import { makeCompound, getOC, cast, makeLine, makeCircle, makeThreePointArc, makePolygon, basicFaceExtrusion, revolution, measureArea, measureShapeVolumeProperties, measureDistanceBetween, exportSTEP, Vector, assembleWire, genericSweep, loft } from 'replicad'
 import { arcAngles, entRadius, pruneOpen, crossings, insidePoly, interiorPoint, inFills, chainLoops } from './geom2d.js'
 
 export class Problem extends Error {}
@@ -1740,6 +1740,11 @@ export function build(job) {
   if (job.step && model.bodies.length && !failed) {
     let unnamed = 0
     result.stepBlob = exportSTEP(model.bodies.map((b) => ({ shape: b.shape, name: b.name ?? `Körper ${++unnamed}` })))
+  }
+  // STL für den 3D-Druck (alle Körper, binär, fein genug für Radien)
+  if (job.stl && model.bodies.length && !failed) {
+    const all = model.bodies.length === 1 ? model.bodies[0].shape : makeCompound(model.shapes)
+    result.stlBlob = all.blobSTL({ binary: true, tolerance: Number(job.stlTol) || 0.02, angularTolerance: 0.15 })
   }
   if (job.tess !== false) result.tess = model.bodies.length ? tessellate(model, Number(job.quality) || 1) : null
   result.timing = { build: Math.round(tBuild - t0), total: Math.round(performance.now() - t0), cached: start }

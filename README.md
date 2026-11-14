@@ -204,12 +204,13 @@ Tastenkürzel.
    **Muster**, **Spiegeln**, **Schale**; im Menü „Mehr“: *Formen* – Rippe, Sweep, Loft; *Ändern* – Fläche verschieben,
    **Flächen entfernen** (Bohrung, Senkung, gerade Verrundung, Fase), **Formschräge**; *Körper und Baugruppe* –
    **Boolesch**, **Körper verschieben/drehen** (auch als Kopie), **Teil einfügen** (STEP), **Ausrichten** (Fläche auf
-   Fläche, Bolzen in Bohrung). Beim importierten Teil **Radius/Bohrung ändern**. Die **Körperliste** zeigt alle Körper
+   Fläche, Bolzen in Bohrung), **Normteil** (Zylinderschraube ISO 4762, Mutter ISO 4032, Scheibe ISO 7089 – direkt in
+   eine Bohrung setzbar). Beim importierten Teil **Radius/Bohrung ändern**. Die **Körperliste** zeigt alle Körper
    (getönt), Doppelklick benennt um, das Auge blendet aus; überschneiden sich Körper, warnt das Übernehmen.
 5. **Verlauf** links: Doppelklick = bearbeiten, Rechtsklick = Umbenennen, Duplizieren, Nach oben/unten, Unterdrücken,
    **Bis hier zurückrollen** (neue Features kommen an die Marke), Löschen. Fehler stehen rot am Feature.
 6. **Messen**, **Schnittansicht** und **Darstellung** (mit/ohne Kanten, durchsichtig, Drahtgitter) rechts oben im Bild; **„In die Rechnung übernehmen“** baut das Teil als STEP,
-   vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP speichern“** exportiert es.
+   vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP“** bzw. **„Als STL“** (3D-Druck) exportiert es.
 
 **Aus Draftpad:** Startseite „Aus Draftpad“ oder Knopf „Draftpad“ in der Konstruktion öffnet die
 **Online-Ablage von Draftpad** (Adresse des Draftpad-Servers einmal eintragen, z. B. der Raspberry Pi; optional mit

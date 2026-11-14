@@ -386,6 +386,7 @@ selbst starten.
 | 18e.70 | Mehrere Körper; Knopf „Darstellung“ rechts oben im Bild mehrfach klicken | Körper leicht unterschiedlich getönt (Farbpunkt in der Körperliste passt); Darstellung wechselt: mit Kanten → ohne Kanten → durchsichtig → Drahtgitter (wird gemerkt) | [ ] |
 | 18e.71 | Skizze: Kreis wählen, Strg+C, Maus an andere Stelle, Strg+V (auch in einer anderen Skizze) | Kopie erscheint an der Maus und ist gewählt (gleich verschiebbar/bemaßbar) | [ ] |
 | 18e.72 | Platte mit Bohrung Ø9; Mehr › Normteil › Schraube M8 × 30, „In Bohrung“ › Bohrung anklicken; danach Mutter M8 mit „andere Seite“ | Schraube steht mit dem Kopf (Innensechskant) auf der oberen Öffnung, Schaft durch die Bohrung; Mutter sitzt unten; Namen „Schraube M8×30 ISO 4762“, „Mutter M8 ISO 4032“ | [ ] |
+| 18e.73 | Konstruktion › „Als STL“ | binäre STL-Datei mit allen Körpern (im Slicer öffnen: Maße wie im CAD) | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

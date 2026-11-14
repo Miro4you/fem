@@ -54,7 +54,7 @@ import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
 import NumInput from './NumInput.jsx'
 import * as I from './icons.jsx'
 import { describe as describePick, between as betweenPicks } from '../measure.js'
-import { cadBuildView, kernelReady } from './kernel/client.js'
+import { cadBuildView, cadBuildStl, kernelReady } from './kernel/client.js'
 
 const FEATURE_ICON = {
   sketch: I.IcSketch,
@@ -1690,9 +1690,26 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               <button className={'btn wide' + (!appliedNow && hasBody ? ' primary' : '')} disabled={!hasBody || busy || building || errors.length > 0 || rollIdx < features.length} onClick={() => onApply(builtKey)}>
                 <Check size={15} /> {appliedNow ? 'Übernommen' : 'In die Rechnung übernehmen'}
               </button>
-              <button className="btn wide" disabled={!hasBody || busy} onClick={onExport}>
-                <Download size={15} /> Als STEP speichern
-              </button>
+              <div className="grid2">
+                <button className="btn wide" disabled={!hasBody || busy} onClick={onExport}>
+                  <Download size={15} /> Als STEP
+                </button>
+                <button
+                  className="btn wide"
+                  disabled={!hasBody || busy}
+                  title="Für den 3D-Druck (Slicer): alle Körper als binäre STL-Datei"
+                  onClick={async () => {
+                    try {
+                      const blob = await cadBuildStl({ base: cad.base ?? null, features: kernelFeatures(live) })
+                      await api.saveBlob(blob, 'Konstruktion.stl', 'STL-Netz', 'stl')
+                    } catch (e) {
+                      onError(String(e?.message ?? e))
+                    }
+                  }}
+                >
+                  <Download size={15} /> Als STL
+                </button>
+              </div>
             </section>
           </>
         )}

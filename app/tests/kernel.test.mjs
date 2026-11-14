@@ -503,3 +503,13 @@ test('Normteil in Bohrung: Schraube sitzt mit dem Kopf auf der Öffnung', () => 
     else assert.ok(Math.abs(Math.max(...zs) - 18) < 1e-6 && Math.abs(Math.min(...zs) + 20) < 1e-6, 'Kopf oben auf der Platte, Schaft nach unten')
   }
 })
+
+test('STL für den 3D-Druck', async () => {
+  clearCache()
+  const r = build({ features: [{ id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 20, 10) }, { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 5, dir: 1 }], stl: true, tess: false })
+  allOk(r)
+  const buf = new Uint8Array(await r.stlBlob.arrayBuffer())
+  const n = new DataView(buf.buffer).getUint32(80, true)
+  assert.equal(buf.length, 84 + 50 * n, 'binäres STL')
+  assert.ok(n >= 12, `${n} Dreiecke`)
+})
