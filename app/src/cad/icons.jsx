@@ -404,3 +404,11 @@ export const IcMore = (p) => (
     <circle cx="18" cy="12" r="1.4" className={F} />
   </Svg>
 )
+
+/// Darstellung (Symbol je Modus)
+export const IcDisplay = ({ mode = 'edges', ...p }) => (
+  <Svg {...p}>
+    <path d="M12 3.5 20 8v8l-8 4.5L4 16V8z" className={mode === 'wire' ? undefined : F} strokeDasharray={mode === 'xray' ? '2 2' : undefined} />
+    {mode !== 'shaded' && <path d="M4 8l8 4.5L20 8M12 12.5V20.5" className={mode === 'wire' ? A : undefined} />}
+  </Svg>
+)

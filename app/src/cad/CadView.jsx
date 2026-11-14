@@ -7,7 +7,7 @@ import { IcHome, IcFit } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
 import { lengthStep, snapFrom, snapRect, snapRadius, snapRectCenter, snapPolygon, slotWidth, measureText, parseTyped, TYPE_HINT } from './sketchInput.js'
 import { filletCorner, filletPreview, suggestFilletRadius, cornerLines, addSlot, addPolygon, addCenterRect, mirrorEnts, tangentAt, tangentArc } from './sketchTools.js'
-import { IcSection as IcSectionView, IcMeasure as IcMeasureTool } from './icons.jsx'
+import { IcSection as IcSectionView, IcMeasure as IcMeasureTool, IcDisplay } from './icons.jsx'
 import { num } from './features.js'
 import {
   basis,
@@ -38,7 +38,16 @@ import {
 
 const PLANE_COLORS = { XY: 0x3b82f6, XZ: 0x16a34a, YZ: 0xdc2626 }
 const PLANE_NAMES = { XY: 'Oben', XZ: 'Vorne', YZ: 'Rechts' }
-const BODY = new THREE.Color('#b9c0c8')
+// weitere Körper leicht getönt (Baugruppen auseinanderhalten); Körper 1 bleibt grau
+export const BODY_TINT_HEX = ['#b9c0c8', '#a7bfd6', '#cbbd9f', '#a9c9ad', '#c9b1c4', '#c4c79d', '#a3c8c6', '#d0b0a6']
+const BODY_TINTS = BODY_TINT_HEX.map((x) => new THREE.Color(x))
+// Darstellung: schattiert mit Kanten, schattiert, durchsichtig, Drahtgitter
+const DISPLAY = [
+  ['edges', 'Schattiert mit Kanten'],
+  ['shaded', 'Schattiert ohne Kanten'],
+  ['xray', 'Durchsichtig'],
+  ['wire', 'Nur Kanten (Drahtgitter)'],
+]
 const HOVER = new THREE.Color('#ffffff')
 const SELECT = new THREE.Color('#f59e0b')
 const FACE_PICK = new THREE.Color('#60a5fa')
@@ -103,6 +112,23 @@ export default function CadView({
   const [section, setSection] = useState({ on: false, axis: 0, pos: 50, flip: false }) // Schnittansicht
   const [typing, setTyping] = useState(null) // eingetippter Wert beim Zeichnen { text, x, y, tool }
   const [boxRect, setBoxRect] = useState(null) // Auswahlrahmen { x, y, w, h, cross }
+  const [display, setDisplay] = useState(() => {
+    try {
+      return localStorage.getItem('projekt-fem.cad-darstellung') || 'edges'
+    } catch {
+      return 'edges'
+    }
+  })
+  const nextDisplay = () => {
+    const i = DISPLAY.findIndex(([k]) => k === display)
+    const k = DISPLAY[(i + 1) % DISPLAY.length][0]
+    setDisplay(k)
+    try {
+      localStorage.setItem('projekt-fem.cad-darstellung', k)
+    } catch {
+      /* ohne Speicher */
+    }
+  }
   const [handleScr, setHandleScr] = useState(null) // Ziehgriff auf dem Bild { o:[x,y], t:[x,y] }
   const handleRef = useRef(handle)
   handleRef.current = handle
@@ -384,17 +410,21 @@ export default function CadView({
     const col = s.surf.geometry.attributes.color.array
     const c = new THREE.Color()
     const faceSel = selected?.faces ?? new Set()
+    const bodyOf = new Map((tess.surfaces ?? []).map((x) => [x.tag, x.body ?? 0]))
     for (let t = 0; t < tess.tri_surface.length; t++) {
       const tag = tess.tri_surface[t]
-      c.copy(BODY)
+      c.copy(BODY_TINTS[(bodyOf.get(tag) ?? 0) % BODY_TINTS.length])
       if (faceSel.has(tag)) c.copy(SELECT)
       else if (hover?.face === tag) c.lerp(pick?.faces || pick?.planar || pick?.cyl ? FACE_PICK : HOVER, 0.45)
       for (let k = 0; k < 3; k++) c.toArray(col, 9 * t + 3 * k)
     }
     s.surf.geometry.attributes.color.needsUpdate = true
-    s.surf.material.transparent = !!preview
-    s.surf.material.opacity = preview ? 0.35 : 1
-    s.surf.material.depthWrite = !preview
+    const see = !!preview || display === 'xray'
+    s.surf.material.transparent = see
+    s.surf.material.opacity = see ? 0.35 : 1
+    s.surf.material.depthWrite = !see
+    s.surf.visible = display !== 'wire'
+    if (s.edges) s.edges.visible = display !== 'shaded'
     s.surf.material.needsUpdate = true
     s.hi.traverse((o) => (o.geometry?.dispose(), o.material?.dispose()))
     s.hi.clear()
@@ -410,7 +440,7 @@ export default function CadView({
       s.hi.add(line)
     }
     s.dirty = true
-  }, [tess, selected, hover, pick, preview, pickEdges])
+  }, [tess, selected, hover, pick, preview, pickEdges, display])
 
   // --- Achsen am Ursprung (immer sichtbar) -----------------------------------------------------------
   useEffect(() => {
@@ -1960,6 +1990,11 @@ export default function CadView({
           <button className="icon-btn" title="Alles zeigen" aria-label="Alles zeigen" onClick={() => fitAll(cam[2], cam[1])}>
             <IcFit />
           </button>
+          {tess?.triangles?.length > 0 && (
+            <button className={'icon-btn' + (display !== 'edges' ? ' on' : '')} title={`Darstellung: ${DISPLAY.find(([k]) => k === display)?.[1]} – klicken zum Wechseln`} aria-label="Darstellung wechseln" onClick={nextDisplay}>
+              <IcDisplay mode={display} />
+            </button>
+          )}
           {tess?.triangles?.length > 0 && !sketch && (
             <button className={'icon-btn' + (section.on ? ' on' : '')} title="Schnittansicht" aria-label="Schnittansicht" onClick={() => setSection((x) => ({ ...x, on: !x.on }))}>
               <IcSectionView size={18} />

@@ -27,7 +27,7 @@ import {
   Unlink,
   Keyboard,
 } from 'lucide-react'
-import CadView, { fmtN } from './CadView.jsx'
+import CadView, { fmtN, BODY_TINT_HEX } from './CadView.jsx'
 import * as api from '../api.js'
 import {
   FEATURE_LABEL,
@@ -1608,7 +1608,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     onMouseLeave={() => setHotBody(null)}
                     title="Überfahren = im Bild markieren"
                   >
-                    <Boxes size={14} />
+                    <span className="cad-body-dot" style={{ background: BODY_TINT_HEX[i % BODY_TINT_HEX.length] }} />
                     {renaming === `body:${i}` ? (
                       <input
                         className="cad-feat-rename"
