@@ -241,6 +241,7 @@ export default function App() {
   const [cad, setCad] = useState({ base: null, features: [] })
   const [cadApplied, setCadApplied] = useState(null) // Stand (Schlüssel), der im Rechenmodell ist
   const keepCadRef = useRef(false)
+  const overlapWarnRef = useRef(null) // Hinweis „Körper überschneiden sich“ beim Übernehmen
   const [cadDraftpad, setCadDraftpad] = useState(null) // Draftpad-Zeichnung, die als Skizze übernommen werden soll
   const [cadLib, setCadLib] = useState(0) // Draftpad-Bibliothek in der Konstruktion öffnen
   // aus Draftpad „In Projekt-FEM nachweisen“: neues Teil mit der Zeichnung (verknüpft)
@@ -1046,6 +1047,12 @@ export default function App() {
         const bad = r.status.find((x) => !x.ok && !x.skipped)
         if (bad) throw new Error(bad.error)
         if (!r.step) throw new Error('Die Konstruktion hat noch keinen Körper')
+        // überschneidende Körper: die Vernetzung trennt die Überschneidung als eigene Teile ab
+        const overlapWarn = (r.overlaps ?? []).map((o) => {
+          const n = (i) => r.bodies_info?.[i]?.name ?? `Körper ${i + 1}`
+          return `„${n(o.a)}“ und „${n(o.b)}“ überschneiden sich (${fmt(o.volume / 1000)} cm³) – in der Rechnung wird daraus ein eigenes Teil; besser mit „Ausrichten“/„Körper verschieben“ trennen oder „Boolesch“ vereinigen`
+        })
+        overlapWarnRef.current = overlapWarn
         if (cad.base) warn = await swapGeometry(r.step, r.step)
         else if (cadApplied == null || !mesh) {
           // erstes Mal: wie ein neu geöffnetes Teil
@@ -1064,6 +1071,8 @@ export default function App() {
         }
       }
       setCadApplied(key)
+      warn = [...(overlapWarnRef.current ?? []), ...warn]
+      overlapWarnRef.current = null
       setNotice(warn.length ? warn.join(' · ') : 'Konstruktion übernommen – Lager und Lasten im Reiter Modell festlegen bzw. prüfen')
     } catch (e) {
       keepCadRef.current = false

@@ -1547,6 +1547,24 @@ export function build(job) {
       return { name: b.name ?? `Körper ${++unnamed}`, volume: p.volume, center: p.center, src: b.src ?? null, named: !!b.name }
     })
   }
+  // beim Übernehmen: sich überschneidende Körper melden (die Rechnung machte daraus eigene Teile)
+  if (job.step && model.bodies.length > 1 && model.bodies.length <= 30 && !failed) {
+    const boxes = model.bodies.map((b) => bboxOf([b.shape]))
+    const over = []
+    for (let i = 0; i < model.bodies.length; i++)
+      for (let j = i + 1; j < model.bodies.length; j++) {
+        if (!boxesTouch(boxes[i], boxes[j], 0)) continue
+        let v = 0
+        try {
+          v = solidsOf(bool('common', model.bodies[i].shape, model.bodies[j].shape)).reduce((a, x) => a + volumeOf(x), 0)
+        } catch {
+          v = 0
+        }
+        const vmin = Math.min(massOf(model.bodies[i]).volume, massOf(model.bodies[j]).volume)
+        if (v > 1e-6 * vmin) over.push({ a: i, b: j, volume: v })
+      }
+    if (over.length) result.overlaps = over
+  }
   if (job.step && model.bodies.length && !failed) {
     let unnamed = 0
     result.stepBlob = exportSTEP(model.bodies.map((b) => ({ shape: b.shape, name: b.name ?? `Körper ${++unnamed}` })))
