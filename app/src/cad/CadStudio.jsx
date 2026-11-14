@@ -256,6 +256,10 @@ function coaxialFaces(tess, face) {
 
 export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied, busy, onError, incoming, openLibrary }) {
   const features = cad.features
+  // Zurückrollen: nur die Features bis zur Marke wirken (neue kommen dort hinein)
+  const [rollTo, setRollTo] = useState(null)
+  const rollIdx = rollTo == null ? features.length : Math.min(rollTo, features.length)
+  const live = useMemo(() => features.slice(0, rollIdx), [features, rollIdx])
   const [built, setBuilt] = useState(null) // Ergebnis aller Features
   const [building, setBuilding] = useState(false)
   const [edit, setEdit] = useState(null) // { id, draft, isNew, index }
@@ -318,14 +322,15 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   }, [])
 
   const builtKey = JSON.stringify(kernelFeatures(features)) + (cad.base ?? '')
+  const viewKey = rollIdx < features.length ? JSON.stringify(kernelFeatures(live)) + (cad.base ?? '') + '|roll' : builtKey
   useEffect(() => {
     let stop = false
-    run(features).then((r) => !stop && r && setBuilt(r))
+    run(live).then((r) => !stop && r && setBuilt(r))
     return () => {
       stop = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builtKey])
+  }, [viewKey])
 
   const status = useMemo(() => new Map((built?.status ?? []).map((s) => [s.id, s])), [built])
 
@@ -380,14 +385,14 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (face) {
       const plane = planeFromFace(face)
       draft.sketch = newSketch(plane, { face: faceRef(face) })
-      setEdit({ id, draft, isNew: true, index: features.length })
+      setEdit({ id, draft, isNew: true, index: rollIdx })
       setSkInfo({ ok: true, dof: 0, free: new Set(), redundant: 0 })
       setPickFor(null)
       setTool(firstTool)
       setTimeout(() => viewRef.current?.lookAt(plane), 0)
     } else {
       draft.sketch = null
-      setEdit({ id, draft, isNew: true, index: features.length })
+      setEdit({ id, draft, isNew: true, index: rollIdx })
       setTool('select')
       setPickFor('plane')
     }
@@ -411,7 +416,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if ((type === 'fillet' || type === 'chamfer') && pre.edges.length) draft.edges = pre.edges
     if (['shell', 'removefaces'].includes(type) && pre.faces.length) draft.faces = pre.faces
     if (type === 'moveface' && pre.faces.length) draft.faces = pre.faces.filter((f) => f.kind === 'plane')
-    const lastSketch = [...features].reverse().find((f) => f.type === 'sketch' && !f.suppressed)
+    const lastSketch = [...live].reverse().find((f) => f.type === 'sketch' && !f.suppressed)
     if (['extrude', 'revolve', 'hole'].includes(type) && lastSketch) draft.sketch = lastSketch.id
     // Skizze schon von einem anderen Feature benutzt: nichts vorwählen, Flächen im Bild anklicken
     if ((type === 'extrude' || type === 'revolve') && lastSketch && features.some((f) => (f.type === 'extrude' || f.type === 'revolve') && f.sketch === lastSketch.id && !f.suppressed))
@@ -421,7 +426,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       draft.axis = line?.id ?? null
     }
     if (type === 'hole' && lastSketch) draft.flip = false
-    setEdit({ id, draft, isNew: true, index: features.length })
+    setEdit({ id, draft, isNew: true, index: rollIdx })
     setSel(emptySel)
     setTool('select')
     skHist.current = { undo: [], redo: [] }
@@ -477,8 +482,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (d.type === 'sketch' && !d.sketch) return cancel()
     const prob = problemOf(d, [...features.slice(0, edit.index), d])
     if (prob && d.type !== 'sketch') return note(prob)
-    const list = edit.isNew ? [...features, d] : features.map((f) => (f.id === d.id ? d : f))
+    const list = edit.isNew ? [...features.slice(0, edit.index), d, ...features.slice(edit.index)] : features.map((f) => (f.id === d.id ? d : f))
     commitFeatures(list)
+    if (edit.isNew && rollTo != null) setRollTo(edit.index + 1)
     if (d.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
     // Skizze mit Schraffuren (Draftpad), noch nicht benutzt: Teile vorschlagen
     if (d.type === 'sketch' && d.sketch?.fills?.length && !list.some((f) => f.sketch === d.id && f.type !== 'sketch')) openParts(d)
@@ -549,7 +555,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const removeFeature = (f) => {
     const users = features.filter((g) => g.sketch === f.id || (Array.isArray(g.features) && g.features.includes(f.id)))
     if (users.length) return note(`„${f.name}“ wird von ${users.map((u) => `„${u.name}“`).join(', ')} benutzt – erst dort ändern`)
+    const k = features.findIndex((g) => g.id === f.id)
     commitFeatures(features.filter((g) => g.id !== f.id))
+    if (rollTo != null && k < rollTo) setRollTo(rollTo - 1 >= features.length - 1 ? null : rollTo - 1)
   }
 
   // --- Skizze bearbeiten ----------------------------------------------------------------------------
@@ -878,7 +886,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       setBefore(null)
       return
     }
-    if (edit.index === features.length && built) {
+    if (edit.index === rollIdx && built) {
       setBefore(built)
       return
     }
@@ -1347,10 +1355,25 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 const Icon = FEATURE_ICON[f.type] ?? Info
                 const st = status.get(f.id)
                 const prob = problemOf(f, features)
-                return (
+                const marker = rollIdx < features.length && i === rollIdx && (
+                  <div key="roll" className="cad-roll" title="Zurückgerollt: das Bild zeigt den Stand bis hier, neue Features kommen an diese Stelle">
+                    <span>Stand bis hier</span>
+                    <button className="btn small" onClick={() => setRollTo(rollIdx - 1 > 0 ? rollIdx - 1 : 0)} disabled={rollIdx === 0} title="Marke ein Feature nach oben">
+                      ▲
+                    </button>
+                    <button className="btn small" onClick={() => setRollTo(rollIdx + 1 >= features.length ? null : rollIdx + 1)} title="Marke ein Feature nach unten">
+                      ▼
+                    </button>
+                    <button className="btn small" onClick={() => setRollTo(null)}>
+                      Ans Ende
+                    </button>
+                  </div>
+                )
+                return [
+                  marker,
                   <div
                     key={f.id}
-                    className={'cad-feat' + (f.suppressed ? ' off' : '') + (st && !st.ok && !st.skipped ? ' bad' : '') + (st?.skipped ? ' skipped' : '') + (selSketch === f.id ? ' on' : '')}
+                    className={'cad-feat' + (i >= rollIdx ? ' rolled' : '') + (f.suppressed ? ' off' : '') + (st && !st.ok && !st.skipped ? ' bad' : '') + (st?.skipped ? ' skipped' : '') + (selSketch === f.id ? ' on' : '')}
                     onDoubleClick={() => openEdit(f)}
                     onContextMenu={(e) => {
                       e.preventDefault()
@@ -1409,8 +1432,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     <button className="icon-btn" title="Löschen" onClick={() => removeFeature(f)}>
                       <Trash2 size={13} />
                     </button>
-                  </div>
-                )
+                  </div>,
+                ]
               })}
               {errors.map((e) => (
                 <div key={e.id} className="notice warn small">
@@ -1436,7 +1459,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                   : 'Noch kein Körper.'}{' '}
                 {appliedNow ? 'Dieser Stand ist im Modell.' : hasBody ? 'Übernehmen vernetzt das Teil; Lager und Lasten werden auf die neuen Flächen übertragen.' : ''}
               </p>
-              <button className={'btn wide' + (!appliedNow && hasBody ? ' primary' : '')} disabled={!hasBody || busy || building || errors.length > 0} onClick={() => onApply(builtKey)}>
+              {rollIdx < features.length && <p className="hint">Zurückgerollt – zum Übernehmen die Marke im Verlauf „Ans Ende“ setzen.</p>}
+              <button className={'btn wide' + (!appliedNow && hasBody ? ' primary' : '')} disabled={!hasBody || busy || building || errors.length > 0 || rollIdx < features.length} onClick={() => onApply(builtKey)}>
                 <Check size={15} /> {appliedNow ? 'Übernommen' : 'In die Rechnung übernehmen'}
               </button>
               <button className="btn wide" disabled={!hasBody || busy} onClick={onExport}>
@@ -1612,6 +1636,13 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             items={[
               ['Bearbeiten', () => openEdit(ctxMenu.f)],
               ['Umbenennen', () => setRenaming(ctxMenu.f.id)],
+              [
+                'Bis hier zurückrollen',
+                () => {
+                  const k = features.findIndex((g) => g.id === ctxMenu.f.id)
+                  setRollTo(k + 1 >= features.length ? null : k + 1)
+                },
+              ],
               ['Nach oben', () => moveFeature(ctxMenu.f, -1)],
               ['Nach unten', () => moveFeature(ctxMenu.f, 1)],
               [ctxMenu.f.suppressed ? 'Wieder einschalten' : 'Unterdrücken', () => commitFeatures(features.map((g) => (g.id === ctxMenu.f.id ? { ...g, suppressed: !g.suppressed } : g)))],
