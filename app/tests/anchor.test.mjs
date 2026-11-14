@@ -77,3 +77,21 @@ test('Fase an der senkrechten Ecke folgt der Ecke, wenn die Platte breiter wird'
   const vol = 150 * 40 * 10 - 2 * Math.PI * 16 * 10 - 0.5 * 9 * 10
   assert.ok(Math.abs(r.volume - vol) < 1e-6 * vol, `${r.volume} statt ${vol}`)
 })
+
+test('Verrundung an der oberen Kante bleibt oben, wenn die Platte dicker wird (Tiefe 10 → 25)', () => {
+  clearCache()
+  const { features } = model()
+  // obere Längskante bei y = 40 (Mitte über der Linienmitte, Höhe 10 = Deckel)
+  const edge = { mid: [50, 40, 10], dir: [1, 0, 0], kind: 'line', length: 100 }
+  const fil = anchorRefs({ id: 3, type: 'fillet', name: 'Verrunden 1', edges: [edge], radius: '4' }, features)
+  assert.equal(fil.edges[0].anchor.x, 2)
+  const all = [...features, fil]
+  all[1] = { ...all[1], depth: '25' }
+  const r = build({ features: kernelFeatures(all) })
+  assert.ok(r.status.every((s) => s.ok), JSON.stringify(r.status))
+  const cyl = r.tess.surfaces.filter((s) => s.kind === 'cylinder' && Math.abs(s.radius - 4) < 1e-6 && !s.hole)
+  assert.equal(cyl.length, 1)
+  assert.ok(cyl[0].center[2] > 20, `Rundung bei z = ${cyl[0].center[2]} (soll oben bei 25)`)
+  const vol = 100 * 40 * 25 - 2 * Math.PI * 16 * 25 - (1 - Math.PI / 4) * 16 * 100
+  assert.ok(Math.abs(r.volume - vol) < 1e-6 * vol, `${r.volume} statt ${vol}`)
+})

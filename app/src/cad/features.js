@@ -1,5 +1,5 @@
 // Features der Konstruktion: Bezeichnungen, Vorgaben, Umwandlung für den Kern.
-import { kernelSketch, newSketch, STD_PLANES, addPoint, addEnt, addCon, basis, to2d, to3d } from './sketch.js'
+import { kernelSketch, newSketch, STD_PLANES, addPoint, addEnt, addCon, basis, to2d, to3d, v3 } from './sketch.js'
 
 export const FEATURE_LABEL = {
   sketch: 'Skizze',
@@ -322,10 +322,22 @@ export function anchorFor(features, p) {
       if (!at) continue
       const [x, y] = to2d(sk.plane, at)
       const dist = Math.hypot(x - q[0], y - q[1])
-      if (dist < ANCHOR_TOL && (!best || dist <= best.dist)) best = { dist, a: { s: f.id, ...c, at } }
+      if (dist < ANCHOR_TOL && (!best || dist <= best.dist)) best = { dist, f, a: { s: f.id, ...c, at } }
     }
   }
-  return best?.a ?? null
+  if (!best) return null
+  // Höhe innerhalb einer Extrusion dieser Skizze: ändert sich die Tiefe, wandert der Bezug anteilig mit (Deckel ganz)
+  const b = basis(best.f.sketch.plane)
+  const hz = v3.dot(v3.sub(p, best.a.at), b.n)
+  for (const g of features) {
+    if (g.type !== 'extrude' || g.sketch !== best.f.id || g.suppressed || g.through || g.upto) continue
+    const d = num(g.depth)
+    if (!(d > 0)) continue
+    const lo = g.symmetric ? -d / 2 : g.flip ? -d : 0
+    const hi = g.symmetric ? d / 2 : g.flip ? 0 : d
+    if (hz >= lo - ANCHOR_TOL && hz <= hi + ANCHOR_TOL && Math.abs(hz) > ANCHOR_TOL) return { ...best.a, x: g.id, hz, d0: d }
+  }
+  return best.a
 }
 
 // Bezugspunkt einer Kante/Fläche für den Anker: Kreiskante über ihre Mitte, sonst Kantenmitte bzw. Flächenmitte
@@ -353,7 +365,16 @@ function follow(r, key, features) {
   const f = features.find((g) => g.id === a.s && g.type === 'sketch' && !g.suppressed)
   const now = f?.sketch ? anchorPos(f.sketch, a) : null
   if (!now) return v
-  return v.map((x, i) => x + now[i] - a.at[i])
+  let out = v.map((x, i) => x + now[i] - a.at[i])
+  if (a.x != null && a.d0 > 0) {
+    const g = features.find((h) => h.id === a.x && h.type === 'extrude')
+    const d1 = num(g?.depth)
+    if (g && !g.through && !g.upto && d1 > 0 && Math.abs(d1 - a.d0) > 1e-12) {
+      const n = basis(f.sketch.plane).n
+      out = out.map((x, i) => x + n[i] * a.hz * (d1 / a.d0 - 1))
+    }
+  }
+  return out
 }
 
 const edgeHint = (x, features) => ({ mid: follow(x, 'mid', features), dir: x.dir, kind: x.kind, radius: x.radius, length: x.length })
