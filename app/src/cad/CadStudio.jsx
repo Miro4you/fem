@@ -52,7 +52,7 @@ import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
 import NumInput from './NumInput.jsx'
 import * as I from './icons.jsx'
 import { describe as describePick, between as betweenPicks } from '../measure.js'
-import { cadBuildView, kernelReady, newKernelWanted, oldKernelReason } from './kernel/client.js'
+import { cadBuildView, kernelReady } from './kernel/client.js'
 
 const FEATURE_ICON = {
   sketch: I.IcSketch,
@@ -172,7 +172,7 @@ const shiftPlane = (plane, d) => (d ? { ...plane, origin: plane.origin.map((x, i
 /// Grundebene einer Skizze (ohne Abstand) aus ihrem Bezug
 const basePlaneOf = (sk) => (sk.planeRef?.std ? STD_PLANES[sk.planeRef.std] : sk.planeRef?.face?.normal ? planeFromFace(sk.planeRef.face) : null)
 
-const faceRef = (f) => ({ center: f.center, kind: f.kind, normal: f.normal, point: f.point, axis: f.axis, origin: f.origin, radius: f.radius })
+const faceRef = (f) => ({ center: f.center, kind: f.kind, normal: f.normal, point: f.point, axis: f.axis, origin: f.origin, radius: f.radius, ...(f.kind === "cylinder" && f.hole != null ? { hole: f.hole } : {}) })
 const nameOf = (r) =>
   r?.std ? `Ebene ${r.std}` : r?.axis ? `${r.axis}-Achse` : r?.edge ? (r.edge.kind === 'circle' ? 'Kreiskante' : 'Kante') : r?.face ? (r.face.kind === 'cylinder' ? 'Zylinderfläche' : 'Fläche') : '–'
 
@@ -310,7 +310,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // neuer Kern: WebAssembly gleich beim Öffnen laden
   useEffect(() => {
-    if (newKernelWanted()) kernelReady()
+    kernelReady()
   }, [])
 
   const builtKey = JSON.stringify(kernelFeatures(features)) + (cad.base ?? '')
@@ -342,7 +342,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         run(isSk ? features.slice(0, edit.index) : list, { regionsOf }).then((r) => {
           if (!stop && r) setPreview(r)
         }),
-      isSk ? 0 : newKernelWanted() ? 60 : 250,
+      isSk ? 0 : 60,
     )
     return () => {
       stop = true
@@ -1268,12 +1268,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             <section className="section">
               <h2>
                 <Hash size={15} /> Verlauf
-                {newKernelWanted() && (
-                  <span
-                    className={'cad-kern ' + (built?.kernel === 'neu' ? 'neu' : 'alt')}
-                    title={built?.kernel === 'neu' ? 'Neuer Geometriekern im Browser (zurück: #kern=alt an der Adresse)' : (oldKernelReason({ base: cad.base, features: kernelFeatures(features) }) ?? '')}
-                  >
-                    {built?.kernel === 'neu' ? `neuer Kern · ${built.timing?.total ?? '–'} ms` : 'alter Kern'}
+                {built?.timing && (
+                  <span className="cad-kern neu" title="Geometriekern OpenCASCADE im Browser (WebAssembly) – Zeit für den letzten Aufbau">
+                    {built.timing.total} ms
                   </span>
                 )}
               </h2>
@@ -1374,7 +1371,6 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 {hasBody
                   ? `${built.bodies} Körper, Volumen ${fmtN(built.volume / 1000)} cm³.`
                   : 'Noch kein Körper.'}{' '}
-                {built?.kernel === 'neu' && built.timing && <small className="muted">(neuer Kern, {built.timing.total} ms) </small>}
                 {appliedNow ? 'Dieser Stand ist im Modell.' : hasBody ? 'Übernehmen vernetzt das Teil; Lager und Lasten werden auf die neuen Flächen übertragen.' : ''}
               </p>
               <button className={'btn wide' + (!appliedNow && hasBody ? ' primary' : '')} disabled={!hasBody || busy || building || errors.length > 0} onClick={() => onApply(builtKey)}>

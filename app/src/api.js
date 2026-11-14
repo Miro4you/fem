@@ -19,14 +19,12 @@ if (!isDesktop && typeof window !== 'undefined') {
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const k = hash.get('k')
   const dp = hash.get('draftpad')
-  // #kern=neu / #kern=alt: Geometriekern der Konstruktion wählen (wird gemerkt)
+  // alte Links mit #kern=… (Umschalter auf den alten Geometriekern) – gibt es nicht mehr, nur aus der Adresse nehmen
   const kern = hash.get('kern')
-  if (kern === 'neu' || kern === 'alt') {
-    try {
-      localStorage.setItem('projekt-fem.kern', kern)
-    } catch {
-      /* ohne Speicher: bleibt beim alten Kern */
-    }
+  try {
+    localStorage.removeItem('projekt-fem.kern')
+  } catch {
+    /* ohne Speicher */
   }
   if (k && /^[a-z0-9]+$/i.test(k)) storage.set(KEY_STORE, k)
   if (dp && /^[a-z0-9][a-z0-9-]{0,63}$/.test(dp)) startDraftpad = dp
@@ -130,6 +128,10 @@ export const draftpadMeta = (id) => (isDesktop ? invoke('draftpad_meta', { id })
 export const cadBuild = (args) => (isDesktop ? invoke('cad_build', { args }) : http('/cad_build', { method: 'POST', json: args }))
 
 /// geänderte STEP-Datei speichern
+/// Inhalt einer STEP-Datei (Ausgangsteil für den Geometriekern im Browser)
+export const stepText = (path) =>
+  isDesktop ? invoke('read_step', { path }) : http('/file?path=' + encodeURIComponent(path), { raw: true }).then((b) => b.text())
+
 export async function exportStep(path, name) {
   if (isDesktop) {
     const p = await save({ defaultPath: name, filters: [{ name: 'STEP-Geometrie', extensions: ['step', 'stp'] }] })

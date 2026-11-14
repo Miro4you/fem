@@ -383,11 +383,6 @@ async fn api_open_step(State(s): State<Shared>, headers: HeaderMap, Json(a): Jso
 }
 
 async fn api_cad_build(Json(a): Json<crate::CadArgs>) -> ApiResult<Response> {
-    if let Some(b) = &a.base {
-        if !is_step(Path::new(b)) || !path_allowed(b) {
-            return Err(bad("Nur STEP-Dateien (.step, .stp)"));
-        }
-    }
     let v = tokio::task::spawn_blocking(move || cad_build_impl(a)).await.map_err(bad)?.map_err(bad)?;
     Ok(Json(v).into_response())
 }

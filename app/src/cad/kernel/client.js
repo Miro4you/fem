@@ -1,18 +1,5 @@
-// Zugang zum neuen Geometriekern (Web Worker) – gleiche Aufrufform wie api.cadBuild
+// Zugang zum Geometriekern (OpenCASCADE als WebAssembly im Web Worker). Der Server speichert nur noch fertige STEP-Dateien.
 import * as api from '../../api.js'
-
-const KEY = 'projekt-fem.kern'
-/// Was der neue Kern schon kann (Rest: alter Kern auf dem Server)
-const SUPPORTED = new Set(['sketch', 'extrude', 'revolve', 'hole', 'fillet', 'chamfer', 'pattern', 'mirror', 'moveface', 'shell', 'sweep', 'loft'])
-
-/// Neuer Kern eingeschaltet? Standard ja; #kern=alt an der Adresse schaltet auf den alten (wird gemerkt, s. api.js)
-export function newKernelWanted() {
-  try {
-    return localStorage.getItem(KEY) !== 'alt'
-  } catch {
-    return true
-  }
-}
 
 let worker = null
 let seq = 0
@@ -52,8 +39,38 @@ export function kernelReady() {
   return readyP
 }
 
-/// Feature-Liste im Worker aufbauen
-export function kernelBuild(job) {
+// Ausgangsteile (STEP) für den Worker: Text einmal vom Server holen und einmal schicken, danach nur den Schlüssel
+const baseText = new Map() // Pfad → Promise<Text>
+const sentBase = new Set()
+async function withBase(args) {
+  if (!args.base) return { ...args, base: undefined }
+  if (!baseText.has(args.base)) baseText.set(args.base, api.stepText(args.base).catch((e) => (baseText.delete(args.base), Promise.reject(e))))
+  const text = await baseText.get(args.base)
+  const job = { ...args, base: undefined, base_key: args.base }
+  if (!sentBase.has(args.base)) job.base_text = text
+  return job
+}
+
+/// Feature-Liste im Worker aufbauen (mit Ausgangsteil: STEP wird im Browser eingelesen)
+export async function kernelBuild(args) {
+  const job = await withBase(args)
+  try {
+    const r = await kernelBuildRaw(job)
+    if (job.base_key) sentBase.add(job.base_key)
+    return r
+  } catch (e) {
+    // Worker kennt das Ausgangsteil nicht (mehr): mit Text noch einmal
+    if (job.base_key && String(e?.message).includes('BASE_MISSING')) {
+      sentBase.delete(job.base_key)
+      const r = await kernelBuildRaw({ ...job, base_text: await baseText.get(args.base) })
+      sentBase.add(job.base_key)
+      return r
+    }
+    throw e
+  }
+}
+
+function kernelBuildRaw(job) {
   const w = start()
   const id = ++seq
   const t = performance.now()
@@ -70,18 +87,9 @@ export function kernelBuild(job) {
   })
 }
 
-/// Warum der alte Kern rechnet (null = neuer Kern zuständig)
-const NAMES = { pattern: 'Muster', mirror: 'Spiegeln', moveface: 'Fläche verschieben', removefaces: 'Flächen entfernen', refillet: 'Radius ändern', rehole: 'Bohrung ändern' }
-export function oldKernelReason(args) {
-  if (args.base) return 'Ausgangsteil aus STEP'
-  const missing = [...new Set((args.features ?? []).filter((f) => !SUPPORTED.has(f.type)).map((f) => NAMES[f.type] ?? f.type))]
-  return missing.length ? `${missing.join(', ')} kann der neue Kern noch nicht` : null
-}
-
-/// Für die Anzeige in der Konstruktion: neuer Kern, wenn eingeschaltet und alle Features unterstützt – sonst Server
+/// Für die Anzeige in der Konstruktion
 export function cadBuildView(args) {
-  const ok = newKernelWanted() && !args.step && !oldKernelReason(args)
-  return ok ? kernelBuild(args) : api.cadBuild(args)
+  return kernelBuild(args)
 }
 
 // für Messungen und Browser-Tests
@@ -90,7 +98,6 @@ if (typeof window !== 'undefined') window.__kernel = { kernelBuild, kernelReady,
 /// STEP-Datei zum Rechnen/Speichern: mit dem neuen Kern im Browser bauen und dem Server nur die fertige Datei geben
 /// (gleiche Antwort wie api.cadBuild mit `step`: { status, volume, bodies, bodies_info, step: Pfad })
 export async function cadBuildStep(args) {
-  if (!newKernelWanted() || oldKernelReason(args)) return api.cadBuild(args)
   const r = await kernelBuild({ ...args, step: true, tess: false })
   const text = r.step_text
   delete r.step_text

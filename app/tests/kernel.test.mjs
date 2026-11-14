@@ -240,3 +240,46 @@ test('Bohrung aus einer Skizze unter dem Teil: bohrt automatisch ins Material', 
     near(r.volume, 24000 - 2 * PI * 6.25 * 10, 1e-6, `Richtung ${flip}`)
   }
 })
+
+test('Flächen entfernen, Radius und Bohrung ändern im neuen Kern (ohne Defeaturing)', () => {
+  clearCache()
+  const top = { origin: [0, 0, 10], normal: [0, 0, 1], u: [1, 0, 0] }
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 60, 40) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1 },
+    { id: 3, type: 'sketch', plane: top, ents: [], pts: [[15, 20]] },
+    { id: 4, type: 'hole', sketch: 3, diameter: 6, through: true },
+    { id: 5, type: 'sketch', plane: top, ents: [], pts: [[45, 20]] },
+    { id: 6, type: 'hole', sketch: 5, diameter: 8, through: false, depth: 6, tip: true, sink: { kind: 'cone', d: 14, angle: 90 } },
+    { id: 7, type: 'fillet', edges: [{ mid: [30, 0, 10], dir: [1, 0, 0] }], radius: 3 },
+    { id: 8, type: 'fillet', edges: [{ mid: [60, 20, 0], dir: [0, 1, 0] }], radius: 2 },
+  ]
+  const r0 = build({ features: base })
+  allOk(r0)
+  const cyl = (pred) => r0.tess.surfaces.filter((s) => s.kind === 'cylinder' && pred(s)).map((s) => ({ center: s.center, kind: s.kind, axis: s.axis, radius: s.radius }))
+  const h6 = cyl((s) => Math.abs(s.radius - 3) < 1e-6 && s.hole)
+  const h8 = cyl((s) => Math.abs(s.radius - 4) < 1e-6)
+  const f3 = cyl((s) => Math.abs(s.radius - 3) < 1e-6 && !s.hole)
+  const plate = 60 * 40 * 10
+  const filletLoss = (r, L) => (r * r - (PI * r * r) / 4) * L
+  // Bohrung Ø6 entfernen: genau das Bohrungsvolumen kommt zurück
+  const a = build({ features: [...base, { id: 9, type: 'removefaces', faces: h6.filter((x) => x.center[2] < 10 && Math.hypot(x.center[0] - 15, x.center[1] - 20) < 1) }] })
+  allOk(a)
+  near(a.volume - r0.volume, PI * 9 * 10, 1e-6, 'Ø6 gefüllt')
+  // Sackloch mit Senkung und Spitze: alles gefüllt → Platte ohne diese Bohrung
+  const b = build({ features: [...base, { id: 9, type: 'removefaces', faces: h8 }] })
+  allOk(b)
+  near(b.volume, plate - PI * 9 * 10 - filletLoss(3, 60) - filletLoss(2, 40), 1e-6, "Sackloch gefüllt")
+  // Verrundung R3 entfernen → scharfe Kante
+  const c = build({ features: [...base, { id: 9, type: 'removefaces', faces: f3 }] })
+  allOk(c)
+  near(c.volume - r0.volume, filletLoss(3, 60), 1e-4, 'R3 entfernt')
+  // Radius ändern R3 → R6
+  const d = build({ features: [...base, { id: 9, type: 'refillet', surfaces: f3.map((x) => x.center), axis: f3[0].axis, radius: 6 }] })
+  allOk(d)
+  near(d.volume - r0.volume, filletLoss(3, 60) - filletLoss(6, 60), 1e-4, 'R6')
+  // Bohrung ändern Ø6 → Ø10
+  const e = build({ features: [...base, { id: 9, type: 'rehole', surfaces: h6.map((x) => x.center), axis: [0, 0, 1], origin: [15, 20, 5], diameter: 10 }] })
+  allOk(e)
+  near(r0.volume - e.volume, PI * (25 - 9) * 10, 1e-6, 'Ø10')
+})

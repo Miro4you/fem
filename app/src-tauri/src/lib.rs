@@ -598,60 +598,50 @@ pub fn open_step_full(
 
 #[derive(Deserialize)]
 pub struct CadArgs {
-    /// Ausgangsteil (STEP), an dem weiterkonstruiert wird; ohne = neues Teil
-    #[serde(default)]
-    pub base: Option<String>,
-    pub features: serde_json::Value,
-    #[serde(default)]
-    pub upto: Option<usize>,
-    #[serde(default)]
-    pub regions_of: Option<serde_json::Value>,
-    /// STEP-Datei schreiben (zum Rechnen übernehmen / exportieren)
+    /// Dateiname der STEP-Datei (ohne Ordner)
     #[serde(default)]
     pub step: Option<String>,
-    #[serde(default = "yes")]
-    pub tess: bool,
-    /// fertige STEP-Datei aus dem Geometriekern im Browser: nur speichern (mit `step` als Name), nicht neu bauen
+    /// fertige STEP-Datei aus dem Geometriekern im Browser
     #[serde(default)]
     pub step_text: Option<String>,
 }
 
-/// Features aufbauen; mit `step` (Dateiname) entsteht eine STEP-Datei im Temp-Ordner.
+/// STEP-Datei aus der Konstruktion speichern (aufgebaut wird im Browser) → { step: Pfad }
 pub fn cad_build_impl(a: CadArgs) -> Result<serde_json::Value, String> {
-    let output = a.step.as_ref().map(|name| {
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let stem: String = PathBuf::from(name)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("konstruktion")
-            .chars()
-            .map(|c| if c.is_alphanumeric() || "-_ ".contains(c) { c } else { '_' })
-            .collect();
-        fem_core::cad::work_dir().join("teile").join(format!("{stamp}")).join(format!("{stem}.step"))
-    });
-    if let Some(text) = &a.step_text {
-        let path = output.ok_or("Dateiname für die STEP-Datei fehlt")?;
-        if !text.trim_start().starts_with("ISO-10303-21") {
-            return Err("Keine STEP-Datei".into());
-        }
-        std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-        std::fs::write(&path, text).map_err(|e| e.to_string())?;
-        return Ok(serde_json::json!({ "step": path }));
+    let text = a
+        .step_text
+        .ok_or("Die Konstruktion rechnet im Browser – bitte die Seite neu laden (veraltete Oberfläche)")?;
+    if !text.trim_start().starts_with("ISO-10303-21") {
+        return Err("Keine STEP-Datei".into());
     }
-    fem_core::cad::build(&fem_core::cad::CadJob {
-        base: a.base.map(PathBuf::from),
-        features: a.features,
-        upto: a.upto,
-        output,
-        regions_of: a.regions_of,
-        tess: a.tess,
-    })
-    .map_err(|e| e.to_string())
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let stem: String = PathBuf::from(a.step.as_deref().unwrap_or("konstruktion"))
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("konstruktion")
+        .chars()
+        .map(|c| if c.is_alphanumeric() || "-_ ".contains(c) { c } else { '_' })
+        .collect();
+    let path = fem_core::cad::work_dir().join("teile").join(format!("{stamp}")).join(format!("{stem}.step"));
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "step": path }))
 }
 
 #[tauri::command]
 async fn cad_build(args: CadArgs) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || cad_build_impl(args)).await.map_err(|e| e.to_string())?
+}
+
+/// STEP-Datei lesen (Ausgangsteil für den Geometriekern im Browser)
+#[tauri::command]
+fn read_step(path: String) -> Result<String, String> {
+    let ok = path.to_lowercase().ends_with(".step") || path.to_lowercase().ends_with(".stp");
+    if !ok {
+        return Err("Nur STEP-Dateien".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Geänderte STEP-Datei speichern (Kopie)
@@ -1447,6 +1437,7 @@ pub fn run() {
             open_step,
             cad_build,
             copy_step,
+            read_step,
             solve,
             section,
             orientation_scan,

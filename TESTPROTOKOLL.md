@@ -332,7 +332,7 @@ selbst starten.
 | 18e.16 | In Draftpad: Menü › „In Projekt-FEM nachweisen“ (beim ersten Mal Adresse, z. B. `http://nas:8790`) | Projekt-FEM öffnet sich mit neuem Teil und der Zeichnung | [ ] |
 | 18e.17 | Draftpad-Import: Vorschau im Dialog ansehen, „Lücken schließen bis“ von 0,3 auf 0,8 mm | Freihand/Texte blass, offene Enden rot mit Zähler; Zähler sinkt, wenn die Lücken kleiner als der Wert sind | [ ] |
 | 18e.18 | Draftpad-Zeichnung mit Maßen als Datei/Kopie übernehmen | Maße erscheinen als Skizzenmaße (gemessener Wert), überzählige (z. B. dieselbe Länge zweimal) fehlen; Meldung „… Maße aus Draftpad“ | [ ] |
-| 18e.19 | Neuer Kern (Standard): Konstruktion › Platte skizzieren, extrudieren, Kante verrunden/fasen, Tiefe ändern | Körper erscheint ohne merkliche Wartezeit; neben „Verlauf“ steht grün „neuer Kern · … ms“ (gelb „alter Kern“, wenn ein Feature dabei ist, das der neue noch nicht kann – Grund beim Darüberfahren); Volumen wie mit `#kern=alt` | [ ] |
+| 18e.19 | Konstruktion › Platte skizzieren, extrudieren, Kante verrunden/fasen, Tiefe ändern | Körper erscheint ohne merkliche Wartezeit; neben „Verlauf“ steht grün die Aufbauzeit („… ms“, Geometriekern im Browser) | [ ] |
 | 18e.20 | Extrudieren: in das Feld „Tiefe“ klicken, Mausrad drehen (mit Umschalt / Strg); `10+5` eintippen und Feld verlassen | ±1 mm je Raste (Umschalt 0,1, Strg 10); 15 steht im Feld; Vorschau folgt sofort | [ ] |
 | 18e.21 | Extrudieren: den blauen Punkt mit der Maßangabe im Bild nach oben/unten ziehen | Tiefe ändert sich in 1-mm-Schritten (Umschalt 0,1 mm), Feld und Vorschau laufen mit | [ ] |
 | 18e.22 | Skizze: Maß doppelklicken, `2*30` eingeben | Maß wird 60 | [ ] |
@@ -364,6 +364,9 @@ selbst starten.
 | 18e.48 | Skizze: im Leeren Rahmen aufziehen (links → rechts bzw. rechts → links), Strg+A | ganz umschlossene bzw. berührte Elemente gewählt, Leiste daneben | [ ] |
 | 18e.49 | Bohrung (H): „Gewinde (Kernloch)“, M6; Skizze liegt unter dem Teil | Ø 5, bohrt automatisch ins Material; Durchgangsloch nach ISO 273 fein/mittel/grob | [ ] |
 | 18e.50 | Taste **?** (oder F1, Tastatur-Knopf) | Übersicht aller Tastenkürzel und Mausbefehle | [ ] |
+| 18e.51 | STEP öffnen (z. B. `Daten/Hebel.step`) › Konstruktion | Teil erscheint nach ≈ 1–2 s (eingelesen im Browser, kein Python mehr); Körpernamen aus der STEP-Datei bleiben | [ ] |
+| 18e.52 | „Radius/Bohrung“: Bohrung anklicken, neuer Ø; Radius anklicken, neuer Radius (0 = scharfe Kante) | Bohrung bzw. Rundung geändert, Volumen plausibel; „In die Rechnung übernehmen“ vernetzt das geänderte Teil | [ ] |
+| 18e.53 | Mehr › Flächen entfernen: Bohrung (mit Senkung/Spitze) bzw. gerade Verrundung anklicken | Bohrung ganz zu bzw. scharfe Kante; ebene Flächen/Fasen werden mit Hinweis abgelehnt | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

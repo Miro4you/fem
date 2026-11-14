@@ -169,9 +169,13 @@ Muster kreisförmig um Achse, Formschräge (wenn einfach).
   „weiter mit Extrudieren“, Übersicht mit **?**.
 - Bohrung: ISO 273 fein/mittel/grob, Gewinde-Kernloch M2–M24, bohrt automatisch auf die Materialseite.
 
-Offen danach: alter Kern (`cad.py`) wird nur noch für Fläche entfernen / Radius-Bohrung ändern an STEP-Teilen gebraucht
-(kein Defeaturing im WASM-Build) – Ablösung bleibt offen; Boolesch zwischen Körpern, Ebene durch drei Punkte,
-Baugruppen (G6).
+Nachtrag 14.11. vormittags: **alter Kern entfernt** (`cad.py` gelöscht, Server speichert nur noch fertige STEP-Dateien).
+STEP-Ausgangsteile werden im Browser eingelesen (`STEPControl_Reader`, Körpernamen aus der Datei); „Flächen entfernen“,
+„Radius ändern“, „Bohrung ändern“ ohne Defeaturing nachgebaut: koaxiale Zylinder-/Kegelflächen (Bohrung, Senkung, Spitze)
+werden mit Drehkörpern gefüllt, gerade Verrundungen zwischen zwei Ebenen mit dem Keil bis zur scharfen Kante ergänzt bzw.
+abgezogen, dann neu verrundet. Nicht abgedeckt: Fasen, Verrundungs-Ecken (Torus), Freiformflächen → Hinweis im Feature.
+
+Offen: Boolesch zwischen Körpern, Ebene durch drei Punkte, Baugruppen (G6).
 
 ## G6. Baugruppen (bis ~50 Teile)
 

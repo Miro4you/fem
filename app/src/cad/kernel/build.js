@@ -660,8 +660,11 @@ function findFace(model, ref, what) {
   const same = (face) => {
     const k = faceKind(face)
     if (ref.kind === 'plane' && k.kind === 'plane' && ref.normal) return Math.abs(dot(k.normal, unit(ref.normal))) > 0.9995
-    if (ref.kind === 'cylinder' && k.kind === 'cylinder' && ref.radius)
-      return (!ref.axis || Math.abs(dot(k.axis, unit(ref.axis))) > 0.9995) && Math.abs(k.radius - ref.radius) <= 1e-3 * Math.max(1, ref.radius)
+    if (ref.kind === 'cylinder' && k.kind === 'cylinder' && ref.radius) {
+      const ok = (!ref.axis || Math.abs(dot(k.axis, unit(ref.axis))) > 0.9995) && Math.abs(k.radius - ref.radius) <= 1e-3 * Math.max(1, ref.radius)
+      // Bohrung oder Zapfen (z. B. Welle in Buchse: gleiche Achse, gleicher Radius)
+      return ok && (ref.hole == null || revInfo(face)?.concave === !!ref.hole)
+    }
     return ref.kind === 'other' && k.kind === 'other'
   }
   for (const c of cand) {
@@ -693,6 +696,251 @@ function moveFace(model, f, warn) {
     if (ts.length) combine(model, mode, ts, [])
   }
   void warn
+}
+
+// --- Flächen entfernen, Radius/Bohrung ändern (ohne Defeaturing aus OpenCASCADE: das fehlt im WASM-Build) -------------
+// Bohrungen, Senkungen, Bohrspitzen: koaxiale Zylinder-/Kegelflächen werden mit Drehkörpern gefüllt.
+// Gerade Verrundungen (Teilzylinder zwischen zwei Ebenen): Keil zwischen Bogen und scharfer Ecke ergänzen bzw. abziehen.
+
+/// Drehachse, Radius und Lage einer Zylinder- oder Kegelfläche; (s, r)-Punkte des Rands entlang der Achse
+function revInfo(face) {
+  const O = oc()
+  const t = face.geomType
+  if (t !== 'CYLINDRE' && t !== 'CONE') return null
+  let axis
+  let c0
+  let radius = null
+  if (t === 'CYLINDRE') {
+    const ad = new O.BRepAdaptor_Surface(face.wrapped, true)
+    const g = ad.Cylinder()
+    const ax = g.Axis()
+    const loc = ax.Location()
+    const d = ax.Direction()
+    axis = [d.X(), d.Y(), d.Z()]
+    c0 = [loc.X(), loc.Y(), loc.Z()]
+    radius = g.Radius()
+    ad.delete()
+  } else {
+    // Kegel (gp_Cone fehlt im WASM-Build): Achse aus einer Kreiskante des Rands
+    const circ = face.edges.find((e) => e.geomType === 'CIRCLE')
+    if (!circ) return null
+    const ci = edgeInfo(circ)
+    axis = ci.axis
+    c0 = ci.center
+  }
+  const sr = []
+  for (const e of face.edges)
+    for (let k = 0; k <= 12; k++) {
+      const p = tuple(e.pointAt(k / 12))
+      const s = dot(sub(p, c0), axis)
+      sr.push([s, dist3(p, add(c0, mul(axis, s)))])
+    }
+  const uv = face.UVBounds
+  const span = t === 'CYLINDRE' ? uv.uMax - uv.uMin : 2 * Math.PI
+  const pm = tuple(face.pointOnSurface(0.5, 0.5))
+  const foot = add(c0, mul(axis, dot(sub(pm, c0), axis)))
+  const n = tuple(face.normalAt(pm))
+  return { kind: t === 'CYLINDRE' ? 'cyl' : 'cone', axis, c0, radius, sr, span, mid: pm, foot, concave: dot(n, sub(pm, foot)) < 0 }
+}
+
+const sameAxis = (a, b, tol) => Math.abs(Math.abs(dot(a.axis, b.axis)) - 1) < 1e-6 && norm(cross(sub(b.c0, a.c0), a.axis)) < tol
+
+/// Drehkörper aus einem (s, r)-Umriss um die Achse (s längs der Achse, r Abstand)
+function revolveProfile(info, prof) {
+  const w = unit(Math.abs(info.axis[0]) < 0.9 ? cross(info.axis, [1, 0, 0]) : cross(info.axis, [0, 1, 0]))
+  const P = ([s, r]) => add(add(info.c0, mul(info.axis, s)), mul(w, r))
+  const face = makePolygon(prof.map(P))
+  return solidsOf(revolution(face, info.c0, info.axis, 360))[0]
+}
+
+/// Füllkörper für eine Gruppe koaxialer Loch-Flächen (Zylinder und Kegel)
+function holeFill(group) {
+  const out = []
+  for (const g of group) {
+    const pts = g.sr
+    const lo = pts.reduce((a, p) => (p[0] < a[0] ? p : a))
+    const hi = pts.reduce((a, p) => (p[0] > a[0] ? p : a))
+    if (hi[0] - lo[0] < 1e-9) continue
+    const r0 = g.kind === 'cyl' ? g.radius : lo[1]
+    const r1 = g.kind === 'cyl' ? g.radius : hi[1]
+    const prof = [[lo[0], 0], [lo[0], r0], [hi[0], r1], [hi[0], 0]].filter((p, i, a) => i === 0 || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 1e-9)
+    out.push(revolveProfile(g, prof))
+  }
+  return out
+}
+
+/// Keil einer geraden Verrundung: zwischen Bogen und der scharfen Ecke der beiden Nachbarebenen
+function filletWedge(info, face) {
+  const O = oc()
+  const ad = new O.BRepAdaptor_Surface(face.wrapped, true)
+  const u0 = ad.FirstUParameter()
+  const u1 = ad.LastUParameter()
+  ad.delete()
+  const theta = u1 - u0
+  if (!(theta > 1e-3) || theta >= Math.PI - 1e-3) return null
+  const lo = Math.min(...info.sr.map((p) => p[0]))
+  const hi = Math.max(...info.sr.map((p) => p[0]))
+  const rad = (u) => {
+    const p = tuple(face.pointOnSurface(u, 0.5))
+    const f0 = add(info.c0, mul(info.axis, dot(sub(p, info.c0), info.axis)))
+    return unit(sub(p, f0))
+  }
+  const d1 = rad(0)
+  const d2 = rad(1)
+  const m = unit(add(d1, d2))
+  const cosH = Math.max(1e-6, dot(d1, m))
+  const r = info.radius
+  const O0 = add(info.c0, mul(info.axis, lo))
+  const A1 = add(O0, mul(d1, r))
+  const A2 = add(O0, mul(d2, r))
+  const Pc = add(O0, mul(m, r / cosH))
+  const M = add(O0, mul(m, r))
+  const wire = assembleWire([makeLine(A1, Pc), makeLine(Pc, A2), makeThreePointArc(A2, M, A1)])
+  const f = makeFaceFromWire(wire)
+  return { solid: basicFaceExtrusion(f, new Vector(mul(info.axis, hi - lo))), corner: Pc, axis: info.axis, length: hi - lo }
+}
+
+function makeFaceFromWire(wire) {
+  const O = oc()
+  const mk = new O.BRepBuilderAPI_MakeFace(wire.wrapped, true)
+  const f = cast(mk.Face())
+  mk.delete()
+  return f
+}
+
+/// gewählte Flächen eines Körpers entfernen → neue Form; edges: scharfe Kanten, die dabei entstanden sind (für „Radius ändern“)
+function removeFacesOf(shape, faces, what, size) {
+  const infos = faces.map((face) => ({ face, info: revInfo(face) }))
+  const bad = infos.find((x) => !x.info)
+  if (bad) throw new Problem(`${what}: geht für Bohrungen, Senkungen und gerade Verrundungen (Zylinder-/Kegelflächen) – diese Fläche ist ${bad.face.geomType === 'PLANE' ? 'eben' : 'gekrümmt anders'}`)
+  const tol = 1e-4 * Math.max(1, size)
+  // koaxiale Gruppen
+  const groups = []
+  for (const x of infos) {
+    const g = groups.find((gr) => sameAxis(gr[0].info, x.info, tol))
+    if (g) g.push(x)
+    else groups.push([x])
+  }
+  // Bohrspitzen/Senkungen gleicher Achse gehören zur Bohrung, auch wenn nur der Zylinder gewählt ist
+  for (const g of groups) {
+    const base = g[0].info
+    if (!base.concave) continue
+    for (const face of shape.faces) {
+      if (g.some((x) => x.face.isSame(face))) continue
+      const ti = face.geomType === 'CONE' ? revInfo(face) : null
+      if (!ti || !ti.concave || !sameAxis(base, ti, tol)) continue
+      const lo = Math.min(...g.flatMap((x) => x.info.sr.map((p) => p[0])))
+      const hi = Math.max(...g.flatMap((x) => x.info.sr.map((p) => p[0])))
+      const s = ti.sr.map((p) => dot(sub(add(ti.c0, mul(ti.axis, p[0])), base.c0), base.axis))
+      if (Math.min(...s) <= hi + tol && Math.max(...s) >= lo - tol) g.push({ face, info: { ...ti, c0: base.c0, axis: base.axis, sr: ti.sr.map((p, i) => [s[i], p[1]]) } })
+    }
+  }
+  let out = shape
+  const sharp = []
+  for (const g of groups) {
+    const base = g[0].info
+    const span = g.filter((x) => x.info.kind === 'cyl').reduce((a, x) => a + x.info.span, 0)
+    const full = span > 2 * Math.PI - 1e-3 || g.some((x) => x.info.kind === 'cone')
+    if (full && base.concave) {
+      for (const s of holeFill(g.map((x) => x.info))) out = out.fuse(s)
+    } else if (full) {
+      // Zapfen: Zylinderbereich abziehen
+      for (const s of holeFill(g.map((x) => x.info))) out = out.cut(s)
+    } else {
+      for (const x of g) {
+        if (x.info.kind !== 'cyl') throw new Problem(`${what}: Kegelflächen gehen nur als Teil einer Bohrung`)
+        const w = filletWedge(x.info, x.face)
+        if (!w) throw new Problem(`${what}: diese Rundung lässt sich nicht zur scharfen Kante ergänzen (mehr als 180° oder zu klein)`)
+        out = x.info.concave ? out.cut(w.solid) : out.fuse(w.solid)
+        sharp.push(w)
+      }
+    }
+  }
+  const solid = solidsOf(out)
+  if (!solid.length) throw new Problem(`${what}: dabei ist kein Körper übrig geblieben`)
+  let res = solid.length === 1 ? solid[0] : out
+  try {
+    res = res.simplify()
+  } catch {
+    // ungeteilt lassen
+  }
+  return { shape: solidsOf(res)[0] ?? res, sharp }
+}
+
+function removeFaces(model, f, warn, what = 'Flächen entfernen') {
+  const refs = f.faces ?? (f.surfaces ?? []).map((c) => ({ center: c }))
+  if (!refs.length) throw new Problem(`${what}: keine Fläche gewählt`)
+  const per = new Map()
+  for (const ref of refs) {
+    const c = findFace(model, ref, what)
+    if (!per.has(c.bi)) per.set(c.bi, [])
+    if (!per.get(c.bi).some((x) => x.isSame(c.face))) per.get(c.bi).push(c.face)
+  }
+  const size = model.diag()
+  const vol0 = model.volume()
+  const sharp = []
+  for (const [bi, faces] of per) {
+    const body = model.bodies[bi]
+    const r = removeFacesOf(body.shape, faces, what, size)
+    model.bodies[bi] = { shape: r.shape, name: body.name }
+    sharp.push(...r.sharp.map((w) => ({ ...w, bi })))
+  }
+  if (Math.abs(model.volume() - vol0) < 1e-9 * Math.max(vol0, 1)) warn?.push('Es hat sich nichts geändert – Flächen einer Bohrung oder Verrundung wählen')
+  return sharp
+}
+
+/// Radius eines (importierten) Teils ändern: Verrundung zur scharfen Kante ergänzen, dann neu verrunden
+function refillet(model, f, warn) {
+  const sharp = removeFaces(model, f, null, 'Radius ändern')
+  const r = Number(f.radius) || 0
+  if (r <= 0) return
+  const O = oc()
+  const per = new Map()
+  for (const w of sharp) {
+    const body = model.bodies[w.bi]
+    let best = null
+    for (const e of body.shape.edges) {
+      if (e.geomType !== 'LINE') continue
+      const info = edgeInfo(e)
+      if (Math.abs(dot(info.dir, w.axis)) < 0.999) continue
+      const off = norm(cross(sub(info.mid, w.corner), w.axis))
+      if (off < 1e-3 * Math.max(1, w.length) && (!best || off < best.off)) best = { e, off }
+    }
+    if (!best) throw new Problem('Radius ändern: Kante für die neue Verrundung nicht gefunden')
+    if (!per.has(w.bi)) per.set(w.bi, [])
+    per.get(w.bi).push(best.e)
+  }
+  for (const [bi, edges] of per) {
+    const body = model.bodies[bi]
+    const mk = new O.BRepFilletAPI_MakeFillet(body.shape.wrapped, O.ChFi3d_FilletShape.ChFi3d_Rational)
+    for (const e of edges) mk.Add(r, e.wrapped)
+    let ok = false
+    try {
+      mk.Build(new O.Message_ProgressRange())
+      ok = mk.IsDone()
+    } catch {
+      ok = false
+    }
+    if (!ok) {
+      mk.delete()
+      throw new Problem(`Radius ändern: ${r} mm lässt sich hier nicht erzeugen – zu groß für die angrenzenden Flächen?`)
+    }
+    const s = cast(mk.Shape())
+    mk.delete()
+    model.bodies[bi] = { shape: solidsOf(s)[0] ?? s, name: body.name }
+  }
+  void warn
+}
+
+/// Bohrung eines (importierten) Teils ändern: schließen und mit neuem Durchmesser bohren (0 = zu)
+function rehole(model, f, warn) {
+  removeFaces(model, f, null, 'Bohrung ändern')
+  const d = Number(f.diameter) || 0
+  if (d <= 0) return
+  const a = unit(f.axis)
+  const L = 2 * model.diag()
+  const info = { axis: a, c0: sub(f.origin, mul(a, L / 2)) }
+  combine(model, 'cut', [revolveProfile(info, [[0, 0], [0, d / 2], [L, d / 2], [L, 0]])], warn)
 }
 
 /// Schale: Körper aushöhlen, gewählte Flächen bleiben offen
@@ -926,6 +1174,9 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'mirror') mirrorFeature(model, f, sketches, byId, warn)
   else if (f.type === 'moveface') moveFace(model, f, warn)
   else if (f.type === 'shell') shellOp(model, f)
+  else if (f.type === 'removefaces') removeFaces(model, f, warn)
+  else if (f.type === 'refillet') refillet(model, f, warn)
+  else if (f.type === 'rehole') rehole(model, f, warn)
   else throw new Problem(`„${f.type}“ kann der neue Kern noch nicht`)
   if (!model.bodies.length) throw new Problem('Es ist kein Körper entstanden')
   if (f.mode === 'new' && (f.type === 'extrude' || f.type === 'revolve')) newBodies(model, f, before, warn)
@@ -956,14 +1207,73 @@ function newBodies(model, f, before, warn) {
 }
 
 /// Feature-Liste ausführen. job: { features, upto, regions_of, tess, quality, step }
+// --- Ausgangsteil aus STEP -----------------------------------------------------------------------
+
+const BASE_CACHE = new Map() // Schlüssel → Model (eingelesen)
+
+/// Namen in STEP-Texten: \X2\hhhh\X0\ (UTF-16), \X\hh (Latin-1), '' für '
+function stepString(t) {
+  return t
+    .replace(/\\X2\\([0-9A-Fa-f]+)\\X0\\/g, (_, h) => String.fromCharCode(...(h.match(/.{4}/g) ?? []).map((x) => parseInt(x, 16))))
+    .replace(/\\X\\([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/''/g, "'")
+}
+
+/// Körpernamen aus der STEP-Datei (nur wenn eindeutig zuzuordnen: so viele Namen wie Körper)
+function stepNames(text, n) {
+  const grab = (re) => [...text.matchAll(re)].map((m) => stepString(m[1]).trim())
+  // Platzhalter der Übersetzer (z. B. „Open CASCADE STEP translator 7.8 1“) sind keine Namen
+  const clean = (list) => list.map((x) => (/^(Open CASCADE STEP translator|SOLID|Body|Part)\b/i.test(x) && /\d/.test(x) ? '' : x))
+  const breps = clean(grab(/MANIFOLD_SOLID_BREP\s*\(\s*'((?:[^']|'')*)'/g))
+  if (breps.length === n && breps.some(Boolean)) return breps
+  const prods = clean(grab(/[^_A-Z]PRODUCT\s*\(\s*'((?:[^']|'')*)'/g))
+  if (prods.length === n && prods.some(Boolean)) return prods
+  return Array(n).fill(null)
+}
+
+function importBase(key, text) {
+  let m = BASE_CACHE.get(key)
+  if (m) return m
+  if (!text) throw new Problem('BASE_MISSING')
+  const O = oc()
+  const file = `base_${BASE_CACHE.size}_${Math.round(performance.now())}.step`
+  O.FS.writeFile('/' + file, text)
+  const reader = new O.STEPControl_Reader()
+  let shape = null
+  try {
+    if (reader.ReadFile(file) === O.IFSelect_ReturnStatus.IFSelect_RetDone) {
+      reader.TransferRoots(new O.Message_ProgressRange())
+      shape = cast(reader.OneShape())
+    }
+  } finally {
+    reader.delete()
+    try {
+      O.FS.unlink('/' + file)
+    } catch {
+      // schon weg
+    }
+  }
+  const solids = shape ? solidsOf(shape) : []
+  if (!solids.length) throw new Problem('Ausgangsteil: Die STEP-Datei enthält keinen Volumenkörper')
+  const names = stepNames(text, solids.length)
+  m = new Model(solids.map((sh, i) => ({ shape: sh, name: names[i] || null })))
+  BASE_CACHE.set(key, m)
+  if (BASE_CACHE.size > 4) BASE_CACHE.delete(BASE_CACHE.keys().next().value)
+  return m
+}
+
 export function build(job) {
   const t0 = performance.now()
   let features = job.features ?? []
   if (job.upto != null) features = features.slice(0, job.upto)
-  const keys = features.map((_, k) => JSON.stringify(features.slice(0, k + 1)))
+  // Ausgangsteil (STEP): einmal einlesen, Schlüssel geht in den Merkzettel ein
+  const baseKey = job.base_key ?? null
+  const baseModel = baseKey ? importBase(baseKey, job.base_text) : null
+  const prefix = baseKey ? `base:${baseKey}|` : ''
+  const keys = features.map((_, k) => prefix + JSON.stringify(features.slice(0, k + 1)))
   // längster gespeicherter Anfang
   let start = 0
-  let model = new Model()
+  let model = baseModel ? baseModel.clone() : new Model()
   let status = []
   for (let k = features.length - 1; k >= 0; k--) {
     const hit = CACHE.find((c) => c.key === keys[k])

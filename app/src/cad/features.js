@@ -239,7 +239,7 @@ export function problemOf(f, features) {
 const edgeHint = ({ mid, dir, kind, radius, length }) => ({ mid, dir, kind, radius, length })
 
 // gewählte Fläche für den Kern: Schwerpunkt und Art (damit sie nach Änderungen davor wiedergefunden wird)
-const faceHint = (x) => ({ center: x.center, kind: x.kind, normal: x.normal, axis: x.axis, radius: x.radius })
+const faceHint = (x) => ({ center: x.center, kind: x.kind, normal: x.normal, axis: x.axis, radius: x.radius, ...(x.kind === 'cylinder' && x.hole != null ? { hole: x.hole } : {}) })
 
 // Auswahl über Schraffuren: eine Gruppe (Teil aus Draftpad) oder alle schraffierten Flächen
 const fillsArg = (f) => (f.regions != null ? false : f.fillGroup ? { group: f.fillGroup } : f.useFills !== false)
