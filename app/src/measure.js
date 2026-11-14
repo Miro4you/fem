@@ -20,6 +20,7 @@ export function surfFromMesh(s) {
 
 /// Text zu einer Auswahl
 export function describe(p) {
+  if (p.vertex) return `Punkt (${fmtMm(p.vertex[0], 2)}; ${fmtMm(p.vertex[1], 2)}; ${fmtMm(p.vertex[2], 2)}) mm`
   if (p.edge) {
     const e = p.edge
     if (e.kind === 'circle') return e.closed ? `Kreiskante Ø ${fmtMm(2 * e.radius)} mm (R ${fmtMm(e.radius)})` : `Bogenkante R ${fmtMm(e.radius)} mm, Länge ${fmtMm(e.length)} mm`

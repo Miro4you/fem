@@ -388,6 +388,7 @@ selbst starten.
 | 18e.72 | Platte mit Bohrung Ø9; Mehr › Normteil › Schraube M8 × 30, „In Bohrung“ › Bohrung anklicken; danach Mutter M8 mit „andere Seite“ | Schraube steht mit dem Kopf (Innensechskant) auf der oberen Öffnung, Schaft durch die Bohrung; Mutter sitzt unten; Namen „Schraube M8×30 ISO 4762“, „Mutter M8 ISO 4032“ | [ ] |
 | 18e.73 | Konstruktion › „Als STL“ | binäre STL-Datei mit allen Körpern (im Slicer öffnen: Maße wie im CAD) | [ ] |
 | 18e.74 | Neue Skizze › „Ebene durch 3 Punkte …“, drei Ecken (oder Kreismitten) des Bauteils anklicken | Skizzenebene durch die drei Punkte, Blick senkrecht darauf; Ursprung im ersten Punkt, x-Achse zum zweiten | [ ] |
+| 18e.75 | Konstruktion › Messen: zwei Ecken anklicken | „Punkt (x; y; z)“ je Ecke und „Abstand der Punkte … mm (Δx, Δy, Δz)“ | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

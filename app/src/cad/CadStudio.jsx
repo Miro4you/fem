@@ -875,7 +875,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const [conPos, setConPos] = useState(null) // Bedingungsleiste: neben der letzten Auswahl im Bild
   const pickWant = useMemo(() => {
     if (sketchEdit) return null
-    if (cmeasure.on) return { faces: true, edges: true }
+    if (cmeasure.on) return { faces: true, edges: true, vertices: true }
     // ohne offenes Feature: Flächen/Kanten vorwählen (Skizzen im Bild bleiben anklickbar)
     if (!edit && !parts) return { faces: true, edges: true, pre: true }
     switch (pickFor) {
@@ -930,7 +930,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     }
     if (cmeasure.on) {
       if (!h?.point) return
-      const pick = { point: h.point, surf: h.face ?? null, edge: h.edge ?? null }
+      const pick = { point: h.point, surf: h.face ?? null, edge: h.edge ?? null, vertex: h.vertex ?? null }
       setCmeasure((m) => ({ ...m, picks: [...(m.picks.length >= 2 ? [] : m.picks), pick] }))
       return
     }
@@ -2019,7 +2019,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         {cmeasure.on && !sketchEdit && (
           <div className="measure-panel">
             <b>Messen</b>
-            {!cmeasure.picks.length && <span className="muted">Fläche oder Kante anklicken (Ø, Länge) – eine zweite für den Abstand</span>}
+            {!cmeasure.picks.length && <span className="muted">Fläche, Kante oder Ecke anklicken (Ø, Länge, Lage) – eine zweite für den Abstand</span>}
             {cmeasure.picks.map((p, i) => (
               <span key={i}>
                 <b className="measure-tag">{'AB'[i]}</b> {describePick(p)}
