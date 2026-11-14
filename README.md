@@ -210,6 +210,9 @@ Tastenkürzel.
    (getönt), Doppelklick benennt um, das Auge blendet aus; überschneiden sich Körper, warnt das Übernehmen.
 5. **Verlauf** links: Doppelklick = bearbeiten, Rechtsklick = Umbenennen, Duplizieren, Nach oben/unten, Unterdrücken,
    **Bis hier zurückrollen** (neue Features kommen an die Marke), Löschen. Fehler stehen rot am Feature.
+   Gewählte Kanten und Flächen (Verrunden, Fase, Bohrung ändern, bis Fläche …) merken sich den Skizzenpunkt, über
+   dem sie liegen (Ecke, Kreismitte, Linie): wird die Skizze später geändert, wandern sie mit, statt auf die
+   nächstgelegene Kante zu springen.
 6. **Messen**, **Schnittansicht** und **Darstellung** (mit/ohne Kanten, durchsichtig, Drahtgitter) rechts oben im Bild; **„In die Rechnung übernehmen“** baut das Teil als STEP,
    vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP“** bzw. **„Als STL“** (3D-Druck) exportiert es,
    **„Zeichnung …“** zeigt ein Blatt mit drei Ansichten (verdeckte Kanten gestrichelt), Isometrie, Gesamtmaßen,

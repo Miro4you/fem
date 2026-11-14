@@ -45,6 +45,7 @@ import {
   axisOf,
   num,
   fmtField,
+  anchorRefs,
 } from './features.js'
 import { offsetEnts } from './sketch.js'
 import { patternEnts, copyEntsInto, entsCenter } from './sketchTools.js'
@@ -579,7 +580,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   const accept = (next = false) => {
     if (!edit) return
-    const d = edit.draft
+    // gewählte Kanten/Flächen an ihre Skizzenpunkte binden (folgen späteren Änderungen der Skizze)
+    const at = edit.isNew ? edit.index : features.findIndex((f) => f.id === edit.draft.id)
+    const d = edit.draft.type === 'sketch' ? edit.draft : anchorRefs(edit.draft, features.slice(0, at < 0 ? features.length : at))
     if (d.type === 'sketch' && !d.sketch) return cancel()
     const prob = problemOf(d, [...features.slice(0, edit.index), d])
     if (prob && d.type !== 'sketch') return note(prob)

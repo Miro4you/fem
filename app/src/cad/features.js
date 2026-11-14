@@ -1,5 +1,5 @@
 // Features der Konstruktion: Bezeichnungen, Vorgaben, Umwandlung für den Kern.
-import { kernelSketch, newSketch, STD_PLANES, addPoint, addEnt, addCon, basis, to2d } from './sketch.js'
+import { kernelSketch, newSketch, STD_PLANES, addPoint, addEnt, addCon, basis, to2d, to3d } from './sketch.js'
 
 export const FEATURE_LABEL = {
   sketch: 'Skizze',
@@ -282,10 +282,84 @@ export function problemOf(f, features) {
 }
 
 // gewählte Kante für den Kern: Mitte, Richtung, Art (Linie/Kreis), Länge bzw. Radius
-const edgeHint = ({ mid, dir, kind, radius, length }) => ({ mid, dir, kind, radius, length })
+// --- Bezüge folgen der Skizze ------------------------------------------------------------------------------
+// Ein gewählter Bezug (Kante, Fläche) merkt sich beim Bestätigen den Skizzenpunkt, auf den er senkrecht zur
+// Skizzenebene fällt: Ecke (senkrechte Kante), Kreismitte (Bohrung, Zapfen), Bohrpunkt oder Linienmitte (Seitenfläche,
+// Kante oben/unten). Ändert sich die Skizze, wird der Bezug um die Verschiebung dieses Punkts mitgeführt, bevor der Kern
+// ihn sucht – so springt eine Verrundung nicht auf die nächstbeste Kante, wenn ein Maß davor geändert wird.
+const ANCHOR_TOL = 1e-3
+
+function anchorPos(sk, a) {
+  if (a.p != null) {
+    const q = sk.pts?.[a.p]
+    return q ? to3d(sk.plane, [q.x, q.y]) : null
+  }
+  if (a.l) {
+    const [p1, p2] = a.l.map((id) => sk.pts?.[id])
+    return p1 && p2 ? to3d(sk.plane, [(p1.x + p2.x) / 2, (p1.y + p2.y) / 2]) : null
+  }
+  return null
+}
+
+/// Anker eines Punkts im Raum: Skizzenpunkt oder Linienmitte einer der Skizzen, auf die er senkrecht fällt (spätere Skizze gewinnt)
+export function anchorFor(features, p) {
+  if (!Array.isArray(p) || p.length !== 3) return null
+  let best = null
+  for (const f of features) {
+    if (f.type !== 'sketch' || f.suppressed || !f.sketch?.plane || !f.sketch.pts) continue
+    const sk = f.sketch
+    const q = to2d(sk.plane, p)
+    const cands = []
+    for (const e of sk.ents ?? []) {
+      if (e.cons) continue
+      if (e.t === 'point') cands.push({ p: e.p })
+      else if (e.t === 'line') cands.push({ p: e.a }, { p: e.b }, { l: [e.a, e.b] })
+      else if (e.t === 'circle') cands.push({ p: e.c })
+      else if (e.t === 'arc') cands.push({ p: e.c }, { p: e.a }, { p: e.b })
+    }
+    for (const c of cands) {
+      const at = anchorPos(sk, c)
+      if (!at) continue
+      const [x, y] = to2d(sk.plane, at)
+      const dist = Math.hypot(x - q[0], y - q[1])
+      if (dist < ANCHOR_TOL && (!best || dist <= best.dist)) best = { dist, a: { s: f.id, ...c, at } }
+    }
+  }
+  return best?.a ?? null
+}
+
+// Bezugspunkt einer Kante/Fläche für den Anker: Kreiskante über ihre Mitte, sonst Kantenmitte bzw. Flächenmitte
+const refPoint = (r) => (r?.kind === 'circle' && r.center ? r.center : r?.mid ?? r?.center)
+
+/// Bezüge eines Features beim Bestätigen verankern (vorhandene Anker bleiben; false = geprüft, keiner)
+export function anchorRefs(f, before) {
+  const one = (r) => {
+    if (!r || typeof r !== 'object' || Array.isArray(r) || r.anchor != null) return r
+    const pt = refPoint(r)
+    if (!pt) return r
+    return { ...r, anchor: anchorFor(before, pt) ?? false }
+  }
+  const out = { ...f }
+  for (const k of ['edges', 'faces', 'targets', 'tools']) if (Array.isArray(f[k])) out[k] = f[k].map(one)
+  for (const k of ['upto', 'at', 'moving', 'target', 'body']) if (f[k] && typeof f[k] === 'object' && !Array.isArray(f[k])) out[k] = one(f[k])
+  return out
+}
+
+// Lage eines Bezugs mit der Verschiebung seines Ankers seit dem Wählen
+function follow(r, key, features) {
+  const a = r?.anchor
+  const v = r?.[key]
+  if (!a || !Array.isArray(v) || !features) return v
+  const f = features.find((g) => g.id === a.s && g.type === 'sketch' && !g.suppressed)
+  const now = f?.sketch ? anchorPos(f.sketch, a) : null
+  if (!now) return v
+  return v.map((x, i) => x + now[i] - a.at[i])
+}
+
+const edgeHint = (x, features) => ({ mid: follow(x, 'mid', features), dir: x.dir, kind: x.kind, radius: x.radius, length: x.length })
 
 // gewählte Fläche für den Kern: Schwerpunkt und Art (damit sie nach Änderungen davor wiedergefunden wird)
-const faceHint = (x) => ({ center: x.center, kind: x.kind, normal: x.normal, axis: x.axis, radius: x.radius, ...(x.kind === 'cylinder' && x.hole != null ? { hole: x.hole } : {}) })
+const faceHint = (x, features) => ({ center: follow(x, 'center', features), kind: x.kind, normal: x.normal, axis: x.axis, radius: x.radius, ...(x.kind === 'cylinder' && x.hole != null ? { hole: x.hole } : {}) })
 
 // Auswahl über Schraffuren: eine Gruppe (Teil aus Draftpad) oder alle schraffierten Flächen
 const fillsArg = (f) => (f.regions != null ? false : f.fillGroup ? { group: f.fillGroup } : f.useFills !== false)
@@ -297,7 +371,7 @@ export function kernelFeature(f, features) {
     case 'sketch':
       return kernelSketch(f.id, f.sketch)
     case 'extrude':
-      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.bodyName || undefined, subtract: f.subtract !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through && !f.upto, ...(f.upto ? { upto: faceHint(f.upto) } : {}) }
+      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.bodyName || undefined, subtract: f.subtract !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through && !f.upto, ...(f.upto ? { upto: faceHint(f.upto, features) } : {}) }
     case 'revolve': {
       const s = sk(f.sketch)?.sketch
       const line = s?.ents.find((e) => e.id === f.axis)
@@ -317,9 +391,9 @@ export function kernelFeature(f, features) {
         sink: { kind: f.sink.kind, d: num(f.sink.d), depth: num(f.sink.depth), angle: num(f.sink.angle) },
       }
     case 'fillet':
-      return { id: f.id, type: 'fillet', edges: f.edges.map(edgeHint), radius: num(f.radius) }
+      return { id: f.id, type: 'fillet', edges: f.edges.map((x) => edgeHint(x, features)), radius: num(f.radius) }
     case 'chamfer':
-      return { id: f.id, type: 'chamfer', edges: f.edges.map(edgeHint), distance: num(f.distance) }
+      return { id: f.id, type: 'chamfer', edges: f.edges.map((x) => edgeHint(x, features)), distance: num(f.distance) }
     case 'pattern': {
       const out = { id: f.id, type: 'pattern', kind: f.kind, features: f.features, count: num(f.count) }
       if (f.kind === 'linear') {
@@ -341,31 +415,31 @@ export function kernelFeature(f, features) {
     case 'mirror':
       return { id: f.id, type: 'mirror', features: f.features, plane: planeOf(f.plane) }
     case 'removefaces':
-      return { id: f.id, type: 'removefaces', faces: f.faces.map(faceHint) }
+      return { id: f.id, type: 'removefaces', faces: f.faces.map((x) => faceHint(x, features)) }
     case 'moveface':
-      return { id: f.id, type: 'moveface', faces: f.faces.map(faceHint), distance: num(f.distance) }
+      return { id: f.id, type: 'moveface', faces: f.faces.map((x) => faceHint(x, features)), distance: num(f.distance) }
     case 'sweep':
       return { id: f.id, type: 'sweep', sketch: f.sketch, path: f.path, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'loft':
       return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'shell':
-      return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
+      return { id: f.id, type: 'shell', faces: f.faces.map((x) => faceHint(x, features)), thickness: num(f.thickness) }
     case 'split':
       return { id: f.id, type: 'split', plane: planeOf(f.plane), keep: f.keep }
     case 'stdpart':
-      return { id: f.id, type: 'stdpart', kind: f.kind, size: f.size, length: num(f.length), name: f.bodyName, at: f.at ? faceHint(f.at) : null, otherSide: !!f.otherSide }
+      return { id: f.id, type: 'stdpart', kind: f.kind, size: f.size, length: num(f.length), name: f.bodyName, at: f.at ? faceHint(f.at, features) : null, otherSide: !!f.otherSide }
     case 'draft':
-      return { id: f.id, type: 'draft', faces: f.faces.map(faceHint), plane: planeOf(f.plane), angle: num(f.angle), flip: !!f.flip }
+      return { id: f.id, type: 'draft', faces: f.faces.map((x) => faceHint(x, features)), plane: planeOf(f.plane), angle: num(f.angle), flip: !!f.flip }
     case 'rib':
       return { id: f.id, type: 'rib', sketch: f.sketch, thickness: num(f.thickness) }
     case 'align':
-      return { id: f.id, type: 'align', moving: f.moving ? faceHint(f.moving) : null, target: f.target ? faceHint(f.target) : null, offset: num(f.offset) || 0 }
+      return { id: f.id, type: 'align', moving: f.moving ? faceHint(f.moving, features) : null, target: f.target ? faceHint(f.target, features) : null, offset: num(f.offset) || 0 }
     case 'import':
       return { id: f.id, type: 'import', key: f.key, name: f.name, text: f.text }
     case 'movebody':
-      return { id: f.id, type: 'movebody', body: f.body ? faceHint(f.body) : null, d: [num(f.dx) || 0, num(f.dy) || 0, num(f.dz) || 0], axis: f.axis, angle: num(f.angle) || 0, copy: !!f.copy }
+      return { id: f.id, type: 'movebody', body: f.body ? faceHint(f.body, features) : null, d: [num(f.dx) || 0, num(f.dy) || 0, num(f.dz) || 0], axis: f.axis, angle: num(f.angle) || 0, copy: !!f.copy }
     case 'boolean':
-      return { id: f.id, type: 'boolean', op: f.op, targets: f.targets.map(faceHint), tools: f.tools.map(faceHint), keepTools: !!f.keepTools }
+      return { id: f.id, type: 'boolean', op: f.op, targets: f.targets.map((x) => faceHint(x, features)), tools: f.tools.map((x) => faceHint(x, features)), keepTools: !!f.keepTools }
     case 'refillet':
       return { id: f.id, type: 'refillet', surfaces: f.surfaces, axis: f.axis, radius: num(f.radius) }
     case 'rehole':

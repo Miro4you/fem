@@ -196,6 +196,11 @@ und Positionsnummern an der Isometrie.
 **Ring-Rundungen** (Torus an Kreiskanten, z. B. Übergang Nabe–Flansch, Außenkante einer Scheibe) lassen sich mit
 „Flächen entfernen“ exakt zurück zur scharfen Kante nehmen (Außenrundung auffüllen, Hohlkehle abziehen).
 
+**Bezüge folgen der Skizze:** gewählte Kanten/Flächen werden beim Bestätigen an den Skizzenpunkt gebunden, über dem
+sie senkrecht liegen (Ecke, Kreismitte, Bohrpunkt, Linienmitte); vor dem Bauen wird ihre Lage um dessen Verschiebung
+mitgeführt. Grenzen: Änderungen der Extrusionstiefe (Lage entlang der Normalen) und Bezüge ohne passenden
+Skizzenpunkt (z. B. Kanten aus Verrundungen, STEP-Teile) laufen weiter über die nächstgelegene passende Kante/Fläche.
+
 Offen: Bewegung/Gelenke (kinematische Lagebedingungen); „Radius ändern“ an Ring-Rundungen (nach dem Entfernen
 bleibt am Nachbarmantel eine Teilungskante, an der OpenCASCADE falsch verrundet – darum gesperrt mit Meldung);
 Kugelecken (drei Rundungen) beim Flächen-Entfernen; in der Zeichnung Einzelmaße (außer Bohrungen), frei gelegte Schnitte, Gewindedarstellung.
