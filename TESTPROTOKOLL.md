@@ -382,6 +382,7 @@ selbst starten.
 | 18e.66 | Mehr › Teil einfügen: STEP-Datei wählen (z. B. `examples/geometrie/flansch.step`) | Körper der Datei kommen als weitere Körper dazu (Namen aus der Datei bzw. Dateiname), Feature im Verlauf; mit „Körper verschieben“ anordnen; wird mit dem Projekt gespeichert | [ ] |
 | 18e.67 | Mehr › Ausrichten: Fläche am zu bewegenden Körper, dann Zielfläche am anderen Körper; bzw. Zylinder des Bolzens und der Bohrung | eben: Körper wird gedreht und auf die Zielfläche gelegt (Abstand einstellbar); Zylinder: gleiche Achse (Versatz längs der Achse) | [ ] |
 | 18e.68 | Winkel (L-Profil extrudiert), Skizze auf XZ mit „Abstand zur Ebene“ in der Mitte, Linie von Schenkel zu Schenkel; Mehr › Rippe, Dicke 4 | dreieckige Rippe füllt die Ecke bis zu den Wänden, symmetrisch zur Skizzenebene | [ ] |
+| 18e.69 | Quader, Mehr › Formschräge: zwei Seitenflächen anklicken, neutrale Ebene XY, 3° | Seiten neigen sich nach innen (oben kleiner), Boden behält das Maß; „Richtung umkehren“ kehrt die Neigung um. Menü „Mehr“ in Gruppen Formen / Ändern / Körper und Baugruppe | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

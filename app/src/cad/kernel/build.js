@@ -1058,6 +1058,52 @@ function booleanOp(model, f, warn) {
   void vol0
 }
 
+/// Formschräge: gewählte Seitenflächen um den Winkel neigen; Zugrichtung = Normale der neutralen Ebene
+function draftOp(model, f, warn) {
+  const ang = ((Number(f.angle) || 0) * Math.PI) / 180
+  if (!ang) throw new Problem('Formschräge: Winkel angeben')
+  if (!f.faces?.length) throw new Problem('Formschräge: Seitenflächen im Bild wählen')
+  const pl = f.plane
+  if (!pl) throw new Problem('Formschräge: neutrale Ebene wählen (dort bleibt das Maß)')
+  const dir = mul(unit(pl.normal), f.flip ? -1 : 1)
+  const per = new Map()
+  for (const ref of f.faces) {
+    const c = findFace(model, ref, 'Formschräge')
+    if (c.face.geomType !== 'PLANE') throw new Problem('Formschräge: nur ebene Seitenflächen')
+    if (Math.abs(dot(unit(tuple(c.face.normalAt())), dir)) > 0.999) throw new Problem('Formschräge: eine gewählte Fläche liegt parallel zur neutralen Ebene – Seitenflächen wählen')
+    if (!per.has(c.bi)) per.set(c.bi, [])
+    per.get(c.bi).push(c.face)
+  }
+  const O = oc()
+  const pln = new O.gp_Pln(gpPnt(pl.origin), gpDir(dir))
+  for (const [bi, faces] of per) {
+    const body = model.bodies[bi]
+    const mk = new O.BRepOffsetAPI_DraftAngle(body.shape.wrapped)
+    let ok = true
+    for (const face of faces) {
+      mk.Add(face.wrapped, gpDir(dir), ang, pln, true)
+      if (!mk.AddDone()) {
+        ok = false
+        break
+      }
+    }
+    let shape = null
+    if (ok)
+      try {
+        mk.Build(new O.Message_ProgressRange())
+        if (mk.IsDone()) shape = cast(mk.Shape())
+      } catch {
+        shape = null
+      }
+    mk.delete()
+    const solid = shape && solidsOf(shape)[0]
+    if (!solid) throw new Problem(`Formschräge: ${f.angle}° lässt sich an diesen Flächen nicht erzeugen – Seitenflächen und neutrale Ebene prüfen`)
+    model.bodies[bi] = { shape: solid, name: body.name, src: body.src }
+  }
+  pln.delete?.()
+  void warn
+}
+
 /// Rippe: je Linie der Skizze den Spalt zwischen Linie und Bauteil (in der Skizzenebene) mit der Dicke t füllen.
 /// Für beide Seiten der Linie wird ein Streifen bis weit hinaus gebildet; vom Streifen ohne Bauteil bleibt das Stück,
 /// das an der Linie liegt – auf der Seite, wo es endlich (kleiner) ist.
@@ -1428,6 +1474,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'movebody') moveBody(model, f, warn)
   else if (f.type === 'align') alignBody(model, f, warn)
   else if (f.type === 'rib') ribOp(model, f, sketches, warn)
+  else if (f.type === 'draft') draftOp(model, f, warn)
   else if (f.type === 'import') importPart(model, f)
   else if (f.type === 'refillet') refillet(model, f, warn)
   else if (f.type === 'rehole') rehole(model, f, warn)

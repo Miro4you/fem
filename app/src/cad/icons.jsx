@@ -166,6 +166,15 @@ export const IcRib = (p) => (
   </Svg>
 )
 
+export const IcDraft = (p) => (
+  <Svg {...p}>
+    <path d="M5 20h14" className={M} />
+    <path d="M6.5 20 8.5 5h7l2 15" className={A} />
+    <path d="M8.5 5v15M15.5 5v15" className={M} strokeDasharray="1.6 1.6" />
+    <path d="M12 2.5v4M10.5 4 12 2.5 13.5 4" />
+  </Svg>
+)
+
 export const IcSweep = (p) => (
   <Svg {...p}>
     <ellipse cx="5.5" cy="17.5" rx="2.5" ry="3" className={F} />

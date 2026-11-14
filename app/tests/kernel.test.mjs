@@ -444,3 +444,24 @@ test('Rippe: Linie quer durch die Ecke eines Winkels', () => {
   const angle = (40 * 5 + 35 * 5) * 30
   near(r.volume, angle + 0.5 * 25 * 25 * 4, 1e-6, 'Winkel + dreieckige Rippe 25 × 25 × 4')
 })
+
+test('Formschräge: vier Seiten eines Quaders um 5° geneigt', () => {
+  clearCache()
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 40, 40) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 20, dir: 1 },
+  ]
+  const sides = [
+    { center: [20, 0, 10], kind: 'plane', normal: [0, -1, 0] },
+    { center: [40, 20, 10], kind: 'plane', normal: [1, 0, 0] },
+    { center: [20, 40, 10], kind: 'plane', normal: [0, 1, 0] },
+    { center: [0, 20, 10], kind: 'plane', normal: [-1, 0, 0] },
+  ]
+  const r = build({ features: [...base, { id: 3, type: 'draft', faces: sides, plane: { origin: [0, 0, 0], normal: [0, 0, 1] }, angle: 5 }] })
+  allOk(r)
+  // Pyramidenstumpf: unten 40 × 40, oben um 2·20·tan5° kleiner (Seiten neigen nach innen)
+  const k = 20 * Math.tan((5 * PI) / 180)
+  const a = 40
+  const b = 40 - 2 * k
+  near(r.volume, (20 / 3) * (a * a + a * b + b * b), 1e-4, 'Stumpf')
+})

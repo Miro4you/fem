@@ -72,6 +72,7 @@ const FEATURE_ICON = {
   import: I.IcImportPart,
   align: I.IcAlign,
   rib: I.IcRib,
+  draft: I.IcDraft,
   sweep: I.IcSweep,
   loft: I.IcLoft,
   refillet: I.IcFillet,
@@ -132,12 +133,15 @@ const PART_TOOLS = [
 const PART_KEYS = { s: 'sketch', e: 'extrude', r: 'revolve', h: 'hole', f: 'fillet', c: 'chamfer', p: 'pattern', m: 'mirror', a: 'shell', d: 'draftpad' }
 const PART_KEY_OF = Object.fromEntries(Object.entries(PART_KEYS).map(([k, v]) => [v, k.toUpperCase()]))
 // seltener gebraucht: im Menü „Mehr“
+// Gruppen im Menü „Mehr“: [Überschrift, erstes Werkzeug der Gruppe]
+const MORE_GROUPS = { rib: 'Formen', moveface: 'Ändern', boolean: 'Körper und Baugruppe' }
 const MORE_TOOLS = [
   ['rib', 'Rippe: Linie in einer Skizze quer durch die Ecke – füllt mit der Dicke bis zu den Wänden'],
   ['sweep', 'Sweep: Profil-Skizze entlang einer Pfad-Skizze (z. B. Rohr, Bügel)'],
   ['loft', 'Loft: Übergang zwischen zwei oder mehr Skizzen'],
   ['moveface', 'Ebene Fläche verschieben (z. B. Wand dicker)'],
   ['removefaces', 'Flächen entfernen (z. B. Bohrung oder Radius weg)'],
+  ['draft', 'Formschräge: Seitenflächen neigen (Guss, Spritzguss) – neutrale Ebene behält das Maß'],
   ['boolean', 'Boolesch: Körper vereinigen, voneinander abziehen oder Schnittmenge'],
   ['movebody', 'Körper verschieben oder drehen (auch als Kopie) – z. B. Teile zueinander anordnen'],
   ['import', 'Teil einfügen: STEP-Datei als weiteren Körper holen (danach mit „Körper verschieben“ anordnen)'],
@@ -494,7 +498,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (type === 'sketch') {
       setPickFor('plane')
       draft.sketch = null
-    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces', boolean: 'btarget', movebody: 'mbody', align: 'amov' }[type] ?? null)
+    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces', boolean: 'btarget', movebody: 'mbody', align: 'amov', draft: 'faces' }[type] ?? null)
   }
 
   // Feature mit einer bestimmten Skizze anlegen (Kontextmenü, „weiter mit“)
@@ -845,7 +849,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       case 'edges':
         return { edges: true }
       case 'faces':
-        return edit?.draft.type === 'moveface' ? { planar: true } : { faces: true }
+        return edit?.draft.type === 'moveface' || edit?.draft.type === 'draft' ? { planar: true } : { faces: true }
       case 'btarget':
       case 'btool':
       case 'mbody':
@@ -998,7 +1002,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // Stand vor dem bearbeiteten Feature (zum Wählen von Kanten/Flächen)
   const [before, setBefore] = useState(null)
-  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean', 'movebody', 'align'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
+  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean', 'movebody', 'align', 'draft'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
   useEffect(() => {
     if (!beforeKey) {
       setBefore(null)
@@ -1061,7 +1065,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       const bs = new Set([...bodiesOf(d.targets ?? []), ...bodiesOf(d.tools ?? [])])
       for (const x of t?.surfaces ?? []) if (bs.has(x.body)) out.faces.add(x.tag)
     }
-    if (d.type === 'mirror' && d.plane?.std) out.std.add(d.plane.std)
+    if ((d.type === 'mirror' || d.type === 'draft') && d.plane?.std) out.std.add(d.plane.std)
+    if (d.type === 'draft' && d.plane?.face) for (const t of matchFaces(viewTess, [d.plane.face])) out.faces.add(t)
     if (d.type === 'mirror' && d.plane?.face) out.faces = matchFaces(viewTess, [d.plane.face])
     if ((d.type === 'refillet' || d.type === 'rehole') && d.surfaces) out.faces = matchFaces(viewTess, d.surfaces.map((c) => ({ center: c })))
     return out
@@ -2478,6 +2483,20 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
         </>
       )}
 
+      {d.type === 'draft' && (
+        <>
+          <PickButton active={pickFor === 'faces'} label="Seitenflächen" value={d.faces.length ? `${d.faces.length} gewählt` : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'faces' ? null : 'faces')} />
+          <PickButton active={pickFor === 'mplane'} label="Neutrale Ebene" value={d.plane?.std ? `Ebene ${d.plane.std}` : d.plane?.face ? 'Fläche' : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'mplane' ? null : 'mplane')} />
+          <div className="row">
+            <Num label="Winkel" unit="°" value={d.angle} onChange={(angle) => setDraft({ angle })} />
+            <label className="check">
+              <input type="checkbox" checked={!!d.flip} onChange={(e) => setDraft({ flip: e.target.checked })} /> Richtung umkehren
+            </label>
+          </div>
+          <p className="hint">Die Seitenflächen werden geneigt; an der neutralen Ebene (z. B. Boden oder Trennebene) bleibt das Maß. Zugrichtung = Normale der Ebene.</p>
+        </>
+      )}
+
       {d.type === 'rib' && (
         <>
           {sketchSel}
@@ -2669,7 +2688,12 @@ function MoreMenu({ disabled, onPick }) {
         <div className="cad-more-menu" role="menu">
           {MORE_TOOLS.map(([k, title]) => {
             const Icon = FEATURE_ICON[k]
-            return (
+            return [
+              MORE_GROUPS[k] && (
+                <div key={'g' + k} className="cad-more-group">
+                  {MORE_GROUPS[k]}
+                </div>
+              ),
               <button
                 key={k}
                 role="menuitem"
@@ -2684,8 +2708,8 @@ function MoreMenu({ disabled, onPick }) {
                   <b>{FEATURE_LABEL[k]}</b>
                   <small>{title.split(':').slice(-1)[0].trim()}</small>
                 </span>
-              </button>
-            )
+              </button>,
+            ]
           })}
         </div>
       )}

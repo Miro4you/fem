@@ -18,6 +18,7 @@ export const FEATURE_LABEL = {
   import: 'Teil einfügen',
   align: 'Ausrichten',
   rib: 'Rippe',
+  draft: 'Formschräge',
   sweep: 'Sweep',
   loft: 'Loft',
   refillet: 'Radius ändern',
@@ -155,6 +156,8 @@ export function defaults(type) {
       return { moving: null, target: null, offset: '0' }
     case 'rib':
       return { sketch: null, thickness: '3' }
+    case 'draft':
+      return { faces: [], plane: { std: 'XY' }, angle: '3', flip: false }
     case 'movebody':
       return { body: null, dx: '0', dy: '0', dz: '0', axis: 'z', angle: '0', copy: false }
     case 'sweep':
@@ -239,6 +242,10 @@ export function problemOf(f, features) {
       return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
     case 'import':
       return f.text ? null : 'STEP-Datei fehlt'
+    case 'draft':
+      if (!f.faces.length) return 'Seitenflächen im Bild wählen'
+      if (!planeOf(f.plane)) return 'neutrale Ebene wählen'
+      return num(f.angle) ? null : 'Winkel angeben'
     case 'rib':
       if (!has(f.sketch)) return 'Skizze mit der Rippenlinie wählen'
       return pos(f.thickness) ? null : 'Dicke > 0 angeben'
@@ -330,6 +337,8 @@ export function kernelFeature(f, features) {
       return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
+    case 'draft':
+      return { id: f.id, type: 'draft', faces: f.faces.map(faceHint), plane: planeOf(f.plane), angle: num(f.angle), flip: !!f.flip }
     case 'rib':
       return { id: f.id, type: 'rib', sketch: f.sketch, thickness: num(f.thickness) }
     case 'align':
@@ -362,7 +371,7 @@ export function cadParams(features) {
   const out = []
   for (const f of features) {
     if (f.suppressed) continue
-    const field = { rib: ['thickness', 'Dicke'], movebody: ['angle', 'Winkel'], extrude: ['depth', 'Tiefe'], revolve: ['angle', 'Winkel'], hole: ['diameter', 'Ø'], fillet: ['radius', 'Radius'], chamfer: ['distance', 'Fase'], moveface: ['distance', 'Abstand'], shell: ['thickness', 'Wandstärke'], refillet: ['radius', 'Radius'], rehole: ['diameter', 'Ø'] }[f.type]
+    const field = { draft: ['angle', 'Winkel'], rib: ['thickness', 'Dicke'], movebody: ['angle', 'Winkel'], extrude: ['depth', 'Tiefe'], revolve: ['angle', 'Winkel'], hole: ['diameter', 'Ø'], fillet: ['radius', 'Radius'], chamfer: ['distance', 'Fase'], moveface: ['distance', 'Abstand'], shell: ['thickness', 'Wandstärke'], refillet: ['radius', 'Radius'], rehole: ['diameter', 'Ø'] }[f.type]
     if (field && !(f.type === 'extrude' && f.through)) out.push({ key: `cad:${f.id}:${field[0]}`, label: `${f.name}: ${field[1]}`, unit: f.type === 'revolve' ? '°' : 'mm', value: num(f[field[0]]) })
     if (f.type === 'pattern') out.push({ key: `cad:${f.id}:count`, label: `${f.name}: Anzahl`, unit: '', value: num(f.count) })
     if (f.type === 'sketch')
