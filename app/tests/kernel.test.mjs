@@ -567,3 +567,23 @@ test('Zeichnung (SVG): drei Ansichten mit verdeckten Kanten, Mittellinien, Maßs
   const big = build({ features: [{ id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 900, 300) }, { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 200, dir: 1 }], svg: true, tess: false })
   assert.ok(/>1:(5|10)</.test(big.svg), big.svg.match(/>\d+:\d+</)?.[0])
 })
+
+test('Mehrere Körper: STL und Zeichnung lassen den Cache heil (makeCompound löscht sonst die Körper)', () => {
+  clearCache()
+  const features = [
+    { id: 1, type: 'stdpart', kind: 'bolt', size: 'M8', length: 30 },
+    { id: 2, type: 'stdpart', kind: 'nut', size: 'M8' },
+  ]
+  const a = build({ features, stl: true, tess: false })
+  allOk(a)
+  assert.ok(a.stlBlob)
+  const b = build({ features, svg: { title: 'Verbindung' }, tess: false })
+  allOk(b)
+  assert.ok(b.svg.includes('Verbindung'))
+  const c = build({ features, svg: { body: 1 }, tess: false })
+  assert.ok(c.svg.includes('</svg>'))
+  const d = build({ features })
+  allOk(d)
+  assert.equal(d.bodies, 2)
+  near(d.volume, a.volume, 1e-9)
+})

@@ -1160,6 +1160,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       return '7.85'
     }
   })
+  const [drawing, setDrawing] = useState(false) // Zeichnungs-Vorschau offen
   const [hotSketch, setHotSketch] = useState(null) // Skizze im Verlauf überfahren: im Bild zeigen
   const [hiddenBodies, setHiddenBodies] = useState(() => new Set())
   const bodyCount = built?.bodies ?? 0
@@ -1806,24 +1807,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               <button
                 className="btn wide"
                 disabled={!hasBody || busy}
-                title="Technische Zeichnung als SVG: Vorderansicht, Seitenansicht von links, Draufsicht (Projektionsmethode 1), Isometrie, Gesamtmaße, Mittellinien und Schriftfeld – im Browser öffnen und als PDF drucken"
-                onClick={async () => {
-                  try {
-                    const infos = built?.bodies_info ?? []
-                    const title = infos.length === 1 && infos[0].named ? infos[0].name : infos.find((b) => b.named)?.name ?? 'Konstruktion'
-                    const vol = infos.reduce((a, b) => a + b.volume, 0)
-                    const mat = DENSITIES.find(([, v]) => String(v) === String(density))
-                    const mass = vol > 0 ? `${fmtMass((vol / 1000) * Number(density))}${mat ? ` (${mat[0]})` : ''}` : ''
-                    const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                    const svg = await cadBuildSvg({ base: cad.base ?? null, features: kernelFeatures(live) }, { title, date, mass })
-                    const safe = title.replace(/×/g, 'x').replace(/[^\p{L}\p{N} _.-]+/gu, '').trim() || 'Konstruktion'
-                    await api.saveBlob(new Blob([svg], { type: 'image/svg+xml' }), `${safe} - Zeichnung.svg`, 'SVG-Zeichnung', 'svg')
-                  } catch (e) {
-                    onError(String(e?.message ?? e))
-                  }
-                }}
+                title="Technische Zeichnung: Vorderansicht, Seitenansicht von links, Draufsicht (Projektionsmethode 1), Isometrie, Gesamtmaße, Bohrungsangaben und Schriftfeld – ansehen, als SVG speichern oder als PDF drucken"
+                onClick={() => setDrawing(true)}
               >
-                <FileText size={15} /> Zeichnung (SVG)
+                <FileText size={15} /> Zeichnung …
               </button>
             </section>
           </>
@@ -1998,6 +1985,23 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           )}
         </div>
         {showKeys && <KeysHelp sketch={!!sketchEdit} onClose={() => setShowKeys(false)} />}
+        {drawing && built?.bodies_info && (
+          <DrawingPreview
+            bodies={built.bodies_info}
+            onClose={() => setDrawing(false)}
+            onError={onError}
+            make={(body) => {
+              const infos = built.bodies_info
+              const pick = body == null ? infos : [infos[body]]
+              const title = body != null || infos.length === 1 ? pick[0].name : `Baugruppe (${infos.length} Teile)`
+              const vol = pick.reduce((a, b) => a + b.volume, 0)
+              const mat = DENSITIES.find(([, v]) => String(v) === String(density))
+              const mass = vol > 0 ? `${fmtMass((vol / 1000) * Number(density))}${mat ? ` (${mat[0]})` : ''}` : ''
+              const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+              return cadBuildSvg({ base: cad.base ?? null, features: kernelFeatures(live) }, { title, date, mass, body: body ?? undefined }).then((svg) => ({ svg, title }))
+            }}
+          />
+        )}
         {ctxMenu && (
           <FeatureMenu
             menu={ctxMenu}
@@ -2991,6 +2995,99 @@ function KeysHelp({ sketch, onClose }) {
             <Table title="Allgemein" rows={general} />
             <Table title="Maus" rows={mouse} />
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Zeichnung ansehen: alle Körper oder ein einzelner (Einzelteilzeichnung), als SVG speichern oder drucken (PDF)
+function DrawingPreview({ bodies, make, onClose, onError }) {
+  const [body, setBody] = useState(null)
+  const [res, setRes] = useState(null) // { svg, title, url }
+  const [busy, setBusy] = useState(true)
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    let alive = true
+    let url = null
+    setBusy(true)
+    setErr(null)
+    make(body)
+      .then((r) => {
+        if (!alive) return
+        url = URL.createObjectURL(new Blob([r.svg], { type: 'image/svg+xml' }))
+        setRes({ ...r, url })
+      })
+      .catch((e) => alive && setErr(String(e?.message ?? e)))
+      .finally(() => alive && setBusy(false))
+    return () => {
+      alive = false
+      if (url) URL.revokeObjectURL(url)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [body])
+  useEffect(() => {
+    const k = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+  const fileName = () => `${(res?.title ?? 'Konstruktion').replace(/×/g, 'x').replace(/[^\p{L}\p{N} _.-]+/gu, '').trim() || 'Konstruktion'} - Zeichnung`
+  const print = () => {
+    if (!res) return
+    const w = res.svg.match(/width="(\d+)mm" height="(\d+)mm"/)
+    const f = document.createElement('iframe')
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    f.srcdoc = `<!doctype html><html><head><title>${fileName()}</title><style>@page { size: ${w ? `${w[1]}mm ${w[2]}mm` : 'A4 landscape'}; margin: 0 } html, body { margin: 0 } svg { display: block; width: 100vw; height: 100vh }</style></head><body>${res.svg.replace(/^<\?xml[^>]*>\s*/, '')}</body></html>`
+    f.onload = () => {
+      f.contentWindow.focus()
+      f.contentWindow.print()
+      // Druckdialog ist zu: Fokus zurück, damit Esc das Fenster wieder schließt
+      window.focus()
+      document.querySelector('.dwg-card')?.focus()
+      setTimeout(() => f.remove(), 60000)
+    }
+    document.body.appendChild(f)
+  }
+  return (
+    <div className="keys-help" onClick={onClose}>
+      <div className="keys-card dwg-card" tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+        <div className="keys-head">
+          <b>Zeichnung</b>
+          <div className="dwg-bar">
+            {bodies.length > 1 && (
+              <select value={body ?? ''} onChange={(e) => setBody(e.target.value === '' ? null : Number(e.target.value))} title="Alle Körper auf ein Blatt oder ein einzelnes Teil">
+                <option value="">Alle Körper ({bodies.length})</option>
+                {bodies.map((b, i) => (
+                  <option key={i} value={i}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              className="btn"
+              disabled={!res || busy}
+              onClick={() => api.saveBlob(new Blob([res.svg], { type: 'image/svg+xml' }), `${fileName()}.svg`, 'SVG-Zeichnung', 'svg').catch((e) => onError(String(e?.message ?? e)))}
+            >
+              <Download size={15} /> Als SVG
+            </button>
+            <button className="btn" disabled={!res || busy} onClick={print} title="Drucken – als Drucker „Als PDF speichern“ wählen">
+              <FileText size={15} /> Drucken / PDF
+            </button>
+            <button className="icon-btn" title="Schließen (Esc)" onClick={onClose}>
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        <div className={'dwg-sheet' + (busy ? ' busy' : '')}>
+          {err ? (
+            <span className="hint error">Zeichnung ging nicht: {err}</span>
+          ) : res ? (
+            <img src={res.url} alt="Zeichnung" />
+          ) : (
+            <span className="hint">Zeichnung wird erstellt …</span>
+          )}
+          {busy && res && <Loader2 className="spin dwg-spin" size={28} />}
         </div>
       </div>
     </div>

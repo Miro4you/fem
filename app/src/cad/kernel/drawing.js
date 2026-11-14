@@ -294,13 +294,14 @@ export function drawingSvg(shape, bbox, opts = {}) {
   .tv { font-size: 3.5px }
   .tv.big { font-size: 5px; font-weight: bold }
   .frame { stroke-width: 0.5 }
+  rect.bg { fill: #fff; stroke: none }
   line { stroke-width: 0.35 }
   .ctr line, .dim .lk { stroke-width: 0.18; stroke-dasharray: 6 1.2 0.6 1.2 }
   .dim line { stroke-width: 0.25 }
   .sym path, .sym circle { stroke-width: 0.3 }
   .sym .ctr { stroke-width: 0.18; stroke-dasharray: 2 0.6 0.4 0.6 }
 </style>
-<rect width="${sheet.w}" height="${sheet.h}" fill="#fff" stroke="none"/>
+<rect class="bg" width="${sheet.w}" height="${sheet.h}"/>
 <rect class="frame" x="${L}" y="${T}" width="${R - L}" height="${B - T}"/>
 ${body.join('\n')}
 ${dims.join('\n')}

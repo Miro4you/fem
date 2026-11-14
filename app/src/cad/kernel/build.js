@@ -1682,6 +1682,9 @@ function importBase(key, text) {
   return m
 }
 
+// Verbund aus Kopien: makeCompound von replicad löscht die übergebenen Formen (die gehören aber dem Cache)
+const compoundOf = (shapes) => makeCompound(shapes.map((x) => x.clone()))
+
 // Achsen der Bohrungen/Wellen für die Mittellinien der Zeichnung (nur volle Zylinder bzw. Kegel, keine Verrundungen)
 function drawingAxes(model) {
   const axes = []
@@ -1823,14 +1826,20 @@ export function build(job) {
   }
   // STL für den 3D-Druck (alle Körper, binär, fein genug für Radien)
   if (job.stl && model.bodies.length && !failed) {
-    const all = model.bodies.length === 1 ? model.bodies[0].shape : makeCompound(model.shapes)
+    const all = model.bodies.length === 1 ? model.bodies[0].shape : compoundOf(model.shapes)
     result.stlBlob = all.blobSTL({ binary: true, tolerance: Number(job.stlTol) || 0.02, angularTolerance: 0.15 })
+    if (model.bodies.length > 1) all.delete()
   }
   // technische Zeichnung (SVG) mit drei Ansichten, Isometrie und Schriftfeld
+  // (job.svg.body: nur dieser Körper – Einzelteilzeichnung)
   if (job.svg && model.bodies.length && !failed) {
-    const all = model.bodies.length === 1 ? model.bodies[0].shape : makeCompound(model.shapes)
-    const volume = model.bodies.reduce((a, b) => a + massOf(b).volume, 0)
-    result.svg = drawingSvg(all, bboxOf(model.shapes), { volume, axes: drawingAxes(model), ...(job.svg === true ? {} : job.svg) })
+    const opts = job.svg === true ? {} : job.svg
+    const one = Number.isInteger(opts.body) ? model.bodies[opts.body] : null
+    const sel = one ? { bodies: [one], shapes: [one.shape] } : model
+    const all = sel.bodies.length === 1 ? sel.bodies[0].shape : compoundOf(sel.shapes)
+    const volume = sel.bodies.reduce((a, b) => a + massOf(b).volume, 0)
+    result.svg = drawingSvg(all, bboxOf(sel.shapes), { volume, axes: drawingAxes(sel), ...opts })
+    if (sel.bodies.length > 1) all.delete()
   }
   if (job.tess !== false) result.tess = model.bodies.length ? tessellate(model, Number(job.quality) || 1) : null
   result.timing = { build: Math.round(tBuild - t0), total: Math.round(performance.now() - t0), cached: start }
