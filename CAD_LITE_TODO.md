@@ -190,7 +190,8 @@ Punkte. Ausrichten ist ein Feature im Verlauf und wird bei Änderungen neu angew
 **Zeichnung (SVG):** Vorderansicht, Seitenansicht von links, Draufsicht (Projektionsmethode 1, verdeckte Kanten
 gestrichelt über HLR), Isometrie, Gesamtmaße, Mittellinien/-kreuze an Bohrungen und Wellen, Bohrungsangaben „6× Ø9, LK Ø70“, genormter Maßstab,
 A4/A3 und Schriftfeld (Benennung, Masse mit Werkstoff, Datum, ISO 2768-m); Vorschau mit Einzelteilwahl, Schnitt A–A
-durch die Mitte (schraffiert), Drucken als PDF.
+durch die Mitte (schraffiert), Drucken als PDF; Baugruppen mit Stückliste (Pos., Menge, Benennung, Werkstoff, Masse)
+und Positionsnummern an der Isometrie.
 
 Offen: Bewegung/Gelenke (kinematische Lagebedingungen), Torusflächen (Ecken zweier Rundungen) beim
 Flächen-Entfernen; in der Zeichnung Einzelmaße (außer Bohrungen), frei gelegte Schnitte, Gewindedarstellung.

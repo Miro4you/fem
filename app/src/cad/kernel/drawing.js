@@ -85,7 +85,7 @@ function axisLines(axes, v, s, tx, ty) {
 
 // Bohrungsangaben „n× Ød“ mit Hinweislinie in der Ansicht, in der die Bohrungen als Kreise erscheinen
 // (jeder Durchmesser einmal auf dem Blatt; done merkt sich die schon beschrifteten)
-function boreNotes(axes, v, s, tx, ty, done) {
+function boreNotes(axes, v, s, tx, ty, done, top = -Infinity) {
   const xd = unit(v.x)
   const dd = unit(v.dir)
   const yd = cross(dd, xd)
@@ -106,10 +106,12 @@ function boreNotes(axes, v, s, tx, ty, done) {
     const cx = tx + s * dot(a.c0, xd)
     const cy = ty - s * dot(a.c0, yd)
     const rr = (s * d) / 2
+    // schräg nach rechts oben; reichte das in die Überschrift der Ansicht, dann nach rechts unten
+    const down = cy - rr * Math.SQRT1_2 - 7 - 5 < top
     const px = cx + rr * Math.SQRT1_2
-    const py = cy - rr * Math.SQRT1_2
+    const py = down ? cy + rr * Math.SQRT1_2 : cy - rr * Math.SQRT1_2
     const qx = px + 7
-    const qy = py - 7
+    const qy = down ? py + 7 : py - 7
     // Lochkreis: mindestens drei gleiche Bohrungen gleich weit von ihrer Mitte → Strich-Punkt-Kreis und „LK Ø…“
     let lk = ''
     if (list.length >= 3) {
@@ -127,7 +129,7 @@ function boreNotes(axes, v, s, tx, ty, done) {
     out.push(`<line x1="${qx.toFixed(3)}" y1="${qy.toFixed(3)}" x2="${(qx + tw).toFixed(3)}" y2="${qy.toFixed(3)}"/>`)
     // Pfeil auf den Kreis
     const ux = Math.SQRT1_2
-    const uy = -Math.SQRT1_2
+    const uy = down ? Math.SQRT1_2 : -Math.SQRT1_2
     const ah = 2.5
     const aw = 0.9
     const bx = px + ux * ah
@@ -217,9 +219,18 @@ export function drawingSvg(shape, bbox, opts = {}) {
   const H = hi[2] - lo[2]
   // Blatt: A4 quer, wenn der Maßstab sonst unter 1:1 fiele und A3 1:1 erlaubt, dann A3
   const gap = 22 // Platz zwischen den Ansichten für Maße und Beschriftung
+  // Stückliste (nur bei mehreren Körpern): gleiche Namen = eine Position mit Menge
+  const groups = []
+  for (const part of opts.parts ?? []) {
+    const g = groups.find((x) => x.name === part.name)
+    if (g) g.count++
+    else groups.push({ pos: groups.length + 1, name: part.name, count: 1, volume: part.volume, center: part.center })
+  }
+  const showList = groups.length >= 1 && (opts.parts?.length ?? 0) > 1 && groups.length <= 15
+  const listH = showList ? 6 * (groups.length + 1) : 0
   const pick = (sw, sh) => {
     const areaW = sw - 20 - 10 - 3 * gap
-    const areaH = sh - 10 - 10 - 28 - 2 * gap - 4 // Schriftfeld (28 mm) unten frei halten
+    const areaH = sh - 10 - 10 - 28 - listH - 2 * gap - 4 // Schriftfeld (28 mm) und Stückliste unten frei halten
     for (const [n, d] of SCALES) {
       const s = n / d
       if (s * (W + D) <= areaW && s * (H + D) <= areaH) return { n, d, s }
@@ -245,7 +256,7 @@ export function drawingSvg(shape, bbox, opts = {}) {
   const usedW = s * (W + D) + gap
   const usedH = s * (H + D) + gap
   const x0 = L + Math.max(gap, (R - L - usedW) / 2 - 20)
-  const y0 = T + Math.max(gap * 0.6, (B - T - 28 - usedH) / 2)
+  const y0 = T + Math.max(gap * 0.6, (B - T - 28 - listH - usedH) / 2)
   const place = {
     front: [x0, y0],
     left: [x0 + s * W + gap, y0],
@@ -297,7 +308,7 @@ export function drawingSvg(shape, bbox, opts = {}) {
     body.push(`<g class="vis" stroke-width="${sw}">${p.visible.map((d) => `<path d="${d}"/>`).join('')}</g>`)
     body.push('</g>')
     body.push(axisLines(opts.axes ?? [], v, s, tx, ty))
-    notes.push(boreNotes(opts.axes ?? [], v, s, tx, ty, noted))
+    notes.push(boreNotes(opts.axes ?? [], v, s, tx, ty, noted, py))
     frames[k] = { x: px, y: py, w: s * (bx1 - bx0), h: s * (by1 - by0), sec: !!sec }
   }
   // Schnittverlauf A–A in der Draufsicht: Strichpunktlinie, dicke Enden, Pfeile in Blickrichtung (+y = nach oben)
@@ -327,7 +338,7 @@ export function drawingSvg(shape, bbox, opts = {}) {
   // Isometrie (eigener Maßstab) rechts unten über dem Schriftfeld
   const tbW = 180
   const tbH = 28
-  const isoBox = { x: (lv ? lv.x : x0 + s * W + gap), y: (frames.top ? frames.top.y : y0 + s * H + gap), r: R - 4, b: B - tbH - 6 }
+  const isoBox = { x: (lv ? lv.x : x0 + s * W + gap), y: (frames.top ? frames.top.y : y0 + s * H + gap), r: R - 4, b: B - tbH - listH - 6 }
   if (isoBox.r - isoBox.x > 30 && isoBox.b - isoBox.y > 25) {
     const p = project(shape, VIEWS.iso, false)
     if (p.bounds) {
@@ -340,11 +351,61 @@ export function drawingSvg(shape, bbox, opts = {}) {
       body.push(`<g transform="translate(${(ox - si * bx0).toFixed(3)} ${(oy + si * by1).toFixed(3)}) scale(${si})">`)
       body.push(`<g class="vis" stroke-width="${0.35 / si}">${p.visible.map((d) => `<path d="${d}"/>`).join('')}</g></g>`)
       labels.push(`<text class="lbl" x="${ox}" y="${oy - 1}">Isometrie (unmaßstäblich)</text>`)
+      // Positionsnummern an den Teilen (je Position am ersten Teil)
+      if (showList) {
+        const xd = unit(VIEWS.iso.x)
+        const yd = cross(unit(VIEWS.iso.dir), xd)
+        const gx = ox - si * bx0
+        const gy = oy + si * by1
+        // Positionsnummern in einer Spalte rechts neben dem Bild (passt es nicht: links), Höhe wie das Teil
+        const right = ox + si * iw + 12 <= isoBox.r - 4
+        const bx = right ? ox + si * iw + 12 : Math.max(isoBox.x + 4, ox - 12)
+        const items = groups
+          .filter((g) => g.center)
+          .map((g) => ({ g, sx: gx + si * dot(g.center, xd), sy: gy - si * dot(g.center, yd) }))
+          .sort((a, b) => a.sy - b.sy)
+        let last = -Infinity
+        for (const it of items) {
+          it.by = Math.max(it.sy, last + 8, oy + 4)
+          last = it.by
+        }
+        // unten über den Rand: Spalte nach oben schieben
+        const over = items.length ? items[items.length - 1].by - (isoBox.b - 4) : 0
+        if (over > 0) for (const it of items) it.by -= over
+        for (const { g, sx, sy, by } of items) {
+          const ll = Math.hypot(sx - bx, sy - by) || 1
+          const ex = bx + ((sx - bx) / ll) * 3.5
+          const ey = by + ((sy - by) / ll) * 3.5
+          dims.push(
+            `<g class="dim pos"><line x1="${ex.toFixed(2)}" y1="${ey.toFixed(2)}" x2="${sx.toFixed(2)}" y2="${sy.toFixed(2)}"/><circle class="dot" cx="${sx.toFixed(2)}" cy="${sy.toFixed(2)}" r="0.6"/><circle cx="${bx.toFixed(2)}" cy="${by.toFixed(2)}" r="3.5"/><text x="${bx.toFixed(2)}" y="${(by + 1.3).toFixed(2)}" text-anchor="middle">${g.pos}</text></g>`,
+          )
+        }
+      }
     }
   }
   // Schriftfeld (vereinfacht nach DIN EN ISO 7200)
   const tx0 = R - tbW
   const ty0 = B - tbH
+  // Stückliste über dem Schriftfeld: Kopfzeile unten, Positionen nach oben steigend
+  const list = []
+  if (showList) {
+    const cols = [[0, 'Pos.'], [12, 'Menge'], [26, 'Benennung'], [122, 'Werkstoff'], [150, 'Masse']]
+    const yb = ty0
+    list.push(`<rect class="frame" x="${tx0}" y="${yb - listH}" width="${tbW}" height="${listH}"/>`)
+    for (const [cx] of cols.slice(1)) list.push(`<line x1="${tx0 + cx}" y1="${yb - listH}" x2="${tx0 + cx}" y2="${yb}"/>`)
+    for (let i = 1; i <= groups.length; i++) list.push(`<line class="thin" x1="${tx0}" y1="${yb - 6 * i}" x2="${R}" y2="${yb - 6 * i}"/>`)
+    for (const [cx, t] of cols) list.push(`<text class="th" x="${tx0 + cx + 1.5}" y="${yb - 1.8}">${t}</text>`)
+    const dens = Number(opts.density)
+    groups.forEach((g, i) => {
+      const y = yb - 6 * (i + 1) - 1.8
+      const m = dens > 0 && g.volume > 0 ? (g.volume / 1000) * dens : null
+      const mass = m == null ? '' : m >= 1000 ? `${num(m / 1000, 3)} kg` : `${num(m, 1)} g`
+      const name = g.name.length > 48 ? g.name.slice(0, 47) + '…' : g.name
+      list.push(
+        `<text class="td" x="${tx0 + 1.5}" y="${y}">${g.pos}</text><text class="td" x="${tx0 + 13.5}" y="${y}">${g.count}</text><text class="td" x="${tx0 + 27.5}" y="${y}">${esc(name)}</text><text class="td" x="${tx0 + 123.5}" y="${y}">${esc(opts.material ?? '')}</text><text class="td" x="${tx0 + 151.5}" y="${y}">${mass}</text>`,
+      )
+    })
+  }
   const cell = (x, y, label, value, big) =>
     `<text class="tl" x="${x + 1.5}" y="${y + 3.2}">${label}</text><text class="${big ? 'tv big' : 'tv'}" x="${x + 1.5}" y="${y + (big ? 11.5 : 8.3)}">${esc(value)}</text>`
   const vol = opts.volume != null ? `${num(opts.volume / 1000, 2)} cm³` : ''
@@ -383,6 +444,12 @@ export function drawingSvg(shape, bbox, opts = {}) {
   .dim line { stroke-width: 0.25 }
   .sym path, .sym circle { stroke-width: 0.3 }
   .hatch { fill: none; stroke: #000 }
+  .pos circle { stroke-width: 0.35; fill: #fff }
+  .pos .dot { fill: #000; stroke: none }
+  .pos text { font-size: 3.5px }
+  line.thin { stroke-width: 0.18 }
+  .th { font-size: 2.4px; fill: #444 }
+  .td { font-size: 3px }
   .cut .cut-mid { stroke-width: 0.25; stroke-dasharray: 8 1.5 1 1.5 }
   .cut .cut-end { stroke-width: 0.7 }
   .cut .cut-lbl { font-size: 5px; font-weight: bold }
@@ -394,6 +461,7 @@ ${body.join('\n')}
 ${dims.join('\n')}
 ${notes.join('\n')}
 ${labels.join('\n')}
+${list.join('\n')}
 ${tb.join('\n')}
 </svg>
 `

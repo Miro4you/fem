@@ -1838,7 +1838,9 @@ export function build(job) {
     const sel = one ? { bodies: [one], shapes: [one.shape] } : model
     const all = sel.bodies.length === 1 ? sel.bodies[0].shape : compoundOf(sel.shapes)
     const volume = sel.bodies.reduce((a, b) => a + massOf(b).volume, 0)
-    result.svg = drawingSvg(all, bboxOf(sel.shapes), { volume, axes: drawingAxes(sel), ...opts })
+    let unnamed = 0
+    const parts = sel.bodies.length > 1 ? model.bodies.map((b) => ({ name: b.name ?? `Körper ${++unnamed}`, ...massOf(b) })) : null
+    result.svg = drawingSvg(all, bboxOf(sel.shapes), { volume, axes: drawingAxes(sel), parts, ...opts })
     if (sel.bodies.length > 1) all.delete()
   }
   if (job.tess !== false) result.tess = model.bodies.length ? tessellate(model, Number(job.quality) || 1) : null

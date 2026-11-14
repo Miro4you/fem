@@ -585,8 +585,11 @@ test('Mehrere Körper: STL und Zeichnung lassen den Cache heil (makeCompound lö
   const b = build({ features, svg: { title: 'Verbindung' }, tess: false })
   allOk(b)
   assert.ok(b.svg.includes('Verbindung'))
+  // Stückliste mit Positionen (Schraube, Mutter) und Positionsnummern in der Isometrie
+  assert.ok(b.svg.includes('>Schraube M8×30 ISO 4762<') && b.svg.includes('>Mutter M8 ISO 4032<') && b.svg.includes('>Pos.<'))
+  assert.equal((b.svg.match(/class="dim pos"/g) ?? []).length, 2)
   const c = build({ features, svg: { body: 1 }, tess: false })
-  assert.ok(c.svg.includes('</svg>'))
+  assert.ok(c.svg.includes('</svg>') && !c.svg.includes('>Pos.<'), 'Einzelteil ohne Stückliste')
   const d = build({ features })
   allOk(d)
   assert.equal(d.bodies, 2)

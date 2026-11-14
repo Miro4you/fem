@@ -1998,7 +1998,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               const mat = DENSITIES.find(([, v]) => String(v) === String(density))
               const mass = vol > 0 ? `${fmtMass((vol / 1000) * Number(density))}${mat ? ` (${mat[0]})` : ''}` : ''
               const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
-              return cadBuildSvg({ base: cad.base ?? null, features: kernelFeatures(live) }, { title, date, mass, body: body ?? undefined, section }).then((svg) => ({ svg, title }))
+              return cadBuildSvg({ base: cad.base ?? null, features: kernelFeatures(live) }, { title, date, mass, body: body ?? undefined, section, density: Number(density), material: mat?.[0] ?? '' }).then((svg) => ({ svg, title }))
             }}
           />
         )}

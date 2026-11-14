@@ -214,7 +214,7 @@ Tastenkürzel.
    vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP“** bzw. **„Als STL“** (3D-Druck) exportiert es,
    **„Zeichnung …“** zeigt ein Blatt mit drei Ansichten (verdeckte Kanten gestrichelt), Isometrie, Gesamtmaßen,
    Bohrungsangaben (z. B. „6× Ø9, LK Ø70“), Mittellinien und Schriftfeld – für alle Körper oder ein einzelnes Teil, wahlweise mit **Schnitt A–A**
-   (schraffiert, Schnittverlauf in der Draufsicht);
+   (schraffiert, Schnittverlauf in der Draufsicht); bei mehreren Körpern mit Stückliste und Positionsnummern;
    „Als SVG“ speichert, „Drucken / PDF“ druckt im richtigen Format (A4/A3 quer).
 
 **Aus Draftpad:** Startseite „Aus Draftpad“ oder Knopf „Draftpad“ in der Konstruktion öffnet die
