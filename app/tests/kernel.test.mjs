@@ -394,3 +394,33 @@ test('Teil einfügen (STEP) als weiterer Körper, Text nur einmal nötig', async
   allOk(r2)
   near(r2.volume, r.volume, 1e-9, 'gleiches Volumen')
 })
+
+test('Ausrichten: Fläche auf Fläche und Bolzen in Bohrung', () => {
+  clearCache()
+  const far = { origin: [100, 50, 0], normal: [0, 0, 1], u: [1, 0, 0] }
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: [...rect(0, 0, 40, 40), { t: 'circle', c: [20, 20], r: 5 }] },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1, bodyName: 'Platte' },
+    { id: 3, type: 'sketch', plane: far, ents: [{ t: 'circle', c: [0, 0], r: 5 }] },
+    { id: 4, type: 'extrude', sketch: 3, mode: 'new', depth: 30, dir: 1, bodyName: 'Bolzen' },
+  ]
+  const r0 = build({ features: base })
+  allOk(r0)
+  assert.equal(r0.bodies, 2)
+  const cylOf = (name) => {
+    const bi = r0.bodies_info.findIndex((b) => b.name === name)
+    const s = r0.tess.surfaces.find((x) => x.body === bi && x.kind === 'cylinder')
+    return { center: s.center, kind: 'cylinder', axis: s.axis, radius: s.radius, hole: s.hole }
+  }
+  const r = build({ features: [...base, { id: 5, type: 'align', moving: cylOf('Bolzen'), target: cylOf('Platte'), offset: 0 }] })
+  allOk(r)
+  const c = r.bodies_info.find((b) => b.name === 'Bolzen').center
+  assert.ok(Math.abs(c[0] - 20) < 1e-6 && Math.abs(c[1] - 20) < 1e-6, `Bolzen in der Bohrung: ${c}`)
+  // Unterseite des Bolzens (z = 0, Normale −z) auf die Oberseite der Platte (z = 10)
+  const bot = { center: [100, 50, 0], kind: 'plane', normal: [0, 0, -1] }
+  const topP = { center: [20, 35, 10], kind: 'plane', normal: [0, 0, 1] }
+  const r2 = build({ features: [...base, { id: 5, type: 'align', moving: bot, target: topP, offset: 0 }] })
+  allOk(r2)
+  const c2 = r2.bodies_info.find((b) => b.name === 'Bolzen').center
+  assert.ok(Math.abs(c2[2] - 25) < 1e-6 && Math.abs(c2[0] - 100) < 1e-6, `Bolzen steht auf der Platte: ${c2}`)
+})

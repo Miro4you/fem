@@ -16,6 +16,7 @@ export const FEATURE_LABEL = {
   boolean: 'Boolesch',
   movebody: 'Körper verschieben',
   import: 'Teil einfügen',
+  align: 'Ausrichten',
   sweep: 'Sweep',
   loft: 'Loft',
   refillet: 'Radius ändern',
@@ -149,6 +150,8 @@ export function defaults(type) {
       return { faces: [], thickness: '2' }
     case 'boolean':
       return { op: 'union', targets: [], tools: [], keepTools: false }
+    case 'align':
+      return { moving: null, target: null, offset: '0' }
     case 'movebody':
       return { body: null, dx: '0', dy: '0', dz: '0', axis: 'z', angle: '0', copy: false }
     case 'sweep':
@@ -233,6 +236,8 @@ export function problemOf(f, features) {
       return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
     case 'import':
       return f.text ? null : 'STEP-Datei fehlt'
+    case 'align':
+      return f.moving && f.target ? null : !f.moving ? 'Fläche am Körper anklicken, der bewegt wird' : 'Zielfläche am anderen Körper anklicken'
     case 'movebody':
       if (!f.body) return 'Körper im Bild anklicken'
       return num(f.dx) || num(f.dy) || num(f.dz) || num(f.angle) ? null : 'Weg (x, y, z) oder Winkel angeben'
@@ -319,6 +324,8 @@ export function kernelFeature(f, features) {
       return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
+    case 'align':
+      return { id: f.id, type: 'align', moving: f.moving ? faceHint(f.moving) : null, target: f.target ? faceHint(f.target) : null, offset: num(f.offset) || 0 }
     case 'import':
       return { id: f.id, type: 'import', key: f.key, name: f.name, text: f.text }
     case 'movebody':

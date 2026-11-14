@@ -149,6 +149,15 @@ export const IcImportPart = (p) => {
   )
 }
 
+export const IcAlign = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="14" width="18" height="6" rx="1" />
+    <rect x="7" y="3.5" width="10" height="6" rx="1" className={A} />
+    <path d="M12 9.5V14" className={A} strokeDasharray="1.6 1.6" />
+    <path d="M10 12l2 2 2-2" className={A} />
+  </Svg>
+)
+
 export const IcSweep = (p) => (
   <Svg {...p}>
     <ellipse cx="5.5" cy="17.5" rx="2.5" ry="3" className={F} />

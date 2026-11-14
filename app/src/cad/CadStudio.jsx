@@ -70,6 +70,7 @@ const FEATURE_ICON = {
   boolean: I.IcBoolean,
   movebody: I.IcMoveBody,
   import: I.IcImportPart,
+  align: I.IcAlign,
   sweep: I.IcSweep,
   loft: I.IcLoft,
   refillet: I.IcFillet,
@@ -138,6 +139,7 @@ const MORE_TOOLS = [
   ['boolean', 'Boolesch: Körper vereinigen, voneinander abziehen oder Schnittmenge'],
   ['movebody', 'Körper verschieben oder drehen (auch als Kopie) – z. B. Teile zueinander anordnen'],
   ['import', 'Teil einfügen: STEP-Datei als weiteren Körper holen (danach mit „Körper verschieben“ anordnen)'],
+  ['align', 'Ausrichten: Fläche auf Fläche legen oder Bolzen in Bohrung (gleiche Achse)'],
 ]
 
 const emptySel = { pts: [], ents: [], cons: [] }
@@ -490,7 +492,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (type === 'sketch') {
       setPickFor('plane')
       draft.sketch = null
-    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces', boolean: 'btarget', movebody: 'mbody' }[type] ?? null)
+    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces', boolean: 'btarget', movebody: 'mbody', align: 'amov' }[type] ?? null)
   }
 
   // Feature mit einer bestimmten Skizze anlegen (Kontextmenü, „weiter mit“)
@@ -846,6 +848,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       case 'btool':
       case 'mbody':
         return { faces: true }
+      case 'amov':
+      case 'atgt':
+        return { planar: true, cyl: true }
       case 'upto':
         return { planar: true }
       case 'dir':
@@ -910,6 +915,17 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       } else {
         const known = matchEdges(shownTessBefore, d.edges)
         setDraft({ edges: [...d.edges, ...chain.filter((c) => !known.has(c.tag)).map(edgeRef)] })
+      }
+      return
+    }
+    if ((pickFor === 'amov' || pickFor === 'atgt') && h.face) {
+      if (h.face.kind !== 'plane' && h.face.kind !== 'cylinder') return note('Ausrichten: ebene Fläche oder Zylinderfläche anklicken')
+      if (pickFor === 'amov') {
+        setDraft({ moving: faceRef(h.face) })
+        setPickFor(d.target ? null : 'atgt')
+      } else {
+        setDraft({ target: faceRef(h.face) })
+        setPickFor(null)
       }
       return
     }
@@ -980,7 +996,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // Stand vor dem bearbeiteten Feature (zum Wählen von Kanten/Flächen)
   const [before, setBefore] = useState(null)
-  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean', 'movebody'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
+  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean', 'movebody', 'align'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
   useEffect(() => {
     if (!beforeKey) {
       setBefore(null)
@@ -1006,7 +1022,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const pickEdges = edgeFeature && pickFor === 'edges' && before?.tess && preview?.tess && edit.draft.edges?.length ? before.tess.curves : null
   const viewTess = pickEdges
     ? preview.tess
-    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool', 'upto', 'mbody'].includes(pickFor) && before?.tess
+    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool', 'upto', 'mbody', 'amov', 'atgt'].includes(pickFor) && before?.tess
       ? before.tess
       : sketchEdit
         ? (preview?.tess ?? null)
@@ -1030,6 +1046,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (d.edges) out.edges = matchEdges(pickEdges ? before.tess : viewTess, d.edges)
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
     if (d.type === 'extrude' && d.upto) out.faces = matchFaces(viewTess, [d.upto])
+    if (d.type === 'align') out.faces = matchFaces(viewTess, [d.moving, d.target].filter(Boolean))
     if (d.type === 'movebody' && d.body && viewTess) {
       const tag = [...matchFaces(viewTess, [d.body])][0]
       const body = viewTess.surfaces.find((x) => x.tag === tag)?.body
@@ -1888,6 +1905,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 btool: 'Werkzeugkörper anklicken',
                 upto: 'Ebene Fläche anklicken, bis zu der extrudiert wird (parallel zur Skizze)',
                 mbody: 'Körper anklicken, der verschoben/gedreht wird',
+                amov: 'Fläche am Körper anklicken, der bewegt wird (eben oder Zylinder)',
+                atgt: 'Zielfläche am anderen Körper anklicken (eben: aufeinanderlegen, Zylinder: gleiche Achse)',
               }[pickFor]}
           </div>
         )}
@@ -2454,6 +2473,15 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
             <input type="checkbox" checked={!!d.ruled} onChange={(e) => setDraft({ ruled: e.target.checked })} /> Gerade Übergänge (statt weich)
           </label>
           {modeSel}
+        </>
+      )}
+
+      {d.type === 'align' && (
+        <>
+          <PickButton active={pickFor === 'amov'} label="Bewegt" value={d.moving ? (d.moving.kind === 'cylinder' ? 'Zylinder' : 'Fläche') : 'im Bild anklicken'} onClick={() => setPickFor(pickFor === 'amov' ? null : 'amov')} />
+          <PickButton active={pickFor === 'atgt'} label="Ziel" value={d.target ? (d.target.kind === 'cylinder' ? 'Zylinder' : 'Fläche') : 'im Bild anklicken'} onClick={() => setPickFor(pickFor === 'atgt' ? null : 'atgt')} />
+          <Num label={d.moving?.kind === 'cylinder' ? 'Versatz längs der Achse' : 'Abstand zwischen den Flächen'} value={d.offset} onChange={(offset) => setDraft({ offset })} />
+          <p className="hint">Eben auf eben: der Körper wird gedreht und gelegt, bis die Flächen aufeinander liegen (Lage in der Fläche bleibt). Zylinder auf Zylinder: gleiche Achse, z. B. Bolzen in Bohrung.</p>
         </>
       )}
 

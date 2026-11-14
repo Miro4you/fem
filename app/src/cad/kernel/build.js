@@ -1058,6 +1058,55 @@ function booleanOp(model, f, warn) {
   void vol0
 }
 
+/// Drehung, die Richtung a auf Richtung b dreht (kürzester Weg), um einen Punkt
+function trsfAlign(p, a, b) {
+  const ax = cross(a, b)
+  const s = norm(ax)
+  const c = dot(a, b)
+  if (s < 1e-12) {
+    if (c > 0) return null
+    // entgegengesetzt: 180° um eine beliebige Senkrechte
+    const perp = unit(Math.abs(a[0]) < 0.9 ? cross(a, [1, 0, 0]) : cross(a, [0, 1, 0]))
+    return trsfRotate(p, perp, Math.PI)
+  }
+  return trsfRotate(p, unit(ax), Math.atan2(s, c))
+}
+
+/// Ausrichten: Körper mit der gewählten Fläche an eine Fläche eines anderen Körpers legen
+/// (eben: aufeinander, Normalen entgegen, mit Abstand; Zylinder: gleiche Achse)
+function alignBody(model, f, warn) {
+  if (!f.moving || !f.target) throw new Problem('Ausrichten: Fläche am bewegten Körper und Zielfläche wählen')
+  const A = findFace(model, f.moving, 'Ausrichten')
+  const B = findFace(model, f.target, 'Ausrichten')
+  if (A.bi === B.bi) throw new Problem('Ausrichten: die beiden Flächen gehören zum selben Körper')
+  const ka = faceKind(A.face)
+  const kb = faceKind(B.face)
+  const b = model.bodies[A.bi]
+  let shape = b.shape.clone()
+  const off = Number(f.offset) || 0
+  if (ka.kind === 'plane' && kb.kind === 'plane') {
+    const pa = tuple(A.face.center)
+    const pb = tuple(B.face.center)
+    const T = trsfAlign(pa, ka.normal, mul(kb.normal, -1))
+    if (T) shape = transformed(shape, T)
+    // Normalenabstand schließen (Lage in der Ebene bleibt)
+    const d = dot(sub(pb, pa), kb.normal) + off
+    shape = transformed(shape, trsfTranslate(mul(kb.normal, d)))
+  } else if (ka.kind === 'cylinder' && kb.kind === 'cylinder') {
+    const ia = revInfo(A.face)
+    const ib = revInfo(B.face)
+    const sa = dot(ia.axis, ib.axis) >= 0 ? ia.axis : mul(ia.axis, -1)
+    const T = trsfAlign(ia.c0, sa, ib.axis)
+    if (T) shape = transformed(shape, T)
+    // Achse auf Achse: senkrechten Versatz schließen, dazu Abstand längs der Achse
+    const r = sub(ib.c0, ia.c0)
+    const perp = sub(r, mul(ib.axis, dot(r, ib.axis)))
+    shape = transformed(shape, trsfTranslate(add(perp, mul(ib.axis, off))))
+  } else throw new Problem('Ausrichten: zwei ebene Flächen oder zwei Zylinderflächen (Bolzen/Bohrung) wählen')
+  model.bodies[A.bi] = { shape, name: b.name, src: b.src }
+  void warn
+}
+
 /// Körper verschieben und/oder um eine Achse durch seinen Schwerpunkt drehen (wahlweise als Kopie)
 function moveBody(model, f, warn) {
   if (!f.body) throw new Problem('Körper verschieben: Körper im Bild anklicken')
@@ -1315,6 +1364,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'removefaces') removeFaces(model, f, warn)
   else if (f.type === 'boolean') booleanOp(model, f, warn)
   else if (f.type === 'movebody') moveBody(model, f, warn)
+  else if (f.type === 'align') alignBody(model, f, warn)
   else if (f.type === 'import') importPart(model, f)
   else if (f.type === 'refillet') refillet(model, f, warn)
   else if (f.type === 'rehole') rehole(model, f, warn)
