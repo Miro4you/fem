@@ -2,12 +2,6 @@
 // extrudieren …). Gebaut wird mit OpenCASCADE im Rechenkern; das Ergebnis geht als STEP in die Rechnung.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  Pencil,
-  Square,
-  Circle,
-  Spline,
-  Dot,
-  Ruler,
   Undo2,
   Redo2,
   Check,
@@ -15,15 +9,6 @@ import {
   Eye,
   EyeOff,
   Trash2,
-  ArrowUpFromLine,
-  RotateCw,
-  CircleDot,
-  Grid3x3,
-  FlipHorizontal2,
-  SquareRoundCorner,
-  Eraser,
-  Move,
-  Crosshair,
   Lock,
   Download,
   Play,
@@ -31,23 +16,15 @@ import {
   Loader2,
   SquareDashed,
   Info,
-  Diameter,
   Hash,
   FileUp,
-  Layers,
   Power,
   PowerOff,
   PenOff,
-  Tags,
   Boxes,
   RefreshCw,
   ExternalLink,
   Unlink,
-  Scissors,
-  PackageOpen,
-  ArrowRightToLine,
-  Route,
-  Layers2,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
@@ -71,38 +48,39 @@ import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from 
 import { suggestParts, partFeatures } from './parts.js'
 import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
 import NumInput from './NumInput.jsx'
+import * as I from './icons.jsx'
 import { describe as describePick, between as betweenPicks } from '../measure.js'
 import { cadBuildView, kernelReady, newKernelWanted, oldKernelReason } from './kernel/client.js'
 
 const FEATURE_ICON = {
-  sketch: Pencil,
-  extrude: ArrowUpFromLine,
-  revolve: RotateCw,
-  hole: CircleDot,
-  fillet: SquareRoundCorner,
-  chamfer: SquareDashed,
-  pattern: Grid3x3,
-  mirror: FlipHorizontal2,
-  removefaces: Eraser,
-  moveface: Move,
-  shell: PackageOpen,
-  sweep: Route,
-  loft: Layers2,
-  refillet: SquareRoundCorner,
-  rehole: CircleDot,
+  sketch: I.IcSketch,
+  extrude: I.IcExtrude,
+  revolve: I.IcRevolve,
+  hole: I.IcHole,
+  fillet: I.IcFillet,
+  chamfer: I.IcChamfer,
+  pattern: I.IcPattern,
+  mirror: I.IcMirror,
+  removefaces: I.IcRemoveFace,
+  moveface: I.IcMoveFace,
+  shell: I.IcShell,
+  sweep: I.IcSweep,
+  loft: I.IcLoft,
+  refillet: I.IcFillet,
+  rehole: I.IcHole,
 }
 
 const SKETCH_TOOLS = [
-  ['select', 'Auswählen und ziehen', Crosshair, 'S'],
-  ['line', 'Linie (Linienzug, Doppelklick oder Esc beendet)', Pencil, 'L'],
-  ['rect', 'Rechteck (zwei Ecken)', Square, 'R'],
-  ['circle', 'Kreis (Mitte, Radius)', Circle, 'C'],
-  ['arc', 'Bogen (Mitte, Anfang, Ende – gegen den Uhrzeigersinn)', Spline, 'A'],
-  ['point', 'Punkt (z. B. für Bohrungen)', Dot, 'P'],
-  ['dim', 'Bemaßen: ein Element (Länge, Ø, R) oder zwei Elemente (Abstand, Winkel) anklicken, Maß ablegen, Wert eingeben', Ruler, 'D'],
-  ['extend', 'Verlängern: Linie nahe dem Ende anklicken – bis zum nächsten Element', ArrowRightToLine, 'E'],
-  ['trim', 'Trimmen: Stück bis zum nächsten Schnittpunkt anklicken (rot = fällt weg)', Scissors, 'T'],
-  ['use', 'Kante des Bauteils übernehmen', Diameter, 'U'],
+  ['select', 'Auswählen und ziehen', I.IcSelect, 'S'],
+  ['line', 'Linie (Linienzug; Doppelklick oder Esc beendet; auch ziehen)', I.IcLine, 'L'],
+  ['rect', 'Rechteck (zwei Ecken; Zahl tippen: 60x40)', I.IcRect, 'R'],
+  ['circle', 'Kreis (Mitte, Radius; Zahl tippen = Ø)', I.IcCircle, 'C'],
+  ['arc', 'Bogen (Mitte, Anfang, Ende – gegen den Uhrzeigersinn)', I.IcArc, 'A'],
+  ['point', 'Punkt (z. B. für Bohrungen)', I.IcPoint, 'P'],
+  ['dim', 'Bemaßen: ein Element (Länge, Ø, R) oder zwei Elemente (Abstand, Winkel) anklicken, Maß ablegen, Wert eingeben', I.IcDimension, 'D'],
+  ['extend', 'Verlängern: Linie nahe dem Ende anklicken – bis zum nächsten Element', I.IcExtend, 'E'],
+  ['trim', 'Trimmen: Stück bis zum nächsten Schnittpunkt anklicken (rot = fällt weg)', I.IcTrim, 'T'],
+  ['use', 'Kante des Bauteils übernehmen', I.IcUseEdge, 'U'],
 ]
 
 const PART_TOOLS = [
@@ -114,9 +92,12 @@ const PART_TOOLS = [
   ['chamfer', 'Kanten fasen'],
   ['pattern', 'Linear oder im Kreis vervielfältigen'],
   ['mirror', 'An einer Ebene spiegeln'],
+  ['shell', 'Schale: Körper aushöhlen, gewählte Flächen bleiben offen'],
+]
+// seltener gebraucht: im Menü „Mehr“
+const MORE_TOOLS = [
   ['sweep', 'Sweep: Profil-Skizze entlang einer Pfad-Skizze (z. B. Rohr, Bügel)'],
   ['loft', 'Loft: Übergang zwischen zwei oder mehr Skizzen'],
-  ['shell', 'Schale: Körper aushöhlen, gewählte Flächen bleiben offen'],
   ['moveface', 'Ebene Fläche verschieben (z. B. Wand dicker)'],
   ['removefaces', 'Flächen entfernen (z. B. Bohrung oder Radius weg)'],
 ]
@@ -1240,11 +1221,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 </button>
               ))}
               <button className="cad-tool" title="Draftpad-Zeichnung in diese Skizze übernehmen" onClick={() => setDpLib(true)}>
-                <FileUp size={17} />
+                <I.IcDraftpad size={18} />
               </button>
               <span className="cad-sep" />
               <button className={'cad-tool' + (construction ? ' on' : '')} title="Hilfslinie (geht nicht in den Körper ein; z. B. Drehachse). Mit Auswahl: umschalten" onClick={toggleConstruction}>
-                <SquareDashed size={17} />
+                <I.IcConstruction size={18} />
               </button>
               <button className="cad-tool" title="Punkte fixieren / lösen" onClick={toggleFix} disabled={!sel.pts.length && !sel.ents.length}>
                 <Lock size={17} />
@@ -1264,7 +1245,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 title="Bedingungszeichen im Bild zeigen/verbergen (bei vielen Elementen automatisch aus)"
                 onClick={() => setShowGlyphs(!(showGlyphs ?? sketchEdit.sketch.cons.length <= 40))}
               >
-                <Tags size={17} />
+                <I.IcConstraints size={18} />
               </button>
               <span className="cad-sep" />
               <SketchStatus info={skInfo} />
@@ -1275,27 +1256,28 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 const Icon = FEATURE_ICON[k]
                 return (
                   <button key={k} className="cad-tool labeled" title={title} disabled={!!edit} onClick={() => startNew(k)}>
-                    <Icon size={17} />
+                    <Icon size={22} />
                     <span>{SHORT[k] ?? FEATURE_LABEL[k]}</span>
                   </button>
                 )
               })}
+              <MoreMenu disabled={!!edit} onPick={(k) => startNew(k)} />
               <button className="cad-tool labeled" title="Zeichnung aus Draftpad (Online-Ablage oder .draftpad.json) als Skizze übernehmen" disabled={!!edit} onClick={() => setDpLib(true)}>
-                <FileUp size={17} />
+                <I.IcDraftpad size={22} />
                 <span>Draftpad</span>
               </button>
               {cad.base && (
                 <button className="cad-tool labeled" title="Radius oder Bohrung des Ausgangsteils ändern (Zylinderfläche anklicken)" disabled={!!edit} onClick={() => { startNew('refillet'); setPickFor('cyl') }}>
-                  <SquareRoundCorner size={17} />
+                  <I.IcFillet size={22} />
                   <span>Radius/Bohrung</span>
                 </button>
               )}
               <span className="cad-sep" />
               <button className={'cad-tool' + (showSketches ? ' on' : '')} title={showSketches ? 'Fertige Skizzen ausblenden' : 'Fertige Skizzen zeigen'} onClick={() => setShowSketches(!showSketches)}>
-                {showSketches ? <Pencil size={17} /> : <PenOff size={17} />}
+                {showSketches ? <I.IcSketch size={18} /> : <PenOff size={17} />}
               </button>
               <button className={'cad-tool' + (showStd ? ' on' : '')} title={showStd ? 'Hauptebenen verbergen (erscheinen weiter, wenn eine Ebene gewählt werden soll)' : 'Hauptebenen zeigen'} onClick={() => setShowStd(!showStd)}>
-                <Layers size={17} />
+                <I.IcLayers size={18} />
               </button>
               <button className="cad-tool" title="Rückgängig (Strg+Z)" disabled={!!edit || !history.undo.length} onClick={undo}>
                 <Undo2 size={17} />
@@ -1873,6 +1855,50 @@ function DirPick({ label, value, flip, active, onPick, onAxis, onFlip }) {
         )}
       </div>
     </label>
+  )
+}
+
+// Menü „Mehr“ in der Werkzeugleiste (seltener gebrauchte Features)
+function MoreMenu({ disabled, onPick }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => !ref.current?.contains(e.target) && setOpen(false)
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [open])
+  return (
+    <div className="cad-more" ref={ref}>
+      <button className={'cad-tool labeled' + (open ? ' on' : '')} title="Weitere Features: Sweep, Loft, Fläche verschieben, Flächen entfernen" disabled={disabled} onClick={() => setOpen(!open)}>
+        <I.IcMore size={22} />
+        <span>Mehr</span>
+      </button>
+      {open && (
+        <div className="cad-more-menu" role="menu">
+          {MORE_TOOLS.map(([k, title]) => {
+            const Icon = FEATURE_ICON[k]
+            return (
+              <button
+                key={k}
+                role="menuitem"
+                title={title}
+                onClick={() => {
+                  setOpen(false)
+                  onPick(k)
+                }}
+              >
+                <Icon size={20} />
+                <span>
+                  <b>{FEATURE_LABEL[k]}</b>
+                  <small>{title.split(':').slice(-1)[0].trim()}</small>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 

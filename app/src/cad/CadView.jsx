@@ -3,10 +3,10 @@ import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { CadControls, createViewCamera, setCameraAspect, worldPerPx, fitCamera } from '../components/CadControls.js'
 import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
-import { IcHome, IcFit, IcCut } from '../ui/icons.jsx'
+import { IcHome, IcFit } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
 import { lengthStep, snapFrom, snapRect, snapRadius, measureText, parseTyped, TYPE_HINT } from './sketchInput.js'
-import { Ruler } from 'lucide-react'
+import { IcSection as IcSectionView, IcMeasure as IcMeasureTool } from './icons.jsx'
 import { num } from './features.js'
 import {
   basis,
@@ -1656,12 +1656,12 @@ export default function CadView({
           </button>
           {tess?.triangles?.length > 0 && !sketch && (
             <button className={'icon-btn' + (section.on ? ' on' : '')} title="Schnittansicht" aria-label="Schnittansicht" onClick={() => setSection((x) => ({ ...x, on: !x.on }))}>
-              <IcCut />
+              <IcSectionView size={18} />
             </button>
           )}
           {measureTool && (
             <button className={'icon-btn' + (measureTool.on ? ' on' : '')} title="Messen: Flächen oder Kanten anklicken (Ø, Länge, Abstand)" aria-label="Messen" onClick={measureTool.onToggle}>
-              <Ruler size={16} />
+              <IcMeasureTool size={18} />
             </button>
           )}
           {sketch && (

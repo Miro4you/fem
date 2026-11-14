@@ -875,3 +875,21 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .sk-typing small { font-size: 11px; color: var(--muted); background: var(--panel); border-radius: 4px; padding: 0 4px; align-self: flex-start; }
 
 .cad-conbar.at { bottom: auto; transform: none; max-width: 520px; }
+
+/* Icons der Konstruktion: Wirkung blau, Wirkfläche hellblau, Nebenlinien gedämpft */
+.cad-ic .a { stroke: var(--accent); }
+.cad-ic .f { fill: color-mix(in srgb, var(--accent) 24%, transparent); stroke: var(--accent); }
+.cad-ic .m { stroke: var(--muted); }
+.cad-tool:disabled .cad-ic, .cad-tool:disabled .cad-ic * { opacity: .9; }
+.cad-tool.on .cad-ic .f { fill: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* Menü „Mehr“ in der Werkzeugleiste */
+.cad-more { position: relative; display: inline-flex; }
+.cad-more-menu { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 20; min-width: 280px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.16); display: flex; flex-direction: column; gap: 2px; }
+.cad-more-menu button { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: none; border-radius: 7px; background: transparent; color: var(--text);
+  cursor: pointer; text-align: left; font: inherit; }
+.cad-more-menu button:hover { background: var(--hover); }
+.cad-more-menu span { display: flex; flex-direction: column; }
+.cad-more-menu small { color: var(--muted); font-size: 11px; }
+.cad-more-menu button svg { flex: none; }
