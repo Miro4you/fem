@@ -185,6 +185,8 @@ pub struct Model {
     pub joint_pairs: Vec<(usize, usize)>,
     /// Reibung in den geöffneten Fugen (Kontakt)
     pub joint_friction: crate::contact::Friction,
+    /// Kontakt über einen Spalt (von Hand gewählte Flächenpaare, auch im selben Körper)
+    pub gap_pairs: Vec<crate::contact::GapPair>,
     pub solver: SolverKind,
     /// Fortschrittsmeldungen (Oberfläche)
     pub progress: crate::Progress,
@@ -212,6 +214,7 @@ impl Model {
             bolts: vec![],
             joint_pairs: vec![],
             joint_friction: Default::default(),
+            gap_pairs: vec![],
             solver: SolverKind::Auto,
             progress: Default::default(),
         }

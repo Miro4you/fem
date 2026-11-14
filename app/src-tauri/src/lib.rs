@@ -705,6 +705,12 @@ enum LoadDef {
 }
 
 #[derive(Deserialize)]
+pub struct ContactFacesDef {
+    a: Vec<i32>,
+    b: Vec<i32>,
+}
+
+#[derive(Deserialize)]
 pub struct Setup {
     material: Material,
     supports: Vec<SupportDef>,
@@ -727,6 +733,9 @@ pub struct Setup {
     /// Körperpaare mit Kontakt statt verklebt (unabhängig von Schrauben)
     #[serde(default)]
     contacts: Vec<[i32; 2]>,
+    /// Kontakt von Hand: zwei Flächengruppen (CAD-Flächen), auch im selben Körper, mit Spalt
+    #[serde(default)]
+    contact_faces: Vec<ContactFacesDef>,
     /// Gleichungslöser, Standard: automatisch nach Modellgröße
     #[serde(default)]
     solver: SolverKind,
@@ -821,7 +830,33 @@ fn build_model(state: &AppState, setup: &Setup) -> Result<(Model, Vec<Face>, Vec
         let pairs = model.mesh.split_bodies(a.min(b), a.max(b));
         model.joint_pairs.extend(pairs);
     }
-    if !model.joint_pairs.is_empty() {
+    // Kontakt von Hand (Flächen A ↔ B, Spalt erlaubt)
+    if !setup.contact_faces.is_empty() {
+        let bf = model.mesh.boundary_faces();
+        let (lo, hi) = model.mesh.nodes.iter().fold(([f64::MAX; 3], [f64::MIN; 3]), |(lo, hi), p| {
+            ([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])])
+        });
+        let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
+        for (i, c) in setup.contact_faces.iter().enumerate() {
+            let pick = |tags: &[i32]| bf.iter().filter(|f| f.tag.is_some_and(|t| tags.contains(&t))).cloned().collect::<Vec<_>>();
+            let (fa, fb) = (pick(&c.a), pick(&c.b));
+            if fa.is_empty() || fb.is_empty() {
+                return Err(format!("Kontakt {}: Seite A und Seite B brauchen je mindestens eine Fläche", i + 1));
+            }
+            let mut gp = fem_core::contact::gap_pairs(&model.mesh, &fa, &fb, 0.2 * diag);
+            // beide Richtungen: auch Knoten von B suchen ihr Gegenüber auf A (unterschiedlich feine Netze);
+            // jede Seite trägt dann die halbe Fläche (Fläche und Steifigkeit zählen nicht doppelt)
+            gp.extend(fem_core::contact::gap_pairs(&model.mesh, &fb, &fa, 0.2 * diag));
+            for g in &mut gp {
+                g.area *= 0.5;
+            }
+            if gp.is_empty() {
+                return Err(format!("Kontakt {}: keine gegenüberliegenden Stellen gefunden – liegen die Flächen einander zugewandt?", i + 1));
+            }
+            model.gap_pairs.extend(gp);
+        }
+    }
+    if !model.joint_pairs.is_empty() || !model.gap_pairs.is_empty() {
         model.joint_friction = setup.joint_friction;
     }
         for (i, s) in setup.supports.iter().enumerate() {
@@ -916,8 +951,9 @@ pub fn solve_impl(state: &AppState, setup: Setup) -> Result<ResultView, String> 
                 ));
             }
         }
-        // Teil hängt nur über Kontakt und hat sich gelöst: riesige Verschiebung (nur die Stabilisierungsfedern halten)
-        if !res.joints.is_empty() {
+        // Teil hängt nur über Kontakt und hat sich gelöst: riesige Verschiebung (nur die Stabilisierungsfedern halten);
+        // Kontakt nur innerhalb eines Teils (Schlitz) kann kein Teil lösen – dort ist große Verformung eine echte Verformung
+        if res.joints.iter().any(|j| j.body_a != j.body_b) {
             let (lo, hi) = m.bbox();
             let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
             if res.max_displacement().1 > 0.05 * diag {

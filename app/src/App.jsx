@@ -40,6 +40,8 @@ const LOAD_PALE = '#f1cfa9'
 const WELD_A = '#c2410c'
 const WELD_B = '#e9a23b'
 // flächige Verbindung (Baugruppe): türkis, damit sie nicht wie eine Last aussieht
+const CONT_A = '#7c3aed'
+const CONT_B = '#c4b5fd'
 const BOND_A = '#0f9f8f'
 const BOND_B = '#5fd4c4'
 
@@ -843,8 +845,8 @@ export default function App() {
       for (const s of supports)
         if (s.surfaces.includes(tag)) return s.region ? SUPPORT_PALE : hot(s.id) ? SUPPORT_ACTIVE : SUPPORT_COLOR
       for (const w of welds) {
-        if (w.a.includes(tag)) return w.kind === 'bond' ? BOND_A : WELD_A
-        if (w.b.includes(tag)) return w.kind === 'bond' ? BOND_B : WELD_B
+        if (w.a.includes(tag)) return w.kind === 'contact' ? CONT_A : w.kind === 'bond' ? BOND_A : WELD_A
+        if (w.b.includes(tag)) return w.kind === 'contact' ? CONT_B : w.kind === 'bond' ? BOND_B : WELD_B
       }
       return null
     },
@@ -1427,8 +1429,10 @@ export default function App() {
     const num = (v) => Number(String(v).replace(',', '.'))
     return {
         material: materialPayload(mat),
+        // Kontakt von Hand (Flächen A ↔ B, auch im selben Teil, mit Spalt)
+        contact_faces: wls.filter((w) => w.kind === 'contact' && w.a.length && w.b.length).map((w) => ({ a: w.a, b: w.b })),
         welds: wls
-          .filter((w) => w.a.length && w.b.length)
+          .filter((w) => w.kind !== 'contact' && w.a.length && w.b.length)
           .map((w, i) => ({
             name: `${w.kind === 'bond' ? 'Verbindung' : 'Naht'} ${i + 1}`,
             a: w.a,
@@ -2510,6 +2514,8 @@ export default function App() {
         <WeldSection
           welds={welds}
           setWelds={setWelds}
+          jointFric={jointFric}
+          setJointFric={setJointFric}
           gaps={gaps}
           setGaps={setGaps}
           active={active}
@@ -2872,7 +2878,8 @@ export default function App() {
               ? [
                   [bolts.filter((b) => b.on).length, 'Schraube', 'Schrauben'],
                   [(mesh?.touching ?? []).filter(([a, b]) => contactPairs[touchKey(mesh, a, b)]).length, 'Kontakt', 'Kontakte'],
-                  [welds.filter((w) => w.kind !== 'bond').length, 'Schweißnaht', 'Schweißnähte'],
+                  [welds.filter((w) => w.kind === 'contact').length, 'Kontakt von Hand', 'Kontakte von Hand'],
+                  [welds.filter((w) => w.kind !== 'bond' && w.kind !== 'contact').length, 'Schweißnaht', 'Schweißnähte'],
                   [welds.filter((w) => w.kind === 'bond').length, 'Verbindung', 'Verbindungen'],
                   [bolts.filter((b) => !b.on).length, 'Vorschlag', 'Vorschläge'],
                 ]
@@ -3244,7 +3251,9 @@ export default function App() {
                 <div className="pick-hint">
                   <MousePointerClick size={15} />
                   {active.type === 'weldA' || active.type === 'weldB'
-                    ? `Fläche ${active.type === 'weldA' ? 'A' : 'B'} der Naht anklicken`
+                    ? welds.find((w) => w.id === active.id)?.kind === 'contact'
+                      ? `Seite ${active.type === 'weldA' ? 'A' : 'B'} des Kontakts anklicken (eine oder mehrere Flächen)`
+                      : `Fläche ${active.type === 'weldA' ? 'A' : 'B'} der Naht anklicken`
                     : `Flächen anklicken, um sie ${active.type === 'support' ? 'dem Lager' : 'der Last'} hinzuzufügen oder zu entfernen`}
                   <button className="btn small primary" onClick={() => setActive(null)}>
                     <Check size={14} /> Fertig
@@ -3659,9 +3668,7 @@ function JointCard({ result }) {
         const gap = 1 - j.closed
         return (
           <div key={i} className="joint">
-            <b>
-              {nameOf(j.body_a)} ↔ {nameOf(j.body_b)}
-            </b>
+            <b>{j.body_a === j.body_b ? `${nameOf(j.body_a)} (Kontakt im Teil)` : `${nameOf(j.body_a)} ↔ ${nameOf(j.body_b)}`}</b>
             <Stat
               label="liegt auf"
               value={(gap > 0.005 ? pct(j.closed) : 'ganz') + (j.closed_preload != null && Math.abs(j.closed_preload - j.closed) > 0.005 ? ` (angezogen ${pct(j.closed_preload)})` : '')}
@@ -4238,13 +4245,16 @@ function BoltSection({
 }
 
 // Schweißnähte: Spalte suchen, Nähte anlegen (Fläche A wird über den Spalt an Fläche B gekoppelt)
-function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind }) {
+function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind, jointFric, setJointFric }) {
   const upd = (id, patch) => setWelds(welds.map((w) => (w.id === id ? { ...w, ...patch } : w)))
   const has = (c) => welds.some((w) => (w.a.includes(c.a) && w.b.includes(c.b)) || (w.a.includes(c.b) && w.b.includes(c.a)))
-  const take = (cands) => {
-    const add = cands.filter((c) => !has(c)).map((c) => ({ ...newWeld(), a: [c.a], b: [c.b] }))
+  const take = (cands, kind = 'butt') => {
+    const add = cands.filter((c) => !has(c)).map((c) => ({ ...newWeld(), kind, a: [c.a], b: [c.b] }))
     setWelds([...welds, ...add])
   }
+  const colA = (w) => (w.kind === 'contact' ? CONT_A : w.kind === 'bond' ? BOND_A : WELD_A)
+  const colB = (w) => (w.kind === 'contact' ? CONT_B : w.kind === 'bond' ? BOND_B : WELD_B)
+  const anyContact = welds.some((w) => w.kind === 'contact')
   const open = gaps.list?.filter((c) => !has(c)) ?? []
   return (
     <>
@@ -4253,7 +4263,8 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
       </div>
       <p className="hint">
         Schweißnähte für gekantete Bleche mit Spalt an den Ecken (werden später geschweißt) oder getrennte Teile: Fläche A – meist die schmale
-        Stirnfläche – wird über den Spalt fest mit Fläche B verbunden. Später auch Kontakte und Schrauben in Baugruppen.
+        Stirnfläche – wird über den Spalt fest mit Fläche B verbunden. <b>Kontakt</b>: Fläche A und B dürfen sich berühren, abheben und gleiten,
+        aber nicht durchdringen – auch im selben Teil (z. B. Schlitz, Schnappverbindung) und über einen Spalt.
       </p>
       <div className="row">
         <label className="field">
@@ -4278,6 +4289,9 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
               <button className="btn small" onClick={() => take([c])}>
                 <Plus size={13} /> Naht
               </button>
+              <button className="btn small" onClick={() => take([c], 'contact')} title="Flächen dürfen sich berühren, abheben und gleiten, aber nicht durchdringen">
+                <Plus size={13} /> Kontakt
+              </button>
             </div>
           ))}
           {open.length > 1 && (
@@ -4293,9 +4307,9 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
         return (
           <div key={w.id} className={'item' + (pickA || pickB ? ' active weld' : '')}>
             <div className="item-head">
-              <Spline size={14} color={WELD_A} />
+              <Spline size={14} color={colA(w)} />
               <strong>
-                {w.kind === 'bond' ? 'Verbindung' : 'Naht'} {i + 1}
+                {w.kind === 'contact' ? 'Kontakt' : w.kind === 'bond' ? 'Verbindung' : 'Naht'} {i + 1}
               </strong>
               <span className="spacer" />
               <button className="icon-btn" title="Löschen" onClick={() => { setWelds(welds.filter((x) => x.id !== w.id)); if (pickA || pickB) setActive(null) }}>
@@ -4306,18 +4320,21 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
               <option value="butt">Stumpfnaht, durchgeschweißt (a = Blechdicke)</option>
               <option value="fillet">Kehlnaht mit a-Maß</option>
               <option value="bond">flächig verbunden (verklebt, fest verschraubt) – ohne Nahtnachweis</option>
+              <option value="contact">Kontakt – darf berühren, abheben und gleiten (auch im selben Teil, mit Spalt)</option>
             </select>
-            <div className="grid2">
-              {w.kind === 'fillet' && <NumField label="a-Maß" unit="mm" value={w.throat} onChange={(v) => upd(w.id, { throat: v })} />}
-              <NumField label="Spalt bis (leer = auto)" unit="mm" value={w.maxGap} onChange={(v) => upd(w.id, { maxGap: v })} />
-            </div>
+            {w.kind !== 'contact' && (
+              <div className="grid2">
+                {w.kind === 'fillet' && <NumField label="a-Maß" unit="mm" value={w.throat} onChange={(v) => upd(w.id, { throat: v })} />}
+                <NumField label="Spalt bis (leer = auto)" unit="mm" value={w.maxGap} onChange={(v) => upd(w.id, { maxGap: v })} />
+              </div>
+            )}
             <div className="weld-picks">
               <button className={'btn pick' + (pickA ? ' on' : '')} onClick={() => setActive(pickA ? null : { type: 'weldA', id: w.id })}>
-                <span className="swatch" style={{ background: w.kind === 'bond' ? BOND_A : WELD_A }} /> {pickA ? 'Fertig' : 'Fläche A'}
+                <span className="swatch" style={{ background: colA(w) }} /> {pickA ? 'Fertig' : w.kind === 'contact' ? 'Seite A' : 'Fläche A'}
                 <span className="count">{w.a.length}</span>
               </button>
               <button className={'btn pick' + (pickB ? ' on' : '')} onClick={() => setActive(pickB ? null : { type: 'weldB', id: w.id })}>
-                <span className="swatch" style={{ background: w.kind === 'bond' ? BOND_B : WELD_B }} /> {pickB ? 'Fertig' : 'Fläche B'}
+                <span className="swatch" style={{ background: colB(w) }} /> {pickB ? 'Fertig' : w.kind === 'contact' ? 'Seite B' : 'Fläche B'}
                 <span className="count">{w.b.length}</span>
               </button>
             </div>
@@ -4327,6 +4344,15 @@ function WeldSection({ welds, setWelds, gaps, setGaps, active, setActive, onFind
       <button className="btn wide" onClick={() => { const w = newWeld(); setWelds([...welds, w]); setActive({ type: 'weldA', id: w.id }) }}>
         <Plus size={15} /> Naht von Hand (Fläche A und B anklicken)
       </button>
+      <button className="btn wide" onClick={() => { const w = { ...newWeld(), kind: 'contact' }; setWelds([...welds, w]); setActive({ type: 'weldA', id: w.id }) }}>
+        <Plus size={15} /> Kontakt von Hand (Seite A und B anklicken)
+      </button>
+      {anyContact && (
+        <>
+          <FrictionControl jointFric={jointFric} setJointFric={setJointFric} />
+          <p className="hint">Kontakt wird iterativ gerechnet (berührt / offen, haftet / gleitet). Im Ergebnis unter „Fugen (Kontakt)“: wie viel aufliegt und welche Kraft übertragen wird.</p>
+        </>
+      )}
     </>
   )
 }

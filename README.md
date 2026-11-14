@@ -149,6 +149,17 @@ verfeinert. Ergebnisansichten „Sicherheit Infill“ und „Wand / Infill“, d
 Grenzen: Ersatzwerte des Infills sind Näherungen (mit eigenem Zugstab kalibrieren); Stützstrukturen werden nicht
 abgebildet; linear-elastisch, kein Kriechen.
 
+### Kontakt von Hand (auch im selben Teil)
+
+Unter **Verbindungen › „Kontakt von Hand“** zwei Flächengruppen wählen (Seite A, Seite B). Sie dürfen sich berühren,
+abheben und – je nach Reibung (haftet, reibungsfrei, µ) – gleiten, aber nicht durchdringen. Die Seiten dürfen zum
+**selben Körper** gehören (Schlitz, Schnappverbindung, Teil, das sich in sich verkeilt) und einen **Spalt** haben;
+„Spalte suchen“ bietet gefundene Spalte auch als Kontakt an. Gerechnet wird wie bei den Fugen: Knotenpaare
+gegenüberliegender Punkte (beide Richtungen, halbe Fläche je Seite) mit Anfangsspalt, aktive Menge (offen/zu,
+haftet/gleitet), erweitertes Lagrange-Verfahren gegen Durchdringung. Im Ergebnis unter „Fugen (Kontakt)“: aufliegender
+Anteil, Druckkraft, größte Pressung. Prüfrechnung: zwei Klötze mit 0,05 mm Spalt, der obere hängt nur am Kontakt –
+Weg = Spalt + Verkürzung (+0,02 %), volle Kraft in der Fuge.
+
 ### Schweißnähte (Bleche)
 
 Gekantete Bleche mit geschlossenen Ecken haben im CAD einen kleinen Spalt (z. B. 0,1–1 mm) – ohne Naht sind die

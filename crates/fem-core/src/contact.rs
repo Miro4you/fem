@@ -25,6 +25,10 @@ pub enum Friction {
 struct Pair {
     a: usize,
     b: usize,
+    /// Anfangsspalt in Normalenrichtung [mm] (0 = Fuge liegt an; > 0: Kontakt über einen Spalt, z. B. Schlitz)
+    gap: f64,
+    /// von Hand gewählter Kontakt (Flächenpaar), nicht aus einer aufgetrennten Fuge
+    manual: bool,
     /// Normale aus Körper A heraus (zeigt zu B)
     n: Vector3<f64>,
     area: f64,
@@ -189,6 +193,8 @@ impl Contact {
             out.push(Pair {
                 a,
                 b,
+                gap: 0.0,
+                manual: false,
                 n: n.normalize(),
                 area: area[a],
                 kn,
@@ -216,6 +222,52 @@ impl Contact {
             })
             .collect();
         Contact { pairs: out, friction, bodies, faces, committed: false, matrix_dirty: true }
+    }
+
+    /// Kontaktpaare über einen Spalt dazunehmen (z. B. Schlitz im selben Körper, getrennt vernetzte Flächen).
+    /// Beginnen offen, solange der Spalt > 0 ist.
+    pub fn add_gaps(&mut self, mesh: &Mesh, gaps: &[GapPair], e: f64) {
+        let vol: f64 = (0..mesh.n_elems()).map(|k| crate::element::tet_volume(&mesh.elem_coords(k)[..4]).abs()).sum();
+        let h = (vol / mesh.n_elems().max(1) as f64 * 8.5).cbrt().max(1e-6);
+        let mut body_of_node = vec![0i32; mesh.nodes.len()];
+        for k in 0..mesh.n_elems() {
+            let b = mesh.body_of(k);
+            for &n in mesh.elem(k) {
+                body_of_node[n] = b;
+            }
+        }
+        for g in gaps {
+            let kn = 10.0 * e * g.area / h;
+            let kt = match self.friction {
+                Friction::Coulomb { .. } => KT_FACTOR * kn,
+                Friction::Haftend => kn,
+            };
+            let closed = g.gap <= 1e-12;
+            self.pairs.push(Pair {
+                a: g.a,
+                b: g.b,
+                gap: g.gap.max(0.0),
+                manual: true,
+                n: Vector3::from(g.n),
+                area: g.area,
+                kn,
+                kt,
+                closed,
+                slip: None,
+                restick: 0,
+                slip_updates: 0,
+                p: 0.0,
+                lam: 0.0,
+                ft: Vector3::zeros(),
+                flips: 0,
+                f0: Vector3::zeros(),
+                d0: Vector3::zeros(),
+                dt: Vector3::zeros(),
+                closed0: closed,
+            });
+            self.bodies.push((body_of_node[g.a], body_of_node[g.b]));
+        }
+        self.matrix_dirty = true;
     }
 
     /// Lastschritt abschließen: Tangentialkräfte und -verschiebungen werden Ausgangsstand des nächsten Schritts,
@@ -290,7 +342,7 @@ impl Contact {
         let mut f = vec![0.0; ndof];
         for p in self.pairs.iter().filter(|p| p.closed) {
             // Normaldruck (nachgeführt) + Ausgangskraft der Tangentialfeder
-            let fb = p.n * p.lam + self.tangential(p).1;
+            let fb = p.n * (p.lam - p.kn * p.gap) + self.tangential(p).1;
             for c in 0..3 {
                 f[3 * p.b + c] += fb[c];
                 f[3 * p.a + c] -= fb[c];
@@ -314,8 +366,9 @@ impl Contact {
             .iter()
             .map(|p| {
                 let d = Self::rel(p, u);
-                let g = d.dot(&p.n); // < 0: B dringt in A ein
-                (g, d - p.n * g)
+                let gn = d.dot(&p.n);
+                // < 0: B dringt in A ein (Anfangsspalt eingerechnet)
+                (gn + p.gap, d - p.n * gn)
             })
             .collect();
         let pn_of = |p: &Pair, g: f64| p.lam - p.kn * g;
@@ -512,6 +565,10 @@ impl Contact {
                     r.slipping += p.area;
                 }
                 r.pressure_force += p.p;
+                // von Hand gewählter Kontakt (keine Fugendreiecke): Pressung aus dem Knotendruck
+                if p.manual && p.area > 0.0 {
+                    r.max_pressure = r.max_pressure.max(p.p / p.area);
+                }
             }
         }
         // Flächenpressung je Dreieck: Knotenkräfte nach Flächenanteil auf die anliegenden Dreiecke verteilt
@@ -538,4 +595,84 @@ impl Contact {
         }
         out
     }
+}
+
+/// Kontaktpaar über einen Spalt: Knoten `a` auf Seite A, gegenüberliegender Knoten `b` auf Seite B
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, serde::Deserialize)]
+pub struct GapPair {
+    pub a: usize,
+    pub b: usize,
+    /// Normale aus A heraus (zu B hin)
+    pub n: [f64; 3],
+    /// Flächenanteil des Knotens a [mm²]
+    pub area: f64,
+    /// Anfangsspalt [mm]
+    pub gap: f64,
+}
+
+/// Kontaktpaare zwischen zwei Flächengruppen (Randdreiecke). Jeder Knoten von A bekommt den gegenüberliegenden Knoten
+/// von B (kleinster seitlicher Versatz, vor A in Normalenrichtung, Spalt höchstens `max_gap`). Seiten dürfen zum selben
+/// Körper gehören. Knoten, die zu beiden Seiten gehören (gemeinsame Kanten), bleiben außen vor.
+pub fn gap_pairs(mesh: &Mesh, faces_a: &[crate::mesh::Face], faces_b: &[crate::mesh::Face], max_gap: f64) -> Vec<GapPair> {
+    let n_nodes = mesh.nodes.len();
+    let mut normal = vec![Vector3::zeros(); n_nodes];
+    let mut area = vec![0.0; n_nodes];
+    let mut on_a = vec![false; n_nodes];
+    for f in faces_a {
+        let p: Vec<Vector3<f64>> = f.nodes[..3].iter().map(|&k| Vector3::from(mesh.nodes[k])).collect();
+        let nf = (p[1] - p[0]).cross(&(p[2] - p[0])) * 0.5;
+        let af = nf.norm();
+        let shares: Vec<f64> = if f.nodes.len() == 6 {
+            (0..6).map(|i| if i < 3 { 3.0 / 57.0 } else { 16.0 / 57.0 } * af).collect()
+        } else {
+            vec![af / f.nodes.len() as f64; f.nodes.len()]
+        };
+        for (&k, &w) in f.nodes.iter().zip(&shares) {
+            normal[k] += nf;
+            area[k] += w;
+            on_a[k] = true;
+        }
+    }
+    let mut b_nodes: Vec<usize> = faces_b.iter().flat_map(|f| f.nodes.iter().copied()).filter(|&k| !on_a[k]).collect();
+    b_nodes.sort_unstable();
+    b_nodes.dedup();
+    // typische Kantenlänge der Seite B (seitlicher Fang)
+    let mut hb = 0.0;
+    let mut nb = 0.0;
+    for f in faces_b {
+        let p: Vec<Vector3<f64>> = f.nodes[..3].iter().map(|&k| Vector3::from(mesh.nodes[k])).collect();
+        hb += (p[1] - p[0]).norm() + (p[2] - p[1]).norm() + (p[0] - p[2]).norm();
+        nb += 3.0;
+    }
+    let hb = if nb > 0.0 { hb / nb } else { 1.0 };
+    let mut out = Vec::new();
+    for k in 0..n_nodes {
+        if !on_a[k] || area[k] <= 0.0 || normal[k].norm() == 0.0 {
+            continue;
+        }
+        if faces_b.iter().any(|f| f.nodes.contains(&k)) {
+            continue;
+        }
+        let n = normal[k].normalize();
+        let xa = Vector3::from(mesh.nodes[k]);
+        let mut best: Option<(f64, usize, f64)> = None;
+        for &j in &b_nodes {
+            let d = Vector3::from(mesh.nodes[j]) - xa;
+            let gn = d.dot(&n);
+            if gn < -0.1 * hb || gn > max_gap {
+                continue;
+            }
+            let lat = (d - n * gn).norm();
+            if lat > 0.75 * hb {
+                continue;
+            }
+            if best.map_or(true, |(bl, _, _)| lat < bl) {
+                best = Some((lat, j, gn));
+            }
+        }
+        if let Some((_, j, gn)) = best {
+            out.push(GapPair { a: k, b: j, n: [n.x, n.y, n.z], area: area[k], gap: gn.max(0.0) });
+        }
+    }
+    out
 }

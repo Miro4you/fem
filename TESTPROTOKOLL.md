@@ -405,6 +405,7 @@ selbst starten.
 | 18e.89 | Profil mit R12-Ecken extrudieren, Fläche verschieben an der Stirnfläche +20 und −20 | Immer genau ein Körper, Volumen ändert sich um Fläche × 20 |  [ ] |
 | 18e.90 | Draftpad-Teil mit schmalem Schlitz (z. B. Ring mit Zickzack-Schnitt, Spalt < 0,5 mm) übernehmen | Beide Schlitzseiten kommen an, keine gekreuzten Linien, Kontur geschlossen |  [ ] |
 | 18e.91 | Skizze: Rechteck mit Rundungen, eine Kante weit über die gegenüberliegende hinaus ziehen | Skizze klappt nicht um, Element bleibt vorher stehen; normales Ziehen geht glatt |  [ ] |
+| 18e.92 | Teil mit schmalem Schlitz (z. B. Block 60 × 20 × 10 mit 0,2-mm-Schlitz von oben, 15 tief) öffnen; Lager links, Kraft auf die rechte Oberseite nach links; Verbindungen › „Kontakt von Hand“: Seite A = linke Schlitzfläche, Seite B = rechte; rechnen | Bei kleiner Kraft bleibt der Schlitz offen (Ergebnis wie ohne Kontakt); bei großer Kraft legt sich der Finger an: im Ergebnis „Fugen (Kontakt)“ → „… (Kontakt im Teil)“ mit aufliegendem Anteil und Druckkraft, Verformung deutlich kleiner als ohne Kontakt, keine Durchdringung |  [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

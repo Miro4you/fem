@@ -629,6 +629,57 @@ pub fn kontakt_druck(kind: crate::SolverKind) -> Result<Vec<Check>> {
     ])
 }
 
+/// Kontakt über einen Spalt (von Hand gewählte Flächen): der obere Klotz liegt 0,05 mm über dem unteren, hängt nur am
+/// Kontakt und wird angedrückt – der Spalt schließt sich, die ganze Kraft geht über die Fuge, keine Durchdringung
+pub fn kontakt_spalt(kind: crate::SolverKind) -> Result<Vec<Check>> {
+    let (a, h, f, gap) = (20.0, 10.0, 40000.0, 0.05);
+    let mut steel = Material::steel();
+    steel.nu = 0.0;
+    let mut mesh = zwei_kloetze(a, h, [4, 4, 4])?;
+    let pairs = mesh.split_bodies(1, 2);
+    // oberen Klotz um den Spalt anheben (Kopien gehören zu Körper 2)
+    let mut lifted = vec![false; mesh.nodes.len()];
+    for e in 0..mesh.n_elems() {
+        if mesh.body_of(e) == 2 {
+            for &k in mesh.elem(e) {
+                lifted[k] = true;
+            }
+        }
+    }
+    for (k, up) in lifted.iter().enumerate() {
+        if *up {
+            mesh.nodes[k][2] += gap;
+        }
+    }
+    let _ = pairs;
+    let tol = 1e-6;
+    let faces = mesh.boundary_faces();
+    let z = |f: &crate::mesh::Face| f.nodes[..3].iter().map(|&k| mesh.nodes[k][2]).collect::<Vec<_>>();
+    let side_a: Vec<_> = faces.iter().filter(|f| z(f).iter().all(|v| (v - h).abs() < tol)).cloned().collect();
+    let side_b: Vec<_> = faces.iter().filter(|f| z(f).iter().all(|v| (v - h - gap).abs() < tol)).cloned().collect();
+    let gp = crate::contact::gap_pairs(&mesh, &side_a, &side_b, 1.0);
+    let mut model = Model::new(mesh, steel.clone())
+        .group("unten", Selection::Plane { axis: Axis::Z, value: 0.0 })
+        .group("oben", Selection::Plane { axis: Axis::Z, value: 2.0 * h + gap })
+        .support("unten", Fix::all())
+        .load(Load::Force { group: "oben".into(), force: [0.0, 0.0, -f] });
+    model.gap_pairs = gp.clone();
+    model.solver = kind;
+    let res = solve(&model)?;
+    let m = &model.mesh;
+    let name = format!("Kontakt über Spalt ({})", kind_name(kind));
+    let top = mean(m.nodes.iter().zip(&res.displacement).filter(|(p, _)| (p[2] - 2.0 * h - gap).abs() < tol).map(|(_, u)| u[2]));
+    // Durchdringung: Spalt minus Annäherung
+    let pen = gp.iter().map(|g| -(g.gap + res.displacement[g.b][2] - res.displacement[g.a][2])).fold(0.0, f64::max);
+    let j = res.joints.first().ok_or(crate::FemError::Input("kein Kontakt".into()))?;
+    Ok(vec![
+        check(&name, "Weg oben = Spalt + Verkürzung [mm]", -top, gap + f * 2.0 * h / (steel.e * a * a), 3e-3),
+        check(&name, "Druckkraft in der Fuge [N]", j.pressure_force, f, 1e-4),
+        check(&name, "aufliegender Anteil", j.closed, 1.0, 1e-9),
+        check(&name, "1 + Durchdringung / Verkürzung", 1.0 + pen / (f * 2.0 * h / (steel.e * a * a)), 1.0, 2e-2),
+    ])
+}
+
 /// Kontakt mit Reibung ohne Schrauben: Klotz wird angedrückt (N) und quer geschoben (Q < µ·N) – die Fuge trägt N als
 /// Druck und Q ganz über Reibung
 pub fn kontakt_reibung(kind: crate::SolverKind) -> Result<Vec<Check>> {
@@ -806,6 +857,7 @@ pub fn all() -> Result<Vec<Check>> {
     v.extend(verschraubt(crate::SolverKind::Iterative)?);
     v.extend(kontakt_druck(crate::SolverKind::Direct)?);
     v.extend(kontakt_druck(crate::SolverKind::Iterative)?);
+    v.extend(kontakt_spalt(crate::SolverKind::Direct)?);
     v.extend(kontakt_reibung(crate::SolverKind::Direct)?);
     v.extend(vorgespannt(crate::SolverKind::Direct, 0.0)?.0);
     v.extend(vorgespannt(crate::SolverKind::Iterative, 0.0)?.0);
@@ -840,6 +892,15 @@ fn order_name(o: Order) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kontakt_ueber_spalt() {
+        let checks = super::kontakt_spalt(crate::SolverKind::Direct).unwrap();
+        for c in &checks {
+            println!("{:45} {:38} FEM {:>12.6} Theorie {:>12.6} ({:+.3} %)", c.case, c.quantity, c.fem, c.theory, 100.0 * c.rel_error());
+        }
+        assert!(checks.iter().all(|c| c.passed()));
+    }
+
     #[test]
     fn referenzfaelle() {
         let checks = super::all().unwrap();

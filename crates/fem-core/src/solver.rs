@@ -250,8 +250,12 @@ fn solve_once(model: &Model, opts: &SolveOptions) -> Result<Results> {
     };
     // Kontakt in geöffneten Fugen
     let e_ref = std::iter::once(&model.material).chain(model.body_materials.iter().map(|(_, m)| m)).map(|m| m.e).fold(0.0, f64::max);
-    let mut contact = (!model.joint_pairs.is_empty())
-        .then(|| crate::contact::Contact::new(mesh, &model.joint_pairs, e_ref, model.joint_friction))
+    let mut contact = (!model.joint_pairs.is_empty() || !model.gap_pairs.is_empty())
+        .then(|| {
+            let mut c = crate::contact::Contact::new(mesh, &model.joint_pairs, e_ref, model.joint_friction);
+            c.add_gaps(mesh, &model.gap_pairs, e_ref);
+            c
+        })
         .filter(|c| !c.is_empty());
     // rechnen, Kontaktzustände prüfen, wiederholen, bis sich nichts mehr ändert
     let mut contact_iters = 0usize;
