@@ -820,11 +820,84 @@ function makeFaceFromWire(wire) {
   return f
 }
 
+/// Keil einer Fase (ebene Fläche zwischen zwei ebenen Nachbarflächen) bis zur scharfen Kante
+function chamferWedge(shape, face) {
+  const lines = face.edges.filter((e) => e.geomType === 'LINE')
+  // Nachbarflächen über die Kanten
+  const neighbours = []
+  for (const e of lines)
+    for (const f2 of shape.faces) {
+      if (f2.isSame(face) || f2.geomType !== 'PLANE') continue
+      if (f2.edges.some((x) => x.isSame(e))) neighbours.push({ e, f: f2, n: unit(tuple(f2.normalAt())) })
+    }
+  // zwei parallele Kanten, deren Nachbarebenen nicht parallel sind
+  let pair = null
+  for (let i = 0; i < neighbours.length && !pair; i++)
+    for (let j = i + 1; j < neighbours.length; j++) {
+      const a = neighbours[i]
+      const b = neighbours[j]
+      const da = unit(tuple(a.e.tangentAt(0.5)))
+      const db = unit(tuple(b.e.tangentAt(0.5)))
+      if (Math.abs(Math.abs(dot(da, db)) - 1) > 1e-6) continue
+      if (Math.abs(Math.abs(dot(a.n, b.n)) - 1) < 1e-6) continue
+      pair = { a, b, d: da }
+      break
+    }
+  if (!pair) return null
+  const { a, b, d } = pair
+  // Lage längs der Kante: von … bis über alle Ecken der Fase
+  const pts = face.edges.flatMap((e) => [tuple(e.startPoint), tuple(e.endPoint)])
+  const s = pts.map((p) => dot(p, d))
+  const s0 = Math.min(...s)
+  const s1 = Math.max(...s)
+  const onPlane = (p) => add(p, mul(d, s0 - dot(p, d)))
+  const p1 = onPlane(tuple(a.e.pointAt(0.5)))
+  const p2 = onPlane(tuple(b.e.pointAt(0.5)))
+  // Spuren der Nachbarebenen im Querschnitt: durch p1 bzw. p2, Richtung n × d; Schnittpunkt = Ecke K
+  const wa = unit(cross(a.n, d))
+  const wb = unit(cross(b.n, d))
+  const r = sub(p2, p1)
+  const den = dot(cross(wa, wb), cross(wa, wb))
+  if (den < 1e-12) return null
+  const t = dot(cross(r, wb), cross(wa, wb)) / den
+  const K = add(p1, mul(wa, t))
+  const tri = makePolygon([p1, K, p2])
+  const solid = basicFaceExtrusion(tri, new Vector(mul(d, s1 - s0)))
+  // Ecke außerhalb (Außenkante) → dazu, innerhalb (Innenkante) → weg
+  const nc = unit(tuple(face.normalAt()))
+  const mid = mul(add(p1, p2), 0.5)
+  return { solid, convex: dot(sub(K, mid), nc) > 0 }
+}
+
 /// gewählte Flächen eines Körpers entfernen → neue Form; edges: scharfe Kanten, die dabei entstanden sind (für „Radius ändern“)
 function removeFacesOf(shape, faces, what, size) {
+  // Fasen (ebene Flächen) zuerst: Keil bis zur scharfen Kante ergänzen bzw. abziehen
+  const planar = faces.filter((f) => f.geomType === 'PLANE')
+  if (planar.length) {
+    let out = shape
+    for (const f of planar) {
+      const w = chamferWedge(shape, f)
+      if (!w) throw new Problem(`${what}: diese ebene Fläche ist keine Fase zwischen zwei ebenen Flächen – Außenflächen lassen sich nicht entfernen`)
+      out = w.convex ? out.fuse(w.solid) : out.cut(w.solid)
+    }
+    const rest = faces.filter((f) => f.geomType !== 'PLANE')
+    let res = solidsOf(out)[0] ?? out
+    try {
+      res = res.simplify()
+    } catch {
+      // ungeteilt lassen
+    }
+    if (!rest.length) return { shape: solidsOf(res)[0] ?? res, sharp: [] }
+    // übrige Flächen am neuen Körper wiederfinden (gleiche Mitte)
+    const again = rest.map((f) => {
+      const c = tuple(f.center)
+      return res.faces.reduce((best, x) => (!best || dist3(tuple(x.center), c) < dist3(tuple(best.center), c) ? x : best), null)
+    })
+    return removeFacesOf(res, again, what, size)
+  }
   const infos = faces.map((face) => ({ face, info: revInfo(face) }))
   const bad = infos.find((x) => !x.info)
-  if (bad) throw new Problem(`${what}: geht für Bohrungen, Senkungen und gerade Verrundungen (Zylinder-/Kegelflächen) – diese Fläche ist ${bad.face.geomType === 'PLANE' ? 'eben' : 'gekrümmt anders'}`)
+  if (bad) throw new Problem(`${what}: geht für Bohrungen, Senkungen, gerade Verrundungen und Fasen – diese Fläche ist anders gekrümmt (z. B. Ecke zweier Rundungen)`)
   const tol = 1e-4 * Math.max(1, size)
   // koaxiale Gruppen
   const groups = []

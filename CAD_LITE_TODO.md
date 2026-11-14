@@ -179,7 +179,7 @@ Ebenfalls 14.11. vormittags: Bohrung direkt auf Fläche (H → Fläche → Punkt
 Spiegeln im Skizzierer (Symmetrie bleibt), Zurückrollen im Verlauf (Features mittendrin einfügen), Extrudieren bis
 Fläche, Duplizieren, Skizzenebene neigen, Werkzeugleiste für 1280-px-Bildschirme.
 
-Offen: Ebene durch drei Punkte, Fasen/Torusflächen beim Flächen-Entfernen, Baugruppen (G6).
+Offen: Ebene durch drei Punkte, Torusflächen (Ecken zweier Rundungen) beim Flächen-Entfernen, Baugruppen (G6).
 
 ## G6. Baugruppen (bis ~50 Teile)
 

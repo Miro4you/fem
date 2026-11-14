@@ -331,3 +331,28 @@ test('Extrudieren bis Fläche: Tiefe und Richtung aus einer parallelen Fläche',
   assert.equal(r.bodies, 1)
   near(r.volume, 40 * 40 * 10 + PI * 25 * 20, 1e-6, 'Zapfen bis zur Platte')
 })
+
+test('Flächen entfernen: Fase außen (ergänzen) und innen (abziehen)', () => {
+  clearCache()
+  // L-Profil: außen Kante oben vorne, innen die Kehle
+  const L = [[0, 0], [40, 0], [40, 10], [10, 10], [10, 30], [0, 30]]
+  const ents = L.map((a, i) => ({ t: 'line', a, b: L[(i + 1) % L.length] }))
+  const xzp = { origin: [0, 0, 0], normal: [0, -1, 0], u: [1, 0, 0] }
+  const base = [
+    { id: 1, type: 'sketch', plane: xzp, ents },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 20, dir: -1 },
+  ]
+  const r0 = build({ features: base })
+  allOk(r0)
+  const v0 = r0.volume
+  // Außenkante (40, y, 10) und Innenkante (10, y, 10) fasen
+  const withC = [...base, { id: 3, type: 'chamfer', edges: [{ mid: [40, 10, 10], dir: [0, 1, 0] }, { mid: [10, 10, 10], dir: [0, 1, 0] }], distance: 3 }]
+  const r1 = build({ features: withC })
+  allOk(r1)
+  near(r1.volume, v0 - 4.5 * 20 + 4.5 * 20, 1e-6, 'außen weg, innen dazu')
+  const fs = r1.tess.surfaces.filter((x) => x.kind === 'plane' && Math.abs(Math.abs(x.normal[0]) - Math.SQRT1_2) < 1e-6)
+  assert.equal(fs.length, 2, 'zwei Fasenflächen')
+  const r2 = build({ features: [...withC, { id: 4, type: 'removefaces', faces: fs.map((x) => ({ center: x.center, kind: 'plane', normal: x.normal })) }] })
+  allOk(r2)
+  near(r2.volume, v0, 1e-6, 'beide Fasen entfernt')
+})
