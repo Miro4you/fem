@@ -384,6 +384,7 @@ selbst starten.
 | 18e.68 | Winkel (L-Profil extrudiert), Skizze auf XZ mit „Abstand zur Ebene“ in der Mitte, Linie von Schenkel zu Schenkel; Mehr › Rippe, Dicke 4 | dreieckige Rippe füllt die Ecke bis zu den Wänden, symmetrisch zur Skizzenebene | [ ] |
 | 18e.69 | Quader, Mehr › Formschräge: zwei Seitenflächen anklicken, neutrale Ebene XY, 3° | Seiten neigen sich nach innen (oben kleiner), Boden behält das Maß; „Richtung umkehren“ kehrt die Neigung um. Menü „Mehr“ in Gruppen Formen / Ändern / Körper und Baugruppe | [ ] |
 | 18e.70 | Mehrere Körper; Knopf „Darstellung“ rechts oben im Bild mehrfach klicken | Körper leicht unterschiedlich getönt (Farbpunkt in der Körperliste passt); Darstellung wechselt: mit Kanten → ohne Kanten → durchsichtig → Drahtgitter (wird gemerkt) | [ ] |
+| 18e.71 | Skizze: Kreis wählen, Strg+C, Maus an andere Stelle, Strg+V (auch in einer anderen Skizze) | Kopie erscheint an der Maus und ist gewählt (gleich verschiebbar/bemaßbar) | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

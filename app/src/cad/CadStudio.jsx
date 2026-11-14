@@ -45,7 +45,7 @@ import {
   fmtField,
 } from './features.js'
 import { offsetEnts } from './sketch.js'
-import { patternEnts } from './sketchTools.js'
+import { patternEnts, copyEntsInto, entsCenter } from './sketchTools.js'
 import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, CON_GLYPH, isDim, measure, kernelSketch, polyline, basis, to3d } from './sketch.js'
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
@@ -328,6 +328,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const [nextHint, setNextHint] = useState(null) // nach „Skizze fertig“: gleich extrudieren/drehen
   const [ctxMenu, setCtxMenu] = useState(null) // Rechtsklick im Verlauf { f, x, y }
   const [showKeys, setShowKeys] = useState(false) // Übersicht der Tastenkürzel (Taste ?)
+  const clip = useRef(null) // kopierte Skizzenelemente { sk, ents }
   const [renaming, setRenaming] = useState(null) // Feature-Id, deren Name gerade geändert wird
   const [history, setHistory] = useState({ undo: [], redo: [] })
   const skHist = useRef({ undo: [], redo: [] })
@@ -807,6 +808,23 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         deleteSelection()
+        return
+      }
+      if (ctrl && e.key.toLowerCase() === 'c' && sel.ents.length) {
+        e.preventDefault()
+        clip.current = { sk: structuredClone(sketchEdit.sketch), ents: [...sel.ents] }
+        note(`${sel.ents.length} Element${sel.ents.length === 1 ? '' : 'e'} kopiert – Strg+V fügt sie an der Maus ein`)
+        return
+      }
+      if (ctrl && e.key.toLowerCase() === 'v' && clip.current) {
+        e.preventDefault()
+        const { sk: src, ents } = clip.current
+        const c = entsCenter(src, ents)
+        const at = viewRef.current?.sketchMouse(sketchEdit.sketch.plane) ?? [c[0] + 10, c[1] + 10]
+        const r = copyEntsInto(src, ents, sketchEdit.sketch, at[0] - c[0], at[1] - c[1])
+        const sv = solved(r.sketch)
+        changeSketch(sv.info.ok ? sv.sketch : r.sketch, sv.info, false)
+        setSel({ pts: [], ents: r.added, cons: [] })
         return
       }
       if (ctrl && e.key.toLowerCase() === 'a') {
@@ -2728,6 +2746,7 @@ function KeysHelp({ sketch, onClose }) {
     ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
     ['Entf', 'Auswahl löschen (Skizze)'],
     ['Strg+A', 'alles wählen (Skizze)'],
+    ['Strg+C / Strg+V', 'Skizzenelemente kopieren / an der Maus einfügen (auch in eine andere Skizze)'],
     ['Q', 'Hilfslinie an/aus (Skizze; mit Auswahl: umschalten)'],
     ['Zahl tippen', 'beim Zeichnen: genaues Maß (50, 50@30, 60x40)'],
     ['?  /  F1', 'diese Übersicht'],

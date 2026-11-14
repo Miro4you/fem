@@ -322,3 +322,43 @@ export function patternEnts(sk0, entIds, { kind = 'linear', n = 3, dx = 10, dy =
   }
   return { sketch: sk, added }
 }
+
+/// Elemente aus einer Skizze (auch einer anderen) um (dx, dy) versetzt in die Ziel-Skizze kopieren
+/// → { sketch, added } ; Bedingungen der Kopie: keine (frei, wie beim Muster)
+export function copyEntsInto(src, ids, dst0, dx, dy) {
+  const dst = structuredClone(dst0)
+  const map = new Map()
+  const img = (id) => {
+    if (!map.has(id)) {
+      const p = P(src, id)
+      map.set(id, addPoint(dst, [p[0] + dx, p[1] + dy]))
+    }
+    return map.get(id)
+  }
+  const added = []
+  for (const id of ids) {
+    const e = src.ents.find((x) => x.id === id)
+    if (!e) continue
+    if (e.t === 'line') added.push(addEnt(dst, { t: 'line', a: img(e.a), b: img(e.b), cons: e.cons }).id)
+    else if (e.t === 'circle') added.push(addEnt(dst, { t: 'circle', c: img(e.c), r: e.r, cons: e.cons }).id)
+    else if (e.t === 'arc') added.push(addEnt(dst, { t: 'arc', c: img(e.c), a: img(e.a), b: img(e.b), cons: e.cons }).id)
+    else if (e.t === 'point') added.push(addEnt(dst, { t: 'point', p: img(e.p), cons: e.cons }).id)
+  }
+  return { sketch: dst, added }
+}
+
+/// Mitte der Hüllbox gewählter Elemente (Skizzenkoordinaten)
+export function entsCenter(sk, ids) {
+  let lo = [Infinity, Infinity]
+  let hi = [-Infinity, -Infinity]
+  for (const id of ids) {
+    const e = sk.ents.find((x) => x.id === id)
+    if (!e) continue
+    const pts = e.t === 'circle' ? [add(P(sk, e.c), [-e.r, -e.r]), add(P(sk, e.c), [e.r, e.r])] : (e.t === 'line' ? [e.a, e.b] : e.t === 'arc' ? [e.a, e.b, e.c] : [e.p]).map((q) => P(sk, q))
+    for (const p of pts) {
+      lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])]
+      hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])]
+    }
+  }
+  return Number.isFinite(lo[0]) ? [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2] : [0, 0]
+}

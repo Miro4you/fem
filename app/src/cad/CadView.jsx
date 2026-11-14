@@ -136,6 +136,11 @@ export default function CadView({
 
   useImperativeHandle(ref, () => ({
     fit: () => fitAll(),
+    // Mausposition in Skizzenkoordinaten (zum Einfügen kopierter Elemente)
+    sketchMouse: (plane) => {
+      const m = ctx.current?.mouseClient
+      return m && plane ? onPlane({ clientX: m[0], clientY: m[1] }, plane) : null
+    },
     lookAt: (plane, sk) => lookAtPlane(plane, sk),
     snapshot: () => {
       const s = ctx.current
@@ -1028,6 +1033,7 @@ export default function CadView({
       {
         const r = host.current.getBoundingClientRect()
         s.mouse = [ev.clientX - r.left, ev.clientY - r.top]
+        s.mouseClient = [ev.clientX, ev.clientY]
       }
       if (dragDraw && sk && !dragDraw.started && (ev.buttons & 1) && Math.hypot(ev.clientX - dragDraw.x, ev.clientY - dragDraw.y) > 6) {
         // erster Punkt dort, wo gedrückt wurde
