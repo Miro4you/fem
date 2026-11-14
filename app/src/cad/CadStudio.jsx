@@ -367,6 +367,27 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     setCad({ ...cad, features: history.redo[history.redo.length - 1] })
   }
 
+  // neue Skizze: auf einer Fläche (gleich zeichnen) oder Ebene erst im Bild wählen
+  const startSketch = (face, firstTool = 'line', name = null) => {
+    const id = featureId(features)
+    const draft = { id, type: 'sketch', name: name ?? featureName(features, 'sketch'), ...defaults('sketch') }
+    setSel(emptySel)
+    skHist.current = { undo: [], redo: [] }
+    if (face) {
+      const plane = planeFromFace(face)
+      draft.sketch = newSketch(plane, { face: faceRef(face) })
+      setEdit({ id, draft, isNew: true, index: features.length })
+      setSkInfo({ ok: true, dof: 0, free: new Set(), redundant: 0 })
+      setPickFor(null)
+      setTool(firstTool)
+      setTimeout(() => viewRef.current?.lookAt(plane), 0)
+    } else {
+      draft.sketch = null
+      setEdit({ id, draft, isNew: true, index: features.length })
+      setTool('select')
+      setPickFor('plane')
+    }
+  }
   const startNew = (type) => {
     if (edit) return note('Erst das offene Feature bestätigen oder abbrechen')
     setNextHint(null)
@@ -375,18 +396,13 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     // vorher im Bild gewählt: übernehmen (Fläche → Skizzenebene, Kanten → Verrunden/Fase, Flächen → Schale …)
     const pre = preSel
     setPreSel({ faces: [], edges: [] })
-    if (type === 'sketch' && pre.faces.length === 1 && pre.faces[0].kind === 'plane') {
-      const face = pre.faces[0]
-      const plane = planeFromFace(face)
-      draft.sketch = newSketch(plane, { face: faceRef(face) })
-      setEdit({ id, draft, isNew: true, index: features.length })
-      setSel(emptySel)
-      setSkInfo({ ok: true, dof: 0, free: new Set(), redundant: 0 })
-      skHist.current = { undo: [], redo: [] }
-      setPickFor(null)
-      setTool('line')
-      setTimeout(() => viewRef.current?.lookAt(plane), 0)
-      return
+    const preFace = pre.faces.length === 1 && pre.faces[0].kind === 'plane' ? pre.faces[0] : null
+    if (type === 'sketch' && preFace) return startSketch(preFace)
+    if (type === 'hole') {
+      // Bohrung ohne Skizze mit Punkten (oder mit gewählter Fläche): erst Bohrpunkte auf der Fläche setzen, dann Bohrung
+      const withPts = [...features].reverse().find((f) => f.type === 'sketch' && !f.suppressed && f.sketch?.ents?.some((e) => (e.t === 'point' || e.t === 'circle') && !e.cons))
+      const used = withPts && features.some((f) => f.type === 'hole' && f.sketch === withPts.id && !f.suppressed)
+      if (preFace || !withPts || used) return startHolePoints(preFace)
     }
     if ((type === 'fillet' || type === 'chamfer') && pre.edges.length) draft.edges = pre.edges
     if (['shell', 'removefaces'].includes(type) && pre.faces.length) draft.faces = pre.faces
@@ -412,6 +428,13 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   }
 
   // Feature mit einer bestimmten Skizze anlegen (Kontextmenü, „weiter mit“)
+  // Bohrung: Punkte auf einer Fläche setzen (Skizze), nach „Skizze fertig“ geht der Bohrungsdialog auf
+  const afterSketch = useRef(null)
+  const startHolePoints = (face) => {
+    afterSketch.current = 'hole'
+    startSketch(face, 'point', `Bohrpunkte ${features.filter((f) => f.type === 'hole').length + 1}`)
+    note(face ? 'Bohrpunkte anklicken (an Kanten/Mitten fangen, bemaßen), dann „Skizze fertig“' : 'Fläche für die Bohrungen anklicken – dann Bohrpunkte setzen')
+  }
   const startNewWith = (type, sketchId) => {
     startNew(type)
     setEdit((e) => {
@@ -422,6 +445,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       return { ...e, draft: { ...e.draft, sketch: sketchId, regions: used ? [] : null, axis } }
     })
   }
+
+  const latest = useRef({})
+  latest.current = { startNewWith, startHolePoints }
 
   const openEdit = (f) => {
     if (edit) return note('Erst das offene Feature bestätigen oder abbrechen')
@@ -452,7 +478,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (d.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
     // Skizze mit Schraffuren (Draftpad), noch nicht benutzt: Teile vorschlagen
     if (d.type === 'sketch' && d.sketch?.fills?.length && !list.some((f) => f.sketch === d.id && f.type !== 'sketch')) openParts(d)
-    else if (d.type === 'sketch' && edit.isNew && d.sketch?.ents?.some((e) => !e.cons && e.t !== 'point')) setNextHint({ sketchId: d.id, name: d.name })
+    else if (d.type === 'sketch' && edit.isNew && afterSketch.current === 'hole') {
+      afterSketch.current = null
+      if (d.sketch?.ents?.some((e) => (e.t === 'point' || e.t === 'circle') && !e.cons)) setTimeout(() => latest.current.startNewWith('hole', d.id), 0)
+    } else if (d.type === 'sketch' && edit.isNew && d.sketch?.ents?.some((e) => !e.cons && e.t !== 'point')) setNextHint({ sketchId: d.id, name: d.name })
     if (next) {
       // gleich das nächste Feature mit derselben Skizze, nichts gewählt
       const id = featureId(list)
@@ -481,6 +510,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   }
 
   const cancel = () => {
+    afterSketch.current = null
     if (edit?.draft.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
     setEdit(null)
     setPickFor(null)
@@ -761,7 +791,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       } else setDraft({ sketch: newSketch(plane, ref) })
       setSkInfo({ ok: true, dof: 0, free: new Set(), redundant: 0 })
       setPickFor(null)
-      setTool('line')
+      setTool(afterSketch.current === 'hole' ? 'point' : 'line')
       setTimeout(() => viewRef.current?.lookAt(plane), 0)
       return
     }
@@ -1388,6 +1418,14 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           <FeatureDialog
             edit={edit}
             tool={tool}
+            holePoints={
+              edit.draft.type === 'hole' && edit.isNew
+                ? () => {
+                    cancel()
+                    setTimeout(() => latest.current.startHolePoints(null), 0)
+                  }
+                : null
+            }
             features={features}
             setDraft={setDraft}
             linkTools={
@@ -1685,7 +1723,7 @@ function PickButton({ active, label, value, onClick }) {
   )
 }
 
-function FeatureDialog({ edit, tool, features, setDraft, onOk, onOkNext, regionTools, linkTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
+function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkNext, regionTools, linkTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
   const d = edit.draft
   const before = features.slice(0, edit.index)
   const sketches = before.filter((f) => f.type === 'sketch' && !f.suppressed)
@@ -1888,6 +1926,11 @@ function FeatureDialog({ edit, tool, features, setDraft, onOk, onOkNext, regionT
         <>
           {sketchSel}
           <p className="hint">Gebohrt wird an jedem Punkt der Skizze (Werkzeug „Punkt“) und an Kreismitten, senkrecht zur Skizzenebene.</p>
+          {holePoints && (
+            <button className="btn small" title="Fläche anklicken, Bohrpunkte setzen und bemaßen – danach geht dieser Dialog wieder auf" onClick={holePoints}>
+              Neue Bohrpunkte auf einer Fläche …
+            </button>
+          )}
           <Seg
             value={d.holeKind ?? 'clear'}
             onChange={(holeKind) => {

@@ -367,6 +367,7 @@ selbst starten.
 | 18e.51 | STEP öffnen (z. B. `Daten/Hebel.step`) › Konstruktion | Teil erscheint nach ≈ 1–2 s (eingelesen im Browser, kein Python mehr); Körpernamen aus der STEP-Datei bleiben | [ ] |
 | 18e.52 | „Radius/Bohrung“: Bohrung anklicken, neuer Ø; Radius anklicken, neuer Radius (0 = scharfe Kante) | Bohrung bzw. Rundung geändert, Volumen plausibel; „In die Rechnung übernehmen“ vernetzt das geänderte Teil | [ ] |
 | 18e.53 | Mehr › Flächen entfernen: Bohrung (mit Senkung/Spitze) bzw. gerade Verrundung anklicken | Bohrung ganz zu bzw. scharfe Kante; ebene Flächen/Fasen werden mit Hinweis abgelehnt | [ ] |
+| 18e.54 | Platte, dann Taste **H** ohne Auswahl (bzw. Deckfläche anklicken, dann H) | Skizze „Bohrpunkte“: Fläche anklicken, Punkte setzen (fangen an Kanten/Mitten, bemaßbar), „Skizze fertig“ → Bohrungsdialog mit diesen Punkten; Enter = Bohrungen | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
