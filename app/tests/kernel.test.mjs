@@ -562,6 +562,11 @@ test('Zeichnung (SVG): drei Ansichten mit verdeckten Kanten, Mittellinien, Maßs
   // Bohrungsangaben mit Lochkreis, Innenbohrung des Rings
   assert.ok(svg.includes('6× Ø9, LK Ø70'), 'Lochkreis')
   assert.ok(svg.includes('>Ø40<'), 'Innenbohrung')
+  // Schnitt A–A: schraffierte Schnittfläche, Beschriftung, Schnittverlauf
+  clearCache()
+  const sec = build({ features, svg: { section: true }, tess: false })
+  assert.ok(sec.svg.includes('Schnitt A–A') && sec.svg.includes('clip-path="url(#schnitt-a)"') && sec.svg.includes('class="dim cut"'))
+  assert.ok(!sec.svg.includes('>Vorderansicht<'))
   // großes Teil: kleinerer Maßstab
   clearCache()
   const big = build({ features: [{ id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 900, 300) }, { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 200, dir: 1 }], svg: true, tess: false })

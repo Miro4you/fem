@@ -1990,7 +1990,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             bodies={built.bodies_info}
             onClose={() => setDrawing(false)}
             onError={onError}
-            make={(body) => {
+            make={(body, section) => {
               const infos = built.bodies_info
               const pick = body == null ? infos : [infos[body]]
               const title = body != null || infos.length === 1 ? pick[0].name : `Baugruppe (${infos.length} Teile)`
@@ -1998,7 +1998,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               const mat = DENSITIES.find(([, v]) => String(v) === String(density))
               const mass = vol > 0 ? `${fmtMass((vol / 1000) * Number(density))}${mat ? ` (${mat[0]})` : ''}` : ''
               const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
-              return cadBuildSvg({ base: cad.base ?? null, features: kernelFeatures(live) }, { title, date, mass, body: body ?? undefined }).then((svg) => ({ svg, title }))
+              return cadBuildSvg({ base: cad.base ?? null, features: kernelFeatures(live) }, { title, date, mass, body: body ?? undefined, section }).then((svg) => ({ svg, title }))
             }}
           />
         )}
@@ -3004,6 +3004,7 @@ function KeysHelp({ sketch, onClose }) {
 // Zeichnung ansehen: alle Körper oder ein einzelner (Einzelteilzeichnung), als SVG speichern oder drucken (PDF)
 function DrawingPreview({ bodies, make, onClose, onError }) {
   const [body, setBody] = useState(null)
+  const [section, setSection] = useState(false) // Vorderansicht als Schnitt A–A
   const [res, setRes] = useState(null) // { svg, title, url }
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState(null)
@@ -3012,7 +3013,7 @@ function DrawingPreview({ bodies, make, onClose, onError }) {
     let url = null
     setBusy(true)
     setErr(null)
-    make(body)
+    make(body, section)
       .then((r) => {
         if (!alive) return
         url = URL.createObjectURL(new Blob([r.svg], { type: 'image/svg+xml' }))
@@ -3025,7 +3026,7 @@ function DrawingPreview({ bodies, make, onClose, onError }) {
       if (url) URL.revokeObjectURL(url)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [body])
+  }, [body, section])
   useEffect(() => {
     const k = (e) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', k)
@@ -3068,6 +3069,9 @@ function DrawingPreview({ bodies, make, onClose, onError }) {
                 ))}
               </select>
             )}
+            <label className="dwg-check" title="Vorderansicht als Schnitt durch die Mitte (schraffiert), Schnittverlauf in der Draufsicht">
+              <input type="checkbox" checked={section} onChange={(e) => setSection(e.target.checked)} /> Schnitt A–A
+            </label>
             <button
               className="btn"
               disabled={!res || busy}

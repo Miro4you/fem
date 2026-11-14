@@ -393,6 +393,7 @@ selbst starten.
 | 18e.77 | Platte um den Ursprung, Mehr › Teilen (Ebene YZ, „Vorne behalten“) | Volumen halbiert, nur die Hälfte x > 0 bleibt; „Beide“ ergibt zwei Körper „… (1)“ / „… (2)“ | [ ] |
 | 18e.78 | Flansch mit Bohrungen (oder Normteil-Schraube), „Zeichnung …“ | Vorschau-Fenster; „Als SVG“ speichert „… - Zeichnung.svg“: Vorderansicht, Seitenansicht von links, Draufsicht, Isometrie; Bohrungen gestrichelt, Mittellinien/-kreuze, Gesamtmaße, in der Draufsicht „6× Ø9, LK Ø70“ mit Lochkreis, Maßstab (z. B. 1:1 bzw. 2:1), Masse mit Werkstoff im Schriftfeld | [ ] |
 | 18e.79 | Schraube + Mutter (Normteil zweimal), „Zeichnung …“, oben „Mutter M8 …“ wählen, dann „Drucken / PDF“ | Blatt nur mit der Mutter (Maßstab 5:1, Masse der Mutter); „Alle Körper“ heißt „Baugruppe (2 Teile)“; Druckdialog im Blattformat; danach STL-Export und weiteres Konstruieren ohne Fehler | [ ] |
+| 18e.80 | Flansch bzw. Hebel, „Zeichnung …“, Haken „Schnitt A–A“ | Vorderansicht wird „Schnitt A–A“: Schnittfläche schraffiert, Bohrungen im Schnitt offen; in der Draufsicht Schnittverlauf mit „A“ und Pfeilen nach oben | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

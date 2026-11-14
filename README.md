@@ -213,7 +213,8 @@ Tastenkürzel.
 6. **Messen**, **Schnittansicht** und **Darstellung** (mit/ohne Kanten, durchsichtig, Drahtgitter) rechts oben im Bild; **„In die Rechnung übernehmen“** baut das Teil als STEP,
    vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP“** bzw. **„Als STL“** (3D-Druck) exportiert es,
    **„Zeichnung …“** zeigt ein Blatt mit drei Ansichten (verdeckte Kanten gestrichelt), Isometrie, Gesamtmaßen,
-   Bohrungsangaben (z. B. „6× Ø9, LK Ø70“), Mittellinien und Schriftfeld – für alle Körper oder ein einzelnes Teil;
+   Bohrungsangaben (z. B. „6× Ø9, LK Ø70“), Mittellinien und Schriftfeld – für alle Körper oder ein einzelnes Teil, wahlweise mit **Schnitt A–A**
+   (schraffiert, Schnittverlauf in der Draufsicht);
    „Als SVG“ speichert, „Drucken / PDF“ druckt im richtigen Format (A4/A3 quer).
 
 **Aus Draftpad:** Startseite „Aus Draftpad“ oder Knopf „Draftpad“ in der Konstruktion öffnet die

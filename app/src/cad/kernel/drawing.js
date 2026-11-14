@@ -1,7 +1,7 @@
 // Technische Zeichnung als SVG: Vorderansicht, Seitenansicht von links, Draufsicht (Projektionsmethode 1 nach
 // DIN ISO 5456-2) und eine Isometrie auf einem A4-/A3-Blatt mit Schriftfeld und Gesamtmaßen.
 // Sichtbare Kanten breit und durchgezogen, verdeckte Kanten schmal gestrichelt (verdeckte Linien über HLR von OpenCASCADE).
-import { drawProjection, ProjectionCamera } from 'replicad'
+import { drawProjection, ProjectionCamera, makeBox } from 'replicad'
 
 // Blickrichtung zum Betrachter hin und Bild-x (rechts); Bild-y ergibt sich daraus (bei allen drei: z bzw. y nach oben)
 const VIEWS = {
@@ -138,6 +138,52 @@ function boreNotes(axes, v, s, tx, ty, done) {
   return out.length ? `<g class="dim">${out.join('')}</g>` : ''
 }
 
+// Schnitt A–A: vordere Hälfte (y < Mitte) weg, Rest von vorn ohne verdeckte Kanten; Schnittflächen als Dreiecke
+// (Bildkoordinaten der Ansicht) für die Schraffur
+function sectionFront(shape, bbox, v, yc) {
+  const [lo, hi] = bbox
+  const pad = 1 + 0.01 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+  const tool = makeBox([lo[0] - pad, lo[1] - pad, lo[2] - pad], [hi[0] + pad, yc, hi[2] + pad])
+  let cut = null
+  try {
+    cut = shape.clone().cut(tool)
+    const p = project(cut, v, false)
+    const xd = unit(v.x)
+    const yd = cross(unit(v.dir), xd)
+    const tol = 1e-6 * Math.max(1, hi[1] - lo[1])
+    const secIds = new Set()
+    for (const f of cut.faces) {
+      if (f.geomType !== 'PLANE') continue
+      const c = f.center
+      const pt = [c.x, c.y, c.z]
+      const n = f.normalAt(c)
+      if (Math.abs(Math.abs(n.y) - 1) < 1e-6 && Math.abs(pt[1] - yc) < tol) secIds.add(f.hashCode)
+    }
+    const m = cut.mesh({ tolerance: 0.01, angularTolerance: 0.2 })
+    const tris = []
+    for (const g of m.faceGroups) {
+      if (!secIds.has(g.faceId)) continue
+      for (let k = g.start; k < g.start + g.count; k += 3) {
+        tris.push(
+          [0, 1, 2].map((j) => {
+            const i = m.triangles[k + j]
+            const q = [m.vertices[3 * i], m.vertices[3 * i + 1], m.vertices[3 * i + 2]]
+            return [dot(q, xd), -dot(q, yd)]
+          }),
+        )
+      }
+    }
+    return { visible: p.visible, tris }
+  } finally {
+    try {
+      tool.delete()
+      cut?.delete()
+    } catch {
+      /* schon freigegeben */
+    }
+  }
+}
+
 // Maßlinie mit Pfeilen und Zahl (alles in Blatt-mm); vertikal → Zahl gedreht links an der Linie
 function dimLine(a, b, offset, text, vertical) {
   const ah = 2.5
@@ -209,10 +255,24 @@ export function drawingSvg(shape, bbox, opts = {}) {
   const frames = {}
   const notes = []
   const noted = new Set()
+  const dims = []
   for (const k of ['top', 'front', 'left']) {
     const v = VIEWS[k]
     const p = project(shape, v, true)
     if (!p.bounds) continue
+    // Vorderansicht als Schnitt A–A (Lage und Größe wie die ungeschnittene Ansicht, damit alles fluchtet)
+    let sec = null
+    if (k === 'front' && opts.section) {
+      try {
+        sec = sectionFront(shape, bbox, v, (lo[1] + hi[1]) / 2)
+      } catch {
+        sec = null
+      }
+      if (sec) {
+        p.visible = sec.visible
+        p.hidden = []
+      }
+    }
     const [[bx0, by0], [bx1, by1]] = p.bounds
     const [px, py] = place[k]
     // Zeichnungs-y zeigt nach oben, SVG-Pfade von replicad sind schon gespiegelt (y → −y)
@@ -223,14 +283,37 @@ export function drawingSvg(shape, bbox, opts = {}) {
     body.push(`<g transform="translate(${tx.toFixed(3)} ${ty.toFixed(3)}) scale(${s})">`)
     if (p.hidden.length)
       body.push(`<g class="hid" stroke-width="${hw}" stroke-dasharray="${3 / s} ${1.5 / s}">${p.hidden.map((d) => `<path d="${d}"/>`).join('')}</g>`)
+    if (sec?.tris.length) {
+      const xs = sec.tris.flat().map((q) => q[0])
+      const ys = sec.tris.flat().map((q) => q[1])
+      const [x0s, x1s, y0s, y1s] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+      const d = (2.5 / s) * Math.SQRT2
+      const lines = []
+      for (let c = x0s - (y1s - y0s); c <= x1s; c += d) lines.push(`M${(c).toFixed(4)} ${y1s.toFixed(4)} L${(c + (y1s - y0s)).toFixed(4)} ${y0s.toFixed(4)}`)
+      const clip = sec.tris.map((t) => `M${t.map((q) => `${q[0].toFixed(4)} ${q[1].toFixed(4)}`).join(' L')} Z`).join(' ')
+      body.push(`<clipPath id="schnitt-a"><path d="${clip}"/></clipPath>`)
+      body.push(`<path class="hatch" clip-path="url(#schnitt-a)" stroke-width="${0.18 / s}" d="${lines.join(' ')}"/>`)
+    }
     body.push(`<g class="vis" stroke-width="${sw}">${p.visible.map((d) => `<path d="${d}"/>`).join('')}</g>`)
     body.push('</g>')
     body.push(axisLines(opts.axes ?? [], v, s, tx, ty))
     notes.push(boreNotes(opts.axes ?? [], v, s, tx, ty, noted))
-    frames[k] = { x: px, y: py, w: s * (bx1 - bx0), h: s * (by1 - by0) }
+    frames[k] = { x: px, y: py, w: s * (bx1 - bx0), h: s * (by1 - by0), sec: !!sec }
+  }
+  // Schnittverlauf A–A in der Draufsicht: Strichpunktlinie, dicke Enden, Pfeile in Blickrichtung (+y = nach oben)
+  const tv = frames.top
+  if (frames.front?.sec && tv) {
+    const yc = (lo[1] + hi[1]) / 2
+    const ySheet = tv.y + tv.h - s * (yc - lo[1])
+    const xa = tv.x - 6
+    const xb = tv.x + tv.w + 6
+    const a = (x, dir) =>
+      `<line class="cut-end" x1="${x}" y1="${ySheet}" x2="${x + dir * 6}" y2="${ySheet}"/><path class="ar" d="M${x + dir * 3} ${ySheet - 7} l-0.9 2.5 h1.8 Z"/><line x1="${x + dir * 3}" y1="${ySheet}" x2="${x + dir * 3}" y2="${ySheet - 5}"/><text class="cut-lbl" x="${x + dir * 3 + (dir > 0 ? -4 : 4)}" y="${ySheet - 3}" text-anchor="middle">A</text>`
+    dims.push(
+      `<g class="dim cut"><line class="cut-mid" x1="${xa + 6}" y1="${ySheet}" x2="${xb - 6}" y2="${ySheet}"/>${a(xa, 1)}${a(xb, -1)}</g>`,
+    )
   }
   // Gesamtmaße: Breite und Höhe an der Vorderansicht, Tiefe an der Seitenansicht
-  const dims = []
   const f = frames.front
   if (f) {
     dims.push(dimLine([f.x, f.y + f.h], [f.x + f.w, f.y + f.h], 8, num(W), false))
@@ -239,7 +322,7 @@ export function drawingSvg(shape, bbox, opts = {}) {
   const lv = frames.left
   if (lv) dims.push(dimLine([lv.x, lv.y + lv.h], [lv.x + lv.w, lv.y + lv.h], 8, num(D), false))
   const labels = Object.entries(frames).map(
-    ([k, fr]) => `<text class="lbl" x="${fr.x}" y="${fr.y - 3}">${VIEWS[k].label}</text>`,
+    ([k, fr]) => `<text class="lbl" x="${fr.x}" y="${fr.y - 3}">${fr.sec ? 'Schnitt A–A' : VIEWS[k].label}</text>`,
   )
   // Isometrie (eigener Maßstab) rechts unten über dem Schriftfeld
   const tbW = 180
@@ -299,6 +382,10 @@ export function drawingSvg(shape, bbox, opts = {}) {
   .ctr line, .dim .lk { stroke-width: 0.18; stroke-dasharray: 6 1.2 0.6 1.2 }
   .dim line { stroke-width: 0.25 }
   .sym path, .sym circle { stroke-width: 0.3 }
+  .hatch { fill: none; stroke: #000 }
+  .cut .cut-mid { stroke-width: 0.25; stroke-dasharray: 8 1.5 1 1.5 }
+  .cut .cut-end { stroke-width: 0.7 }
+  .cut .cut-lbl { font-size: 5px; font-weight: bold }
   .sym .ctr { stroke-width: 0.18; stroke-dasharray: 2 0.6 0.4 0.6 }
 </style>
 <rect class="bg" width="${sheet.w}" height="${sheet.h}"/>

@@ -954,3 +954,4 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .dwg-spin { position: absolute; }
 .dwg-sheet .hint.error { color: var(--danger, #dc2626); }
 .dwg-card:focus { outline: none; }
+.dwg-check { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
