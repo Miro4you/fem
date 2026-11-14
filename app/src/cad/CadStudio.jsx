@@ -2101,6 +2101,17 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               }[pickFor]}
           </div>
         )}
+        {/* Bestätigen/Abbrechen auch im Bild, oben rechts unter dem Würfel (wie in SolidWorks) */}
+        {edit && (
+          <div className="cad-okfloat">
+            <button className="ok" title={edit.draft.type === 'sketch' ? 'Skizze fertig' : 'OK'} onClick={() => accept(false)}>
+              <Check size={20} />
+            </button>
+            <button className="cancel" title="Abbrechen (Esc)" onClick={cancel}>
+              <X size={18} />
+            </button>
+          </div>
+        )}
         <CadView
           ref={viewRef}
           tess={drawTess}
@@ -2265,6 +2276,22 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
   )
   const sk = d.type === 'sketch' ? d.sketch : null
 
+  const okRow = (
+    <div className={'row cad-ok' + (d.type === 'sketch' ? ' top' : '')}>
+      <button className="btn primary" disabled={(!!prob && d.type !== 'sketch') || (d.type === 'sketch' && !d.sketch)} onClick={onOk}>
+        <Check size={15} /> {d.type === 'sketch' ? 'Skizze fertig' : 'OK'}
+      </button>
+      {(d.type === 'extrude' || d.type === 'revolve') && (
+        <button className="btn" disabled={!!prob} title="Übernehmen und gleich das nächste mit derselben Skizze anlegen (andere Flächen wählen)" onClick={onOkNext}>
+          OK und weiter
+        </button>
+      )}
+      <button className="btn" onClick={onCancel}>
+        <X size={15} /> Abbrechen
+      </button>
+      {building && <Loader2 size={15} className="spin" />}
+    </div>
+  )
   return (
     <section
       className="section cad-dialog"
@@ -2280,6 +2307,8 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
         <Icon size={15} />
         <input className="cad-name" value={d.name} onChange={(e) => setDraft({ name: e.target.value })} />
       </h2>
+      {/* Skizze: „Skizze fertig“ oben (rutscht bei langen Listen nicht aus dem Bild) */}
+      {d.type === 'sketch' && okRow}
 
       {d.type === 'sketch' && (
         <>
@@ -2847,20 +2876,7 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
       )}
       {status?.warn && <p className="hint">{status.warn.join(' · ')}</p>}
       {prob && d.type !== 'sketch' && <p className="hint">{prob}</p>}
-      <div className="row cad-ok">
-        <button className="btn primary" disabled={(!!prob && d.type !== 'sketch') || (d.type === 'sketch' && !d.sketch)} onClick={onOk}>
-          <Check size={15} /> {d.type === 'sketch' ? 'Skizze fertig' : 'OK'}
-        </button>
-        {(d.type === 'extrude' || d.type === 'revolve') && (
-          <button className="btn" disabled={!!prob} title="Übernehmen und gleich das nächste mit derselben Skizze anlegen (andere Flächen wählen)" onClick={onOkNext}>
-            OK und weiter
-          </button>
-        )}
-        <button className="btn" onClick={onCancel}>
-          <X size={15} /> Abbrechen
-        </button>
-        {building && <Loader2 size={15} className="spin" />}
-      </div>
+      {d.type !== 'sketch' && okRow}
     </section>
   )
 }
