@@ -720,17 +720,53 @@ export default function CadView({
     }
     // Maßlinien
     const segs = []
+    const tris = []
+    const per = (() => {
+      try {
+        return mmPerPx(skPlane)
+      } catch {
+        return 0.1
+      }
+    })()
     for (const con of sk.cons) {
       if (!isDim(con)) continue
       const d = dimGeometry(sk, con)
       if (!d || d.arc) continue
       segs.push(...W(d.from), ...W(d.to))
-      for (const [a, b] of d.ext) segs.push(...W(a), ...W(b))
+      // Maßhilfslinien mit kleinem Überstand über die Maßlinie hinaus
+      for (const [a, b] of d.ext) {
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1])
+        if (L < 1e-9) continue
+        const ov = (3 * per) / L
+        segs.push(...W(a), ...W([b[0] + (b[0] - a[0]) * ov, b[1] + (b[1] - a[1]) * ov]))
+      }
+      // Pfeile an beiden Enden (bei Radius nur am Rand), nach außen, wenn die Maßlinie zu kurz ist
+      const L = Math.hypot(d.to[0] - d.from[0], d.to[1] - d.from[1])
+      if (L > 1e-9) {
+        const u = [(d.to[0] - d.from[0]) / L, (d.to[1] - d.from[1]) / L]
+        const len = 11 * per
+        const wid = 3.5 * per
+        const inside = L > 2.6 * len
+        const head = (tip, dirIn) => {
+          const base = [tip[0] + dirIn[0] * len, tip[1] + dirIn[1] * len]
+          const n = [-dirIn[1], dirIn[0]]
+          tris.push(...W(tip), ...W([base[0] + n[0] * wid, base[1] + n[1] * wid]), ...W([base[0] - n[0] * wid, base[1] - n[1] * wid]))
+          if (!inside) segs.push(...W(tip), ...W([tip[0] + dirIn[0] * 2 * len, tip[1] + dirIn[1] * 2 * len]))
+        }
+        const s1 = inside ? 1 : -1
+        if (con.t !== 'rad') head(d.from, [u[0] * s1, u[1] * s1])
+        head(d.to, [-u[0] * s1, -u[1] * s1])
+      }
     }
     if (segs.length) {
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3))
       add(new THREE.LineSegments(g, front(new THREE.LineBasicMaterial({ color: 0x64748b }))), 21)
+    }
+    if (tris.length) {
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.Float32BufferAttribute(tris, 3))
+      add(new THREE.Mesh(g, front(new THREE.MeshBasicMaterial({ color: 0x64748b, side: THREE.DoubleSide }))), 21)
     }
     s.dirty = true
   }, [skData, skPlane, sketch?.sel, sketch?.info, hoverSk])

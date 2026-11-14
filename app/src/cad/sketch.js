@@ -562,7 +562,16 @@ export function dimGeometry(sk, c) {
     }
     const nrm = [-dir[1], dir[0]]
     const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
-    const o = off ? (off[0] - mid[0]) * nrm[0] + (off[1] - mid[1]) * nrm[1] : 0
+    let o = off ? (off[0] - mid[0]) * nrm[0] + (off[1] - mid[1]) * nrm[1] : 0
+    if (!off) {
+      // ohne gespeicherte Lage: etwas nach außen (weg von der Mitte der Skizze), nicht auf die Kante
+      const ids = Object.keys(sk.pts)
+      const cx = ids.reduce((t, id) => t + sk.pts[id].x, 0) / (ids.length || 1)
+      const cy = ids.reduce((t, id) => t + sk.pts[id].y, 0) / (ids.length || 1)
+      const side = (mid[0] - cx) * nrm[0] + (mid[1] - cy) * nrm[1] >= 0 ? 1 : -1
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1])
+      o = side * Math.max(0.12 * L, 2)
+    }
     const proj = (p) => {
       const t = (p[0] - mid[0]) * dir[0] + (p[1] - mid[1]) * dir[1]
       return [mid[0] + dir[0] * t + nrm[0] * o, mid[1] + dir[1] * t + nrm[1] * o]
@@ -573,10 +582,21 @@ export function dimGeometry(sk, c) {
     return { from: A, to: B, ext: [[a, A], [b, B]], label: [(A[0] + B[0]) / 2 + dir[0] * along, (A[1] + B[1]) / 2 + dir[1] * along] }
   }
   if (c.t === 'dpl') {
+    // wie ein Abstandsmaß senkrecht zur Linie: Maßlinie parallel versetzt (nicht auf der Kante), Hilfslinien zu Punkt und Linie
     const e = ent(c.e)
     const p = P(sk, c.p)
     const q = nearestOnInfinite(sk, e, p)
-    return { from: p, to: q, ext: [], label: off ?? [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] }
+    const [ax, ay] = P(sk, e.a)
+    const [bx, by] = P(sk, e.b)
+    const Ll = Math.hypot(bx - ax, by - ay) || 1
+    const dir = [-(by - ay) / Ll, (bx - ax) / Ll] // senkrecht zur Linie
+    const along = [dir[1], -dir[0]] // entlang der Linie
+    const mid = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]
+    const o = off ? (off[0] - mid[0]) * along[0] + (off[1] - mid[1]) * along[1] : 0
+    const A = [p[0] + along[0] * o, p[1] + along[1] * o]
+    const B = [q[0] + along[0] * o, q[1] + along[1] * o]
+    const t = off ? (off[0] - mid[0]) * dir[0] + (off[1] - mid[1]) * dir[1] : 0
+    return { from: A, to: B, ext: [[p, A], [q, B]], label: [(A[0] + B[0]) / 2 + dir[0] * t, (A[1] + B[1]) / 2 + dir[1] * t] }
   }
   if (c.t === 'rad' || c.t === 'dia') {
     const e = ent(c.e)
