@@ -191,6 +191,21 @@ function matchFaces(tess, refs) {
 const edgeRef = (c) => ({ mid: c.mid, dir: c.dir, kind: c.kind, ...(c.kind === 'circle' ? { center: c.center, axis: c.axis, radius: c.radius } : {}), length: c.length })
 /// Ebene parallel verschieben (Abstand entlang der Normalen)
 const shiftPlane = (plane, d) => (d ? { ...plane, origin: plane.origin.map((x, i) => x + basis(plane).n[i] * d) } : plane)
+// Dichten für die Masse in der Körperliste (g/cm³)
+const DENSITIES = [
+  ['Stahl', 7.85],
+  ['Edelstahl', 7.9],
+  ['Aluminium', 2.7],
+  ['Messing', 8.5],
+  ['Grauguss', 7.2],
+  ['PLA', 1.24],
+  ['PETG', 1.27],
+  ['ABS', 1.05],
+  ['PA12', 1.01],
+  ['Holz (Buche)', 0.72],
+]
+const fmtMass = (g) => (g >= 1000 ? `${fmtN(g / 1000)} kg` : `${fmtN(g)} g`)
+
 /// Ebene durch drei Punkte (Ursprung im ersten, u zum zweiten) oder null, wenn sie auf einer Geraden liegen
 function planeFrom3([a, b, c]) {
   const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
@@ -1135,6 +1150,13 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   }, [edit?.draft, viewTess, cmeasure, pickEdges, preSel])
   // Körperliste: überfahrener Körper im Bild markiert, ausgeblendete Körper nicht gezeichnet
   const [hotBody, setHotBody] = useState(null)
+  const [density, setDensity] = useState(() => {
+    try {
+      return localStorage.getItem('projekt-fem.cad-dichte') || '7.85'
+    } catch {
+      return '7.85'
+    }
+  })
   const [hotSketch, setHotSketch] = useState(null) // Skizze im Verlauf überfahren: im Bild zeigen
   const [hiddenBodies, setHiddenBodies] = useState(() => new Set())
   const bodyCount = built?.bodies ?? 0
@@ -1661,6 +1683,25 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               <section className="section">
                 <h2>
                   <Boxes size={15} /> Körper ({bodyCount})
+                  <select
+                    className="cad-density"
+                    value={density}
+                    title="Werkstoff für die Masse (Dichte in g/cm³)"
+                    onChange={(e) => {
+                      setDensity(e.target.value)
+                      try {
+                        localStorage.setItem('projekt-fem.cad-dichte', e.target.value)
+                      } catch {
+                        /* ohne Speicher */
+                      }
+                    }}
+                  >
+                    {DENSITIES.map(([k, v]) => (
+                      <option key={k} value={v}>
+                        {k} ({String(v).replace('.', ',')})
+                      </option>
+                    ))}
+                  </select>
                 </h2>
                 {built.bodies_info.map((b, i) => (
                   <div
@@ -1689,7 +1730,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                         {b.name}
                       </span>
                     )}
-                    <span className="muted small">{fmtN(b.volume / 1000)} cm³</span>
+                    <span className="muted small" title={`${fmtN(b.volume / 1000)} cm³`}>
+                      {fmtMass((b.volume / 1000) * Number(density))}
+                    </span>
                     <span className="spacer" />
                     <button
                       className={'icon-btn' + (hiddenBodies.has(i) ? ' keep' : '')}
@@ -1707,6 +1750,20 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     </button>
                   </div>
                 ))}
+                <button
+                  className="btn small"
+                  title="Stückliste als CSV (Name, Volumen, Masse, Schwerpunkt) – z. B. für Excel"
+                  onClick={() => {
+                    const rows = [['Pos', 'Name', 'Volumen cm³', 'Masse g', 'Schwerpunkt x', 'y', 'z']]
+                    built.bodies_info.forEach((b, i) =>
+                      rows.push([i + 1, b.name, fmtN(b.volume / 1000), fmtN((b.volume / 1000) * Number(density)), ...b.center.map((c) => fmtN(c))]),
+                    )
+                    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n')
+                    api.saveBlob(new Blob(['\ufeff' + csv], { type: 'text/csv' }), 'Stueckliste.csv', 'CSV-Tabelle', 'csv')
+                  }}
+                >
+                  <Download size={13} /> Stückliste (CSV)
+                </button>
               </section>
             )}
             <section className="section">

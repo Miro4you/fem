@@ -389,6 +389,7 @@ selbst starten.
 | 18e.73 | Konstruktion › „Als STL“ | binäre STL-Datei mit allen Körpern (im Slicer öffnen: Maße wie im CAD) | [ ] |
 | 18e.74 | Neue Skizze › „Ebene durch 3 Punkte …“, drei Ecken (oder Kreismitten) des Bauteils anklicken | Skizzenebene durch die drei Punkte, Blick senkrecht darauf; Ursprung im ersten Punkt, x-Achse zum zweiten | [ ] |
 | 18e.75 | Konstruktion › Messen: zwei Ecken anklicken | „Punkt (x; y; z)“ je Ecke und „Abstand der Punkte … mm (Δx, Δy, Δz)“ | [ ] |
+| 18e.76 | Körperliste: Werkstoff oben rechts umstellen (Stahl → PLA), „Stückliste (CSV)“ | Masse je Körper passt sich an (gemerkt); CSV mit Pos, Name, Volumen, Masse, Schwerpunkt (öffnet in Excel mit Umlauten) | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

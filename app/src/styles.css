@@ -943,3 +943,4 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-more-group:first-child { padding-top: 2px; }
 .cad-more-menu { max-height: calc(100vh - 140px); overflow: auto; }
 .cad-body-dot { width: 12px; height: 12px; border-radius: 3px; border: 1px solid color-mix(in srgb, var(--text) 25%, transparent); flex: none; }
+.cad-density { margin-left: auto; height: 24px; font-size: 11.5px; padding: 0 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); max-width: 130px; }
