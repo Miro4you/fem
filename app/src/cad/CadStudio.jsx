@@ -198,6 +198,22 @@ const faceRef = (f) => ({ center: f.center, kind: f.kind, normal: f.normal, poin
 const nameOf = (r) =>
   r?.std ? `Ebene ${r.std}` : r?.axis ? `${r.axis}-Achse` : r?.edge ? (r.edge.kind === 'circle' ? 'Kreiskante' : 'Kante') : r?.face ? (r.face.kind === 'cylinder' ? 'Zylinderfläche' : 'Fläche') : '–'
 
+/// Darstellung ohne die ausgeblendeten Körper (Flächen-Nummern bleiben gleich)
+function hideBodies(tess, hidden) {
+  if (!tess || !hidden?.size) return tess
+  const bodyOf = new Map(tess.surfaces.map((x) => [x.tag, x.body]))
+  const tri = []
+  const triS = []
+  const ts = tess.tri_surface ?? []
+  for (let i = 0; i < ts.length; i++) {
+    if (hidden.has(bodyOf.get(ts[i]))) continue
+    tri.push(tess.triangles[3 * i], tess.triangles[3 * i + 1], tess.triangles[3 * i + 2])
+    triS.push(ts[i])
+  }
+  const curves = tess.curves.filter((c) => !(c.surfaces?.length && c.surfaces.every((tg) => hidden.has(bodyOf.get(tg)))))
+  return { ...tess, triangles: tri, tri_surface: triS, curves }
+}
+
 /// tangential anschließende Kanten (Kette über gemeinsame Endpunkte mit gleicher Richtung), wie in Onshape
 function tangentChain(tess, start) {
   const curves = tess?.curves ?? []
@@ -967,6 +983,18 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if ((d.type === 'refillet' || d.type === 'rehole') && d.surfaces) out.faces = matchFaces(viewTess, d.surfaces.map((c) => ({ center: c })))
     return out
   }, [edit?.draft, viewTess, cmeasure, pickEdges, preSel])
+  // Körperliste: überfahrener Körper im Bild markiert, ausgeblendete Körper nicht gezeichnet
+  const [hotBody, setHotBody] = useState(null)
+  const [hiddenBodies, setHiddenBodies] = useState(() => new Set())
+  const bodyCount = built?.bodies ?? 0
+  useEffect(() => setHiddenBodies(new Set()), [bodyCount])
+  const shownSel = useMemo(() => {
+    if (hotBody == null || !viewTess) return selected
+    const faces = new Set(selected.faces)
+    for (const x of viewTess.surfaces) if (x.body === hotBody) faces.add(x.tag)
+    return { ...selected, faces }
+  }, [selected, hotBody, viewTess])
+  const drawTess = useMemo(() => hideBodies(viewTess, hiddenBodies), [viewTess, hiddenBodies])
 
   // Bereiche zum Anklicken (Extrudieren/Drehen) – direkt aus der Skizze, je Skizze einmal geholt
   const regionDraft = edit && (edit.draft.type === 'extrude' || edit.draft.type === 'revolve') ? edit.draft : null
@@ -1475,6 +1503,41 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 </p>
               ))}
             </section>
+            {bodyCount > 1 && built?.bodies_info && (
+              <section className="section">
+                <h2>
+                  <Boxes size={15} /> Körper ({bodyCount})
+                </h2>
+                {built.bodies_info.map((b, i) => (
+                  <div
+                    key={i}
+                    className={'cad-feat cad-body' + (hiddenBodies.has(i) ? ' off' : '')}
+                    onMouseEnter={() => setHotBody(i)}
+                    onMouseLeave={() => setHotBody(null)}
+                    title="Überfahren = im Bild markieren"
+                  >
+                    <Boxes size={14} />
+                    <span className="cad-feat-name">{b.name}</span>
+                    <span className="muted small">{fmtN(b.volume / 1000)} cm³</span>
+                    <span className="spacer" />
+                    <button
+                      className={'icon-btn' + (hiddenBodies.has(i) ? ' keep' : '')}
+                      title={hiddenBodies.has(i) ? 'Körper zeigen' : 'Körper ausblenden (nur im Bild)'}
+                      onClick={() =>
+                        setHiddenBodies((h) => {
+                          const n = new Set(h)
+                          if (n.has(i)) n.delete(i)
+                          else n.add(i)
+                          return n
+                        })
+                      }
+                    >
+                      {hiddenBodies.has(i) ? <EyeOff size={13} /> : <Eye size={13} />}
+                    </button>
+                  </div>
+                ))}
+              </section>
+            )}
             <section className="section">
               <h2>
                 <Play size={15} /> Rechnen
@@ -1734,11 +1797,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         )}
         <CadView
           ref={viewRef}
-          tess={viewTess}
+          tess={drawTess}
           nav={nav}
           pick={pickWant}
           onPick={onPick}
-          selected={selected}
+          selected={shownSel}
           sketch={sketchProps}
           showPlanes={!sketchEdit && (showStd || !hasBody || pickFor === 'plane' || pickFor === 'mplane' || editingSketchEmpty)}
           regions={regions}

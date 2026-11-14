@@ -374,6 +374,7 @@ selbst starten.
 | 18e.58 | Skizze mit „Abstand zur Ebene“ über dem Teil, Extrudieren › „Bis Fläche“, Deckfläche anklicken | Körper reicht genau bis zur Fläche (Richtung automatisch) | [ ] |
 | 18e.59 | Rechtsklick auf ein Feature › „Duplizieren“ | Kopie direkt dahinter („… (Kopie)“), z. B. zum Ändern der Kanten/Skizze | [ ] |
 | 18e.60 | Skizze: „Neigung“ 30°, um Achse „waagrecht“; Kreis, Extrudieren | schräg stehender Zylinder (Skizzenebene um ihre x-Achse gedreht); mit „Abstand zur Ebene“ kombinierbar | [ ] |
+| 18e.61 | Teil mit zwei Körpern (z. B. „Neuer Körper“) | Abschnitt „Körper (2)“ mit Name und Volumen; Überfahren markiert den Körper im Bild, Auge blendet ihn aus (nur Ansicht) | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
