@@ -1058,6 +1058,67 @@ function booleanOp(model, f, warn) {
   void vol0
 }
 
+// Normteile (vereinfacht, ohne Gewinde): Zylinderschraube ISO 4762, Sechskantmutter ISO 4032, Scheibe ISO 7089
+const STD = {
+  M3: { d: 3, dk: 5.5, k: 3, s: 2.5, t: 1.3, ns: 5.5, m: 2.4, w1: 3.2, w2: 7, h: 0.5 },
+  M4: { d: 4, dk: 7, k: 4, s: 3, t: 2, ns: 7, m: 3.2, w1: 4.3, w2: 9, h: 0.8 },
+  M5: { d: 5, dk: 8.5, k: 5, s: 4, t: 2.5, ns: 8, m: 4.7, w1: 5.3, w2: 10, h: 1 },
+  M6: { d: 6, dk: 10, k: 6, s: 5, t: 3, ns: 10, m: 5.2, w1: 6.4, w2: 12, h: 1.6 },
+  M8: { d: 8, dk: 13, k: 8, s: 6, t: 4, ns: 13, m: 6.8, w1: 8.4, w2: 16, h: 1.6 },
+  M10: { d: 10, dk: 16, k: 10, s: 8, t: 5, ns: 16, m: 8.4, w1: 10.5, w2: 20, h: 2 },
+  M12: { d: 12, dk: 18, k: 12, s: 10, t: 6, ns: 18, m: 10.8, w1: 13, w2: 24, h: 2.5 },
+  M16: { d: 16, dk: 24, k: 16, s: 14, t: 8, ns: 24, m: 14.8, w1: 17, w2: 30, h: 3 },
+  M20: { d: 20, dk: 30, k: 20, s: 17, t: 10, ns: 30, m: 18, w1: 21, w2: 37, h: 3 },
+}
+export const STD_SIZES = Object.keys(STD)
+
+/// Sechskant (Schlüsselweite sw) als Prisma von z0 bis z1 um die z-Achse
+function hexPrism(sw, z0, z1) {
+  const R = sw / Math.sqrt(3)
+  const pts = Array.from({ length: 6 }, (_, i) => [R * Math.cos((i * Math.PI) / 3), R * Math.sin((i * Math.PI) / 3), z0])
+  return basicFaceExtrusion(makePolygon(pts), new Vector([0, 0, z1 - z0]))
+}
+const cylZ = (r, z0, z1) => revolveProfile({ axis: [0, 0, 1], c0: [0, 0, 0] }, [[z0, 0], [z0, r], [z1, r], [z1, 0]])
+
+/// Normteil am Ursprung, Achse z: Schraube mit Kopf oben (Kopfauflage bei z = 0, Schaft nach unten),
+/// Mutter/Scheibe mit Auflage bei z = 0 nach oben
+function stdPart(model, f) {
+  const n = STD[f.size]
+  if (!n) throw new Problem('Normteil: Größe wählen')
+  let shape
+  let name
+  if (f.kind === 'nut') {
+    shape = hexPrism(n.ns, 0, n.m).cut(cylZ(n.d / 2, -1, n.m + 1))
+    name = `Mutter ${f.size} ISO 4032`
+  } else if (f.kind === 'washer') {
+    shape = cylZ(n.w2 / 2, 0, n.h).cut(cylZ(n.w1 / 2, -1, n.h + 1))
+    name = `Scheibe ${String(n.w1).replace('.', ',')} ISO 7089`
+  } else {
+    const l = Number(f.length) || 0
+    if (l <= 0) throw new Problem('Normteil: Schraubenlänge angeben')
+    shape = cylZ(n.dk / 2, 0, n.k).fuse(cylZ(n.d / 2, -l, 0)).cut(hexPrism(n.s, n.k - n.t, n.k + 1))
+    name = `Schraube ${f.size}×${l} ISO 4762`
+  }
+  let solid = solidsOf(shape)[0] ?? shape
+  // in eine Bohrung setzen: Achse auf die Bohrungsachse, Auflage an der Öffnung (Seite wählbar)
+  if (f.at) {
+    const { face } = findFace(model, f.at, 'Normteil')
+    const info = revInfo(face)
+    if (!info || info.kind !== 'cyl') throw new Problem('Normteil: eine Bohrung (Zylinderfläche) anklicken')
+    const ss = info.sr.map((p) => p[0])
+    // Standard: die Öffnung, die eher nach oben (+z) zeigt; „andere Seite“ nimmt die gegenüberliegende
+    let top = info.axis[2] >= -1e-9
+    if (f.otherSide) top = !top
+    const sEnd = top ? Math.max(...ss) : Math.min(...ss)
+    const out = top ? info.axis : mul(info.axis, -1)
+    const P = add(info.c0, mul(info.axis, sEnd))
+    const T = trsfAlign([0, 0, 0], [0, 0, 1], out)
+    if (T) solid = transformed(solid, T)
+    solid = transformed(solid, trsfTranslate(P))
+  }
+  model.bodies.push({ shape: solid, name: f.name?.trim() || name, src: CUR.src })
+}
+
 /// Formschräge: gewählte Seitenflächen um den Winkel neigen; Zugrichtung = Normale der neutralen Ebene
 function draftOp(model, f, warn) {
   const ang = ((Number(f.angle) || 0) * Math.PI) / 180
@@ -1475,6 +1536,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'align') alignBody(model, f, warn)
   else if (f.type === 'rib') ribOp(model, f, sketches, warn)
   else if (f.type === 'draft') draftOp(model, f, warn)
+  else if (f.type === 'stdpart') stdPart(model, f)
   else if (f.type === 'import') importPart(model, f)
   else if (f.type === 'refillet') refillet(model, f, warn)
   else if (f.type === 'rehole') rehole(model, f, warn)

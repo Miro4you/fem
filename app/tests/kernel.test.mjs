@@ -465,3 +465,41 @@ test('Formschräge: vier Seiten eines Quaders um 5° geneigt', () => {
   const b = 40 - 2 * k
   near(r.volume, (20 / 3) * (a * a + a * b + b * b), 1e-4, 'Stumpf')
 })
+
+test('Normteile: Schraube M8×30, Mutter M8, Scheibe 8,4', () => {
+  clearCache()
+  const r = build({ features: [
+    { id: 1, type: 'stdpart', kind: 'bolt', size: 'M8', length: 30 },
+    { id: 2, type: 'stdpart', kind: 'nut', size: 'M8' },
+    { id: 3, type: 'stdpart', kind: 'washer', size: 'M8' },
+  ] })
+  allOk(r)
+  assert.deepEqual(r.bodies_info.map((b) => b.name), ['Schraube M8×30 ISO 4762', 'Mutter M8 ISO 4032', 'Scheibe 8,4 ISO 7089'])
+  const hex = (sw) => (Math.sqrt(3) / 2) * sw * sw
+  const bolt = PI * 6.5 * 6.5 * 8 + PI * 16 * 30 - hex(6) * 4
+  near(r.bodies_info[0].volume, bolt, 1e-6, 'Schraube')
+  near(r.bodies_info[1].volume, hex(13) * 6.8 - PI * 16 * 6.8, 1e-6, 'Mutter')
+  near(r.bodies_info[2].volume, PI * (64 - 4.2 * 4.2) * 1.6, 1e-6, 'Scheibe')
+})
+
+test('Normteil in Bohrung: Schraube sitzt mit dem Kopf auf der Öffnung', () => {
+  clearCache()
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: [...rect(0, 0, 40, 40), { t: 'circle', c: [20, 20], r: 4.5 }] },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1 },
+  ]
+  const r0 = build({ features: base })
+  const h = r0.tess.surfaces.find((x) => x.kind === 'cylinder')
+  const at = { center: h.center, kind: 'cylinder', axis: h.axis, radius: h.radius, hole: true }
+  for (const otherSide of [false, true]) {
+    const r = build({ features: [...base, { id: 3, type: 'stdpart', kind: 'bolt', size: 'M8', length: 30, at, otherSide }] })
+    allOk(r)
+    const c = r.bodies_info[1].center
+    assert.ok(Math.abs(c[0] - 20) < 1e-6 && Math.abs(c[1] - 20) < 1e-6, `Achse der Bohrung: ${c}`)
+    // Achsrichtung der Bohrungsfläche ist ±z; Kopf außen an der gewählten Öffnung
+    // Standard: Kopf oben auf der Platte (z 10 … 18), andere Seite: unten (z −8 … 0)
+    const zs = r.tess.positions.filter((_, i) => i % 3 === 2)
+    if (otherSide) assert.ok(Math.abs(Math.min(...zs) + 8) < 1e-6 && Math.abs(Math.max(...zs) - 30) < 1e-6, 'Kopf unten, Schaft nach oben')
+    else assert.ok(Math.abs(Math.max(...zs) - 18) < 1e-6 && Math.abs(Math.min(...zs) + 20) < 1e-6, 'Kopf oben auf der Platte, Schaft nach unten')
+  }
+})

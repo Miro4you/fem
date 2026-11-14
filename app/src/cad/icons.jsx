@@ -175,6 +175,15 @@ export const IcDraft = (p) => (
   </Svg>
 )
 
+export const IcStdPart = (p) => (
+  <Svg {...p}>
+    <path d="M7 3.5h10v4H7z" className={F} />
+    <path d="M7 3.5h10v4H7z" />
+    <path d="M9.5 7.5v12.5h5V7.5" className={A} />
+    <path d="M9.5 11h5M9.5 14h5M9.5 17h5" className={M} />
+  </Svg>
+)
+
 export const IcSweep = (p) => (
   <Svg {...p}>
     <ellipse cx="5.5" cy="17.5" rx="2.5" ry="3" className={F} />

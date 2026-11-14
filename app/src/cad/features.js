@@ -19,6 +19,7 @@ export const FEATURE_LABEL = {
   align: 'Ausrichten',
   rib: 'Rippe',
   draft: 'Formschräge',
+  stdpart: 'Normteil',
   sweep: 'Sweep',
   loft: 'Loft',
   refillet: 'Radius ändern',
@@ -28,6 +29,9 @@ export const FEATURE_LABEL = {
 // Durchgangsbohrungen nach DIN EN 20273 (mittel) und Senkungen für Zylinderkopf (ISO 4762) / Senkkopf (ISO 10642)
 // Durchgangslöcher nach ISO 273 (fein / mittel / grob), Kernloch für Gewinde (Regelgewinde, ISO 2306),
 // Senkungen für Zylinderschrauben (DIN 974-1, ISO 4762) und Senkschrauben (ISO 15065, 90°)
+/// Gewindegrößen der Normteile (Schraube, Mutter, Scheibe)
+export const STD_PART_SIZES = ['M3', 'M4', 'M5', 'M6', 'M8', 'M10', 'M12', 'M16', 'M20']
+
 export const HOLE_SIZES = [
   { name: 'M2', d: 2.4, fine: 2.2, coarse: 2.6, tap: 1.6, cb: 4.4, cbT: 2.2, cs: 4.4 },
   { name: 'M2,5', d: 2.9, fine: 2.7, coarse: 3.1, tap: 2.05, cb: 5.5, cbT: 2.7, cs: 5.5 },
@@ -158,6 +162,8 @@ export function defaults(type) {
       return { sketch: null, thickness: '3' }
     case 'draft':
       return { faces: [], plane: { std: 'XY' }, angle: '3', flip: false }
+    case 'stdpart':
+      return { kind: 'bolt', size: 'M8', length: '30' }
     case 'movebody':
       return { body: null, dx: '0', dy: '0', dz: '0', axis: 'z', angle: '0', copy: false }
     case 'sweep':
@@ -242,6 +248,8 @@ export function problemOf(f, features) {
       return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
     case 'import':
       return f.text ? null : 'STEP-Datei fehlt'
+    case 'stdpart':
+      return f.kind !== 'bolt' || pos(f.length) ? null : 'Schraubenlänge angeben'
     case 'draft':
       if (!f.faces.length) return 'Seitenflächen im Bild wählen'
       if (!planeOf(f.plane)) return 'neutrale Ebene wählen'
@@ -337,6 +345,8 @@ export function kernelFeature(f, features) {
       return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
+    case 'stdpart':
+      return { id: f.id, type: 'stdpart', kind: f.kind, size: f.size, length: num(f.length), name: f.bodyName, at: f.at ? faceHint(f.at) : null, otherSide: !!f.otherSide }
     case 'draft':
       return { id: f.id, type: 'draft', faces: f.faces.map(faceHint), plane: planeOf(f.plane), angle: num(f.angle), flip: !!f.flip }
     case 'rib':
@@ -371,7 +381,7 @@ export function cadParams(features) {
   const out = []
   for (const f of features) {
     if (f.suppressed) continue
-    const field = { draft: ['angle', 'Winkel'], rib: ['thickness', 'Dicke'], movebody: ['angle', 'Winkel'], extrude: ['depth', 'Tiefe'], revolve: ['angle', 'Winkel'], hole: ['diameter', 'Ø'], fillet: ['radius', 'Radius'], chamfer: ['distance', 'Fase'], moveface: ['distance', 'Abstand'], shell: ['thickness', 'Wandstärke'], refillet: ['radius', 'Radius'], rehole: ['diameter', 'Ø'] }[f.type]
+    const field = { stdpart: ['length', 'Länge'], draft: ['angle', 'Winkel'], rib: ['thickness', 'Dicke'], movebody: ['angle', 'Winkel'], extrude: ['depth', 'Tiefe'], revolve: ['angle', 'Winkel'], hole: ['diameter', 'Ø'], fillet: ['radius', 'Radius'], chamfer: ['distance', 'Fase'], moveface: ['distance', 'Abstand'], shell: ['thickness', 'Wandstärke'], refillet: ['radius', 'Radius'], rehole: ['diameter', 'Ø'] }[f.type]
     if (field && !(f.type === 'extrude' && f.through)) out.push({ key: `cad:${f.id}:${field[0]}`, label: `${f.name}: ${field[1]}`, unit: f.type === 'revolve' ? '°' : 'mm', value: num(f[field[0]]) })
     if (f.type === 'pattern') out.push({ key: `cad:${f.id}:count`, label: `${f.name}: Anzahl`, unit: '', value: num(f.count) })
     if (f.type === 'sketch')

@@ -385,6 +385,7 @@ selbst starten.
 | 18e.69 | Quader, Mehr › Formschräge: zwei Seitenflächen anklicken, neutrale Ebene XY, 3° | Seiten neigen sich nach innen (oben kleiner), Boden behält das Maß; „Richtung umkehren“ kehrt die Neigung um. Menü „Mehr“ in Gruppen Formen / Ändern / Körper und Baugruppe | [ ] |
 | 18e.70 | Mehrere Körper; Knopf „Darstellung“ rechts oben im Bild mehrfach klicken | Körper leicht unterschiedlich getönt (Farbpunkt in der Körperliste passt); Darstellung wechselt: mit Kanten → ohne Kanten → durchsichtig → Drahtgitter (wird gemerkt) | [ ] |
 | 18e.71 | Skizze: Kreis wählen, Strg+C, Maus an andere Stelle, Strg+V (auch in einer anderen Skizze) | Kopie erscheint an der Maus und ist gewählt (gleich verschiebbar/bemaßbar) | [ ] |
+| 18e.72 | Platte mit Bohrung Ø9; Mehr › Normteil › Schraube M8 × 30, „In Bohrung“ › Bohrung anklicken; danach Mutter M8 mit „andere Seite“ | Schraube steht mit dem Kopf (Innensechskant) auf der oberen Öffnung, Schaft durch die Bohrung; Mutter sitzt unten; Namen „Schraube M8×30 ISO 4762“, „Mutter M8 ISO 4032“ | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

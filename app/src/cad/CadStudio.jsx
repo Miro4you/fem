@@ -33,6 +33,7 @@ import {
   FEATURE_LABEL,
   HOLE_SIZES,
   holeDiameter,
+  STD_PART_SIZES,
   defaults,
   featureId,
   featureName,
@@ -73,6 +74,7 @@ const FEATURE_ICON = {
   align: I.IcAlign,
   rib: I.IcRib,
   draft: I.IcDraft,
+  stdpart: I.IcStdPart,
   sweep: I.IcSweep,
   loft: I.IcLoft,
   refillet: I.IcFillet,
@@ -144,6 +146,7 @@ const MORE_TOOLS = [
   ['draft', 'Formschräge: Seitenflächen neigen (Guss, Spritzguss) – neutrale Ebene behält das Maß'],
   ['boolean', 'Boolesch: Körper vereinigen, voneinander abziehen oder Schnittmenge'],
   ['movebody', 'Körper verschieben oder drehen (auch als Kopie) – z. B. Teile zueinander anordnen'],
+  ['stdpart', 'Normteil: Zylinderschraube ISO 4762, Mutter ISO 4032 oder Scheibe ISO 7089 – dann mit „Ausrichten“ einsetzen'],
   ['import', 'Teil einfügen: STEP-Datei als weiteren Körper holen (danach mit „Körper verschieben“ anordnen)'],
   ['align', 'Ausrichten: Fläche auf Fläche legen oder Bolzen in Bohrung (gleiche Achse)'],
 ]
@@ -615,7 +618,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const renameBody = (b, name) => {
     setRenaming(null)
     const f = features.find((g) => g.id === b.src)
-    if (!f || !['extrude', 'revolve', 'sweep', 'loft'].includes(f.type)) return note(b.src === 'base' ? 'Der Name kommt aus der STEP-Datei' : 'Diesen Körper kann man hier nicht umbenennen')
+    if (!f || !['extrude', 'revolve', 'sweep', 'loft', 'stdpart'].includes(f.type)) return note(b.src === 'base' ? 'Der Name kommt aus der STEP-Datei' : 'Diesen Körper kann man hier nicht umbenennen')
     const n = name.trim()
     if ((f.bodyName ?? '') === n) return
     commitFeatures(features.map((g) => (g.id === f.id ? { ...g, bodyName: n || undefined } : g)))
@@ -875,6 +878,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       case 'amov':
       case 'atgt':
         return { planar: true, cyl: true }
+      case 'sphole':
+        return { cyl: true }
       case 'upto':
         return { planar: true }
       case 'dir':
@@ -940,6 +945,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         const known = matchEdges(shownTessBefore, d.edges)
         setDraft({ edges: [...d.edges, ...chain.filter((c) => !known.has(c.tag)).map(edgeRef)] })
       }
+      return
+    }
+    if (pickFor === 'sphole' && h.face?.kind === 'cylinder') {
+      setDraft({ at: faceRef(h.face) })
+      setPickFor(null)
       return
     }
     if ((pickFor === 'amov' || pickFor === 'atgt') && h.face) {
@@ -1020,7 +1030,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // Stand vor dem bearbeiteten Feature (zum Wählen von Kanten/Flächen)
   const [before, setBefore] = useState(null)
-  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean', 'movebody', 'align', 'draft'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
+  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean', 'movebody', 'align', 'draft', 'stdpart'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
   useEffect(() => {
     if (!beforeKey) {
       setBefore(null)
@@ -1046,7 +1056,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const pickEdges = edgeFeature && pickFor === 'edges' && before?.tess && preview?.tess && edit.draft.edges?.length ? before.tess.curves : null
   const viewTess = pickEdges
     ? preview.tess
-    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool', 'upto', 'mbody', 'amov', 'atgt'].includes(pickFor) && before?.tess
+    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool', 'upto', 'mbody', 'amov', 'atgt', 'sphole'].includes(pickFor) && before?.tess
       ? before.tess
       : sketchEdit
         ? (preview?.tess ?? null)
@@ -1071,6 +1081,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
     if (d.type === 'extrude' && d.upto) out.faces = matchFaces(viewTess, [d.upto])
     if (d.type === 'align') out.faces = matchFaces(viewTess, [d.moving, d.target].filter(Boolean))
+    if (d.type === 'stdpart' && d.at) out.faces = matchFaces(viewTess, [d.at])
     if (d.type === 'movebody' && d.body && viewTess) {
       const tag = [...matchFaces(viewTess, [d.body])][0]
       const body = viewTess.surfaces.find((x) => x.tag === tag)?.body
@@ -1931,6 +1942,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 upto: 'Ebene Fläche anklicken, bis zu der extrudiert wird (parallel zur Skizze)',
                 mbody: 'Körper anklicken, der verschoben/gedreht wird',
                 amov: 'Fläche am Körper anklicken, der bewegt wird (eben oder Zylinder)',
+                sphole: 'Bohrung (Zylinderfläche) anklicken, in die das Normteil kommt',
                 atgt: 'Zielfläche am anderen Körper anklicken (eben: aufeinanderlegen, Zylinder: gleiche Achse)',
               }[pickFor]}
           </div>
@@ -2498,6 +2510,47 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
             <input type="checkbox" checked={!!d.ruled} onChange={(e) => setDraft({ ruled: e.target.checked })} /> Gerade Übergänge (statt weich)
           </label>
           {modeSel}
+        </>
+      )}
+
+      {d.type === 'stdpart' && (
+        <>
+          <Seg
+            value={d.kind}
+            onChange={(kind) => setDraft({ kind })}
+            options={[
+              ['bolt', 'Schraube'],
+              ['nut', 'Mutter'],
+              ['washer', 'Scheibe'],
+            ]}
+          />
+          <div className="grid2">
+            <label className="field">
+              <span>Größe</span>
+              <select value={d.size} onChange={(e) => setDraft({ size: e.target.value })}>
+                {STD_PART_SIZES.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {d.kind === 'bolt' && <Num label="Länge" value={d.length} onChange={(length) => setDraft({ length })} />}
+          </div>
+          <PickButton active={pickFor === 'sphole'} label="In Bohrung" value={d.at ? 'gewählt' : 'Bohrung anklicken (oder frei am Ursprung)'} onClick={() => setPickFor(pickFor === 'sphole' ? null : 'sphole')} />
+          {d.at && (
+            <label className="check">
+              <input type="checkbox" checked={!!d.otherSide} onChange={(e) => setDraft({ otherSide: e.target.checked })} /> andere Seite der Bohrung
+            </label>
+          )}
+          <label className="field">
+            <span>Körpername (leer = Normbezeichnung)</span>
+            <input value={d.bodyName ?? ''} placeholder="z. B. Schraube links" onChange={(e) => setDraft({ bodyName: e.target.value })} />
+          </label>
+          <p className="hint">
+            Bohrung anklicken: das Teil sitzt auf der Bohrungsöffnung (Schraube mit dem Kopf, Mutter/Scheibe mit der Auflage; „andere Seite“ für unten).
+            Ohne Bohrung entsteht es am Ursprung (Achse z) und lässt sich mit Ausrichten setzen. Vereinfacht ohne Gewinde.
+          </p>
         </>
       )}
 
