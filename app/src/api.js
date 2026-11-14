@@ -78,10 +78,19 @@ function chooseFile(accept) {
   })
 }
 
+// Dateiname fürs Herunterladen nur aus ASCII: mit Umlauten o. ä. verwerfen manche Browser den Namen („download“)
+const UML = { ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss', '×': 'x', '–': '-', '—': '-' }
+export const asciiName = (n) =>
+  String(n)
+    .replace(/[äöüÄÖÜß×–—]/g, (c) => UML[c])
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E]+/g, '_')
+
 function download(blob, name) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = name
+  a.download = asciiName(name)
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 10000)
 }

@@ -3031,7 +3031,11 @@ function DrawingPreview({ bodies, make, onClose, onError }) {
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
   }, [onClose])
-  const fileName = () => `${(res?.title ?? 'Konstruktion').replace(/×/g, 'x').replace(/[^\p{L}\p{N} _.-]+/gu, '').trim() || 'Konstruktion'} - Zeichnung`
+  // Dateiname nur aus ASCII (Browser verwerfen sonst teils den Namen und speichern „download“)
+  const fileName = () => {
+    const t = (res?.title ?? 'Konstruktion').replace(/×/g, 'x').replace(/[äöüÄÖÜß]/g, (c) => ({ ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' })[c])
+    return `${t.normalize('NFD').replace(/[^A-Za-z0-9 _.()-]+/g, '').trim() || 'Konstruktion'} - Zeichnung`
+  }
   const print = () => {
     if (!res) return
     const w = res.svg.match(/width="(\d+)mm" height="(\d+)mm"/)
