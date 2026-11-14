@@ -51,7 +51,12 @@ export default function NumInput({ value, onChange, disabled, title, min = null,
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           e.preventDefault()
           bump(e.key === 'ArrowUp' ? 1 : -1, e)
-        } else if (e.key === 'Enter') settle()
+        } else if (e.key === 'Enter') {
+          settle()
+          // Feld verlassen, damit Tastenkürzel (z. B. C für Kreis) gleich wieder wirken
+          const el = e.currentTarget
+          setTimeout(() => el.isConnected && document.activeElement === el && el.blur(), 0)
+        }
         else if (e.key === 'Escape') onEscape?.()
       }}
     />

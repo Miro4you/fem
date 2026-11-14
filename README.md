@@ -181,31 +181,32 @@ Gilt für Statik, Eigenfrequenzen, Knicken und Leichtbau. Beispiel: `examples/ge
 
 ### Konstruktion (kleines CAD)
 
-Reiter **„Konstruktion“** – oder auf der Startseite **„Neues Teil konstruieren“**. Abläufe wie in Onshape:
+Reiter **„Konstruktion“** – oder auf der Startseite **„Neues Teil konstruieren“**. Abläufe wie in Onshape; gerechnet
+wird im Browser (OpenCASCADE als WebAssembly), der Server speichert nur die fertige STEP-Datei. Taste **?** zeigt alle
+Tastenkürzel.
 
-1. **Skizze:** Hauptebene (XY, XZ, YZ) oder ebene Fläche des Bauteils anklicken. Zeichnen mit Linie (Linienzug),
-   Rechteck, Kreis, Bogen, Punkt; Punkte rasten an vorhandenen Punkten, Linienmitten, Bauteilecken und am Ursprung ein,
-   fast waagrechte/senkrechte Linien werden waagrecht/senkrecht. **Maß** (Taste D): Linie, Kreis, zwei Punkte,
-   Punkt + Linie oder zwei Linien (Winkel) anklicken, Maß ablegen, Wert eintippen; Doppelklick ändert es.
-   **Bedingungen** zur Auswahl (⇧ für mehrere): waagrecht, senkrecht, parallel, rechtwinklig, gleich, tangential,
-   deckungsgleich, Punkt auf, Mittelpunkt, symmetrisch, fixieren, Hilfslinie. Blau = noch frei, schwarz = bestimmt,
-   oben steht „Voll bestimmt“ bzw. die Zahl der Freiheitsgrade. „Kante übernehmen“ holt Bauteilkanten in die Skizze.
-   Strg+Z/Strg+Y, Entf löscht, Esc beendet das Werkzeug.
-2. **Extrudieren** (dazu / weg / neuer Körper, Tiefe, umkehren, symmetrisch, durch alles) – Flächen der Skizze im Bild
-   an- und abwählen (überlappende Formen müssen nicht getrimmt werden, Löcher sind eigene Flächen, Alt + Klick nimmt
-   eine Fläche samt Inhalt). Eine Skizze reicht für viele Features: „OK und weiter“ legt das nächste mit derselben
-   Skizze an, schon benutzte Flächen sind grau. Fertige Skizzen bleiben im Bild (Auge im Verlauf blendet aus). **Drehen** um eine Linie der Skizze
-   (gern als Hilfslinie).
-3. **Bohrung** an den Punkten einer Skizze: Größe M3–M20 (Durchgang mittel), Durchmesser, Tiefe mit Bohrspitze oder
-   durchgehend, Senkung für Zylinderkopf oder Senkkopf.
-4. **Verrunden / Fase:** Kanten anklicken (tangential anschließende Kanten kommen mit). **Muster** linear (auch zwei
-   Richtungen) oder im Kreis, **Spiegeln** an Hauptebene oder Fläche – jeweils für einzelne Features oder den ganzen
-   Körper. **Fläche verschieben** (Wand dicker/dünner), **Flächen entfernen** (Bohrung, Tasche, Radius weg).
-   Beim importierten Teil zusätzlich **Radius/Bohrung ändern**.
-5. **Verlauf** links: Feature anklicken = bearbeiten, Auge = unterdrücken, Papierkorb = löschen. Ein Feature, das
-   nicht geht, wird rot mit verständlicher Meldung; die Features danach werden übersprungen.
-6. **„In die Rechnung übernehmen“** baut das Teil als STEP, vernetzt es und stellt Lager, Lasten und Nähte auf die
-   neuen Flächen um (Ergebnis wird mit vorher verglichen). **„Als STEP speichern“** exportiert es.
+1. **Skizze** (S): Hauptebene oder ebene Fläche anklicken – oder erst eine Fläche anklicken, dann S. Ebene mit
+   „Abstand zur Ebene“ verschieben und um ihre Achsen **neigen**. Werkzeuge: Linie (L), Rechteck (R), Rechteck aus der
+   Mitte (M), Kreis (C), Bogen (A), Langloch (O), Vieleck (V, +/− Ecken), Ecke verrunden (F), Spiegeln (I), Punkt (P),
+   Maß (D), Verlängern (E), Trimmen (T), Kante übernehmen (U). Wie in Draftpad stehen Länge und Winkel am Zeiger und
+   rasten auf glatte Werte (⇧ = frei); einfach die Zahl tippen: `50`, `50@30`, `60x40`, Ø – daraus werden Maße.
+   Elemente anklicken (oder Rahmen aufziehen: → ganz drin, ← berührt) zeigt die passenden **Bedingungen** gleich
+   daneben (waagrecht, senkrecht, parallel, rechtwinklig, gleich, tangential, deckungsgleich, Punkt auf, Mittelpunkt,
+   symmetrisch, fixieren, Hilfslinie, Versatz, Spiegeln). Status oben: „✓ bestimmt“ bzw. „n frei“.
+2. **Extrudieren** (E): dazu / weg / neuer Körper; Tiefe, **bis Fläche** oder durch alles; Tiefe auch mit dem Griff im
+   Bild ziehen. „Weg“ auf einer Bauteilfläche schneidet automatisch ins Material. Flächen der Skizze im Bild an- und
+   abwählen; nach „Skizze fertig“ bietet eine Leiste „weiter mit Extrudieren / Drehen“ an. **Drehen** (R) um eine Linie.
+3. **Bohrung** (H): Fläche anklicken, Punkte setzen, fertig – oder Punkte einer Skizze. Durchgangsloch nach ISO 273
+   (fein/mittel/grob) oder Gewinde-Kernloch M2–M24, Tiefe mit Spitze oder durchgehend, Senkungen; bohrt immer ins
+   Material.
+4. **Verrunden / Fase** (F/C): Kanten anklicken (tangentiale Kette kommt mit, Alt = nur eine), Vorschau sofort.
+   **Muster**, **Spiegeln**, **Schale**, im Menü „Mehr“: Sweep, Loft, Fläche verschieben, **Flächen entfernen**
+   (Bohrung, Senkung, gerade Verrundung), **Boolesch** (vereinigen, abziehen, Schnittmenge). Beim importierten Teil
+   **Radius/Bohrung ändern**.
+5. **Verlauf** links: Doppelklick = bearbeiten, Rechtsklick = Umbenennen, Duplizieren, Nach oben/unten, Unterdrücken,
+   **Bis hier zurückrollen** (neue Features kommen an die Marke), Löschen. Fehler stehen rot am Feature.
+6. **Messen** und **Schnittansicht** rechts oben im Bild; **„In die Rechnung übernehmen“** baut das Teil als STEP,
+   vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP speichern“** exportiert es.
 
 **Aus Draftpad:** Startseite „Aus Draftpad“ oder Knopf „Draftpad“ in der Konstruktion öffnet die
 **Online-Ablage von Draftpad** (Adresse des Draftpad-Servers einmal eintragen, z. B. der Raspberry Pi; optional mit

@@ -1,5 +1,8 @@
 # Konstruktion: nächste Ausbaustufe – Arbeitsplan
 
+> **Hinweis 14.11.2026:** Dieser Plan ist erledigt und historisch. Der Python-Kern `cad.py` ist entfernt – gerechnet
+> wird im Browser (`app/src/cad/kernel/`), Stand und offene Punkte stehen in `CAD_LITE_TODO.md`.
+
 Stand: 12.11.2026, Branch `claude/stoic-maxwell-rtmn09`, letzter Commit dazu `1c663eb`.
 Dieser Plan ist so geschrieben, dass eine neue Sitzung ihn ohne Vorwissen abarbeiten kann.
 Felix' Wünsche (wörtlich zusammengefasst):

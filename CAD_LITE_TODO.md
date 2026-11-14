@@ -175,7 +175,11 @@ STEP-Ausgangsteile werden im Browser eingelesen (`STEPControl_Reader`, Körperna
 werden mit Drehkörpern gefüllt, gerade Verrundungen zwischen zwei Ebenen mit dem Keil bis zur scharfen Kante ergänzt bzw.
 abgezogen, dann neu verrundet. Nicht abgedeckt: Fasen, Verrundungs-Ecken (Torus), Freiformflächen → Hinweis im Feature.
 
-Offen: Boolesch zwischen Körpern, Ebene durch drei Punkte, Baugruppen (G6).
+Ebenfalls 14.11. vormittags: Bohrung direkt auf Fläche (H → Fläche → Punkte → Bohrung), Boolesch zwischen Körpern,
+Spiegeln im Skizzierer (Symmetrie bleibt), Zurückrollen im Verlauf (Features mittendrin einfügen), Extrudieren bis
+Fläche, Duplizieren, Skizzenebene neigen, Werkzeugleiste für 1280-px-Bildschirme.
+
+Offen: Ebene durch drei Punkte, Fasen/Torusflächen beim Flächen-Entfernen, Baugruppen (G6).
 
 ## G6. Baugruppen (bis ~50 Teile)
 
