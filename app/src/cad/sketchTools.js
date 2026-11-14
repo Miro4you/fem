@@ -202,3 +202,52 @@ export function addCenterRect(sk, M, B, { hitM = null, w = null, h = null, const
   if (h) addCon(sk, { t: 'dy', a: b, b: c, v: h })
   return { diag }
 }
+
+/// Elemente an einer Linie spiegeln: Kopien mit „symmetrisch“ je Punkt (Punkte auf der Linie bleiben dieselben),
+/// Kreise mit „gleich“. → { sketch, added: [Element-IDs] } oder { error }
+export function mirrorEnts(sk0, entIds, lineId) {
+  const sk = structuredClone(sk0)
+  const axis = sk.ents.find((e) => e.id === lineId && e.t === 'line')
+  if (!axis) return { error: 'Spiegeln: eine gerade Linie als Spiegelachse anklicken' }
+  const A = P(sk, axis.a)
+  const B = P(sk, axis.b)
+  const d = unit(sub(B, A))
+  const L = Math.max(1, len(sub(B, A)))
+  const reflect = (p) => {
+    const t = (p[0] - A[0]) * d[0] + (p[1] - A[1]) * d[1]
+    const f = [A[0] + d[0] * t, A[1] + d[1] * t]
+    return [2 * f[0] - p[0], 2 * f[1] - p[1]]
+  }
+  const onAxis = (p) => Math.abs(cross(d, sub(p, A))) < 1e-7 * L
+  const map = new Map()
+  const image = (id) => {
+    if (map.has(id)) return map.get(id)
+    const p = P(sk, id)
+    let q = id
+    if (!onAxis(p) && id !== axis.a && id !== axis.b) {
+      q = addPoint(sk, reflect(p))
+      addCon(sk, { t: 'sym', p: id, q, e: lineId, quiet: true })
+    }
+    map.set(id, q)
+    return q
+  }
+  const added = []
+  for (const id of entIds) {
+    const e = sk.ents.find((x) => x.id === id)
+    if (!e || e.id === lineId) continue
+    if (e.t === 'line') added.push(addEnt(sk, { t: 'line', a: image(e.a), b: image(e.b), cons: e.cons }).id)
+    else if (e.t === 'circle') {
+      const c = addEnt(sk, { t: 'circle', c: image(e.c), r: e.r, cons: e.cons })
+      addCon(sk, { t: 'eq', e1: e.id, e2: c.id, quiet: true })
+      added.push(c.id)
+    } else if (e.t === 'arc') {
+      // Spiegeln dreht den Umlaufsinn: Anfang und Ende tauschen
+      added.push(addEnt(sk, { t: 'arc', c: image(e.c), a: image(e.b), b: image(e.a), cons: e.cons, mirrorOf: e.id }).id)
+    } else if (e.t === 'point') {
+      const q = image(e.p)
+      if (q !== e.p) added.push(addEnt(sk, { t: 'point', p: q, cons: e.cons }).id)
+    }
+  }
+  if (!added.length) return { error: 'Spiegeln: erst die Elemente wählen, die gespiegelt werden sollen' }
+  return { sketch: sk, added }
+}

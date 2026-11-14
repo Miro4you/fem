@@ -117,6 +117,14 @@ export const IcShell = (p) => (
   </Svg>
 )
 
+export const IcBoolean = (p) => (
+  <Svg {...p}>
+    <rect x="3.5" y="3.5" width="11" height="11" rx="1.5" />
+    <rect x="9.5" y="9.5" width="11" height="11" rx="1.5" className={A} />
+    <path d="M9.5 11v3.5h5V9.5H11a1.5 1.5 0 0 0-1.5 1.5z" className={F} />
+  </Svg>
+)
+
 export const IcSweep = (p) => (
   <Svg {...p}>
     <ellipse cx="5.5" cy="17.5" rx="2.5" ry="3" className={F} />

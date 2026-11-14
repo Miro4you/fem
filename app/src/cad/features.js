@@ -13,6 +13,7 @@ export const FEATURE_LABEL = {
   removefaces: 'Flächen entfernen',
   moveface: 'Fläche verschieben',
   shell: 'Schale',
+  boolean: 'Boolesch',
   sweep: 'Sweep',
   loft: 'Loft',
   refillet: 'Radius ändern',
@@ -144,6 +145,8 @@ export function defaults(type) {
       return { faces: [], distance: '2' }
     case 'shell':
       return { faces: [], thickness: '2' }
+    case 'boolean':
+      return { op: 'union', targets: [], tools: [], keepTools: false }
     case 'sweep':
       return { sketch: null, path: null, mode: 'add' }
     case 'loft':
@@ -224,6 +227,9 @@ export function problemOf(f, features) {
       return (f.sketches ?? []).length >= 2 ? null : 'mindestens zwei Skizzen wählen'
     case 'shell':
       return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
+    case 'boolean':
+      if (!f.targets?.length) return f.op === 'union' ? 'Körper im Bild anklicken (mindestens zwei)' : 'Zielkörper im Bild anklicken'
+      return f.tools?.length ? null : f.op === 'union' ? 'noch einen Körper anklicken' : 'Werkzeugkörper anklicken'
     case 'refillet':
       if (!f.surfaces?.length) return 'Radius- oder Bohrungsfläche im Bild wählen'
       return num(f.radius) >= 0 ? null : 'Radius angeben'
@@ -304,6 +310,8 @@ export function kernelFeature(f, features) {
       return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false }
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
+    case 'boolean':
+      return { id: f.id, type: 'boolean', op: f.op, targets: f.targets.map(faceHint), tools: f.tools.map(faceHint), keepTools: !!f.keepTools }
     case 'refillet':
       return { id: f.id, type: 'refillet', surfaces: f.surfaces, axis: f.axis, radius: num(f.radius) }
     case 'rehole':

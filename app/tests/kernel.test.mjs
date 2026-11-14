@@ -283,3 +283,36 @@ test('Flächen entfernen, Radius und Bohrung ändern im neuen Kern (ohne Defeatu
   allOk(e)
   near(r0.volume - e.volume, PI * (25 - 9) * 10, 1e-6, 'Ø10')
 })
+
+test('Boolesch: zwei Körper vereinigen, abziehen, Schnittmenge', () => {
+  clearCache()
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 40, 20) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1 },
+    { id: 3, type: 'sketch', plane: xy, ents: [{ t: 'circle', c: [40, 10], r: 8 }] },
+    { id: 4, type: 'extrude', sketch: 3, mode: 'new', depth: 20, dir: 1, subtract: false },
+  ]
+  const r0 = build({ features: base })
+  allOk(r0)
+  assert.equal(r0.bodies, 2)
+  const faceOf = (bi) => {
+    const s = r0.tess.surfaces.find((x) => x.body === bi && x.kind === 'plane')
+    return { center: s.center, kind: 'plane', normal: s.normal }
+  }
+  const box = 40 * 20 * 10
+  const cyl = PI * 64 * 20
+  const common = (PI * 64 * 10) / 2 // halber Zylinder steckt im Quader (bis z = 10)
+  const u = build({ features: [...base, { id: 5, type: 'boolean', op: 'union', targets: [faceOf(0)], tools: [faceOf(1)] }] })
+  allOk(u)
+  assert.equal(u.bodies, 1)
+  near(u.volume, box + cyl - common, 1e-6, 'vereinigt')
+  const s = build({ features: [...base, { id: 5, type: 'boolean', op: 'subtract', targets: [faceOf(0)], tools: [faceOf(1)] }] })
+  allOk(s)
+  assert.equal(s.bodies, 1)
+  near(s.volume, box - common, 1e-6, 'abgezogen')
+  const k = build({ features: [...base, { id: 5, type: 'boolean', op: 'subtract', targets: [faceOf(0)], tools: [faceOf(1)], keepTools: true }] })
+  assert.equal(k.bodies, 2)
+  const i = build({ features: [...base, { id: 5, type: 'boolean', op: 'intersect', targets: [faceOf(0)], tools: [faceOf(1)] }] })
+  allOk(i)
+  near(i.volume, common, 1e-6, 'Schnittmenge')
+})

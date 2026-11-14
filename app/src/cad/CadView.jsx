@@ -6,7 +6,7 @@ import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
 import { IcHome, IcFit } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
 import { lengthStep, snapFrom, snapRect, snapRadius, snapRectCenter, snapPolygon, slotWidth, measureText, parseTyped, TYPE_HINT } from './sketchInput.js'
-import { filletCorner, filletPreview, suggestFilletRadius, cornerLines, addSlot, addPolygon, addCenterRect } from './sketchTools.js'
+import { filletCorner, filletPreview, suggestFilletRadius, cornerLines, addSlot, addPolygon, addCenterRect, mirrorEnts } from './sketchTools.js'
 import { IcSection as IcSectionView, IcMeasure as IcMeasureTool } from './icons.jsx'
 import { num } from './features.js'
 import {
@@ -1135,7 +1135,7 @@ export default function CadView({
         t.cut = r?.removed ?? null
       }
       tmp.current = t
-      if (sk.tool === 'dim') {
+      if (sk.tool === 'dim' || sk.tool === 'smirror') {
         const h = sketchHit(ev, data, sk.plane)
         const nh = h?.pt ? { pt: h.pt } : h?.ent ? { ent: h.ent } : null
         setHover((o) => (JSON.stringify(o) === JSON.stringify(nh) ? o : nh))
@@ -1322,6 +1322,20 @@ export default function CadView({
         // Bedingungsleiste neben der Auswahl
         const r = host.current.getBoundingClientRect()
         sk.onSelAt?.([ev.clientX - r.left, ev.clientY - r.top])
+        return
+      }
+      if (sk.tool === 'smirror') {
+        // Spiegeln: gewählte Elemente an der angeklickten Linie
+        const h = sketchHit(ev, data, plane)
+        const e = h?.ent && data.ents.find((x) => x.id === h.ent)
+        if (!e || e.t !== 'line') return sk.onMessage?.('Spiegeln: die Spiegellinie anklicken (gerade Linie, z. B. Mittellinie)')
+        const r = mirrorEnts(data, (sk.sel?.ents ?? []).filter((id) => id !== e.id), e.id)
+        if (r.error) return sk.onMessage?.(r.error)
+        const sv = solved(r.sketch)
+        tmp.current = null
+        sk.onChange(sv.info.ok ? sv.sketch : r.sketch, sv.info)
+        sk.onSel({ pts: [], ents: r.added, cons: [] })
+        sk.onTool?.('select')
         return
       }
       if (sk.tool === 'extend') {

@@ -66,6 +66,7 @@ const FEATURE_ICON = {
   removefaces: I.IcRemoveFace,
   moveface: I.IcMoveFace,
   shell: I.IcShell,
+  boolean: I.IcBoolean,
   sweep: I.IcSweep,
   loft: I.IcLoft,
   refillet: I.IcFillet,
@@ -82,6 +83,7 @@ const SKETCH_TOOLS = [
   ['slot', 'Langloch (Mitte 1, Mitte 2, Breite; Zahl tippen = Mittenabstand, dann Breite)', I.IcSlot, 'O'],
   ['poly', 'Vieleck (Mitte, Ecke; +/− ändert die Eckenzahl; Zahl tippen = Schlüsselweite)', I.IcPolygon, 'V'],
   ['sfillet', 'Ecke verrunden: Ecke zweier Linien anklicken, Radius eintippen', I.IcSketchFillet, 'F'],
+  ['smirror', 'Spiegeln: Elemente wählen, dann die Spiegellinie anklicken (bleibt symmetrisch)', I.IcMirror, 'I'],
   ['point', 'Punkt (z. B. für Bohrungen)', I.IcPoint, 'P'],
   ['dim', 'Bemaßen: ein Element (Länge, Ø, R) oder zwei Elemente (Abstand, Winkel) anklicken, Maß ablegen, Wert eingeben', I.IcDimension, 'D'],
   ['extend', 'Verlängern: Linie nahe dem Ende anklicken – bis zum nächsten Element', I.IcExtend, 'E'],
@@ -100,6 +102,7 @@ const SKETCH_HELP = {
   slot: 'Mitte 1, Mitte 2, dann die Breite. Zahl tippen: erst Mittenabstand, dann Breite.',
   poly: 'Mitte, dann eine Ecke. + / − ändert die Eckenzahl, Zahl tippen = Schlüsselweite.',
   sfillet: 'Ecke anklicken und den Radius gleich eintippen. Vorher getippter Radius gilt für alle folgenden Ecken.',
+  smirror: 'Erst die Elemente wählen (Klick/Rahmen), dann die Spiegellinie anklicken. Das Spiegelbild bleibt symmetrisch.',
   point: 'Punkt setzen – z. B. als Mitte für Bohrungen.',
   dim: 'Ein Element (Länge, Ø, R) oder zwei (Abstand, Winkel) anklicken, Maß ablegen, Wert eintippen.',
   extend: 'Linie nahe dem Ende anklicken – sie wächst bis zum nächsten Element.',
@@ -127,6 +130,7 @@ const MORE_TOOLS = [
   ['loft', 'Loft: Übergang zwischen zwei oder mehr Skizzen'],
   ['moveface', 'Ebene Fläche verschieben (z. B. Wand dicker)'],
   ['removefaces', 'Flächen entfernen (z. B. Bohrung oder Radius weg)'],
+  ['boolean', 'Boolesch: Körper vereinigen, voneinander abziehen oder Schnittmenge'],
 ]
 
 const emptySel = { pts: [], ents: [], cons: [] }
@@ -424,7 +428,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (type === 'sketch') {
       setPickFor('plane')
       draft.sketch = null
-    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces' }[type] ?? null)
+    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces', boolean: 'btarget' }[type] ?? null)
   }
 
   // Feature mit einer bestimmten Skizze anlegen (Kontextmenü, „weiter mit“)
@@ -743,6 +747,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         return { edges: true }
       case 'faces':
         return edit?.draft.type === 'moveface' ? { planar: true } : { faces: true }
+      case 'btarget':
+      case 'btool':
+        return { faces: true }
       case 'dir':
       case 'dir2':
         return { edges: 'line', planar: true, cyl: true }
@@ -808,6 +815,24 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       }
       return
     }
+    if ((pickFor === 'btarget' || pickFor === 'btool') && h.face) {
+      // Körper wählen (über eine seiner Flächen); nochmal anklicken = weg
+      const t = shownTessBefore
+      const body = h.face.body
+      const of = (refs) => refs.filter((r) => [...matchFaces(t, [r])].some((tag) => t.surfaces.find((x) => x.tag === tag)?.body === body))
+      const inT = of(d.targets ?? [])
+      const inO = of(d.tools ?? [])
+      if (inT.length || inO.length) return setDraft({ targets: d.targets.filter((r) => !inT.includes(r)), tools: d.tools.filter((r) => !inO.includes(r)) })
+      const ref = faceRef(h.face)
+      if (pickFor === 'btarget' && (d.op !== 'union' ? !d.targets.length : true)) {
+        // abziehen/Schnittmenge: ein Ziel, dann geht es mit dem Werkzeug weiter
+        if (d.op === 'union' && d.targets.length) return setDraft({ tools: [...d.tools, ref] })
+        setDraft({ targets: [...d.targets, ref] })
+        if (d.op !== 'union') setPickFor('btool')
+        return
+      }
+      return setDraft({ tools: [...d.tools, ref] })
+    }
     if (pickFor === 'faces' && h.face) {
       const has = d.faces.some((r) => matchFaces(shownTessBefore, [r]).has(h.face.tag))
       let add = [faceRef(h.face)]
@@ -847,7 +872,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // Stand vor dem bearbeiteten Feature (zum Wählen von Kanten/Flächen)
   const [before, setBefore] = useState(null)
-  const beforeKey = edit && ['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror'].includes(edit.draft.type) ? `${edit.index}|${builtKey}` : null
+  const beforeKey = edit && ['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean'].includes(edit.draft.type) ? `${edit.index}|${builtKey}` : null
   useEffect(() => {
     if (!beforeKey) {
       setBefore(null)
@@ -873,7 +898,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const pickEdges = edgeFeature && pickFor === 'edges' && before?.tess && preview?.tess && edit.draft.edges?.length ? before.tess.curves : null
   const viewTess = pickEdges
     ? preview.tess
-    : edit && pickFor && ['edges', 'faces', 'cyl'].includes(pickFor) && before?.tess
+    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool'].includes(pickFor) && before?.tess
       ? before.tess
       : sketchEdit
         ? (preview?.tess ?? null)
@@ -896,6 +921,13 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     }
     if (d.edges) out.edges = matchEdges(pickEdges ? before.tess : viewTess, d.edges)
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
+    if (d.type === 'boolean') {
+      // ganze Körper zeigen: alle Flächen der Körper, zu denen eine gewählte Fläche gehört
+      const t = viewTess
+      const bodiesOf = (refs) => new Set([...matchFaces(t, refs)].map((tag) => t?.surfaces.find((x) => x.tag === tag)?.body))
+      const bs = new Set([...bodiesOf(d.targets ?? []), ...bodiesOf(d.tools ?? [])])
+      for (const x of t?.surfaces ?? []) if (bs.has(x.body)) out.faces.add(x.tag)
+    }
     if (d.type === 'mirror' && d.plane?.std) out.std.add(d.plane.std)
     if (d.type === 'mirror' && d.plane?.face) out.faces = matchFaces(viewTess, [d.plane.face])
     if ((d.type === 'refillet' || d.type === 'rehole') && d.surfaces) out.faces = matchFaces(viewTess, d.surfaces.map((c) => ({ center: c })))
@@ -1117,6 +1149,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         onChange: onSketchChange,
         onSel: setSel,
         onSelAt: setConPos,
+        onTool: setTool,
         onMessage: note,
         showGlyphs,
       }
@@ -1610,7 +1643,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           </div>
         )}
         {sketchEdit && (sel.pts.length > 0 || sel.ents.length > 0 || sel.cons.length > 0) && (
-          <ConBar pos={conPos} sk={sketchEdit.sketch} sel={sel} onOffset={applyOffset} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
+          <ConBar pos={conPos} sk={sketchEdit.sketch} sel={sel} onOffset={applyOffset} onMirror={() => (setTool('smirror'), note('Spiegellinie anklicken'))} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
         )}
         {(msg || pickFor || regionHint) && (
           <div className="cad-hint">
@@ -1626,6 +1659,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 mplane: 'Spiegelebene: Hauptebene oder ebene Fläche anklicken',
                 cyl: 'Radius- oder Bohrungsfläche (Zylinder) anklicken',
                 skaxis: 'Drehachse: eine gerade Linie der Skizze anklicken (Esc bricht ab)',
+                btarget: edit?.draft.op === 'union' ? 'Körper anklicken, die vereinigt werden (mindestens zwei)' : 'Zielkörper anklicken (von dem abgezogen bzw. geschnitten wird)',
+                btool: 'Werkzeugkörper anklicken',
               }[pickFor]}
           </div>
         )}
@@ -2160,6 +2195,35 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
         </>
       )}
 
+      {d.type === 'boolean' && (
+        <>
+          <Seg
+            value={d.op}
+            onChange={(op) => {
+              setDraft({ op })
+              setPickFor(op === 'union' || !d.targets.length ? 'btarget' : 'btool')
+            }}
+            options={[
+              ['union', 'Vereinigen'],
+              ['subtract', 'Abziehen'],
+              ['intersect', 'Schnittmenge'],
+            ]}
+          />
+          {d.op === 'union' ? (
+            <PickButton active={pickFor === 'btarget'} label="Körper" value={d.targets.length + d.tools.length ? `${d.targets.length + d.tools.length} gewählt` : 'im Bild anklicken'} onClick={() => setPickFor(pickFor === 'btarget' ? null : 'btarget')} />
+          ) : (
+            <>
+              <PickButton active={pickFor === 'btarget'} label="Ziel" value={d.targets.length ? `${d.targets.length} Körper` : 'im Bild anklicken'} onClick={() => setPickFor(pickFor === 'btarget' ? null : 'btarget')} />
+              <PickButton active={pickFor === 'btool'} label="Werkzeug" value={d.tools.length ? `${d.tools.length} Körper` : 'im Bild anklicken'} onClick={() => setPickFor(pickFor === 'btool' ? null : 'btool')} />
+              <label className="check">
+                <input type="checkbox" checked={!!d.keepTools} onChange={(e) => setDraft({ keepTools: e.target.checked })} /> Werkzeugkörper behalten
+              </label>
+            </>
+          )}
+          <p className="hint">Körper über eine ihrer Flächen anklicken; nochmal anklicken nimmt ihn wieder heraus.</p>
+        </>
+      )}
+
       {d.type === 'shell' && (
         <>
           <PickButton active={pickFor === 'faces'} label="Offene Flächen" value={d.faces.length ? `${d.faces.length} gewählt` : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'faces' ? null : 'faces')} />
@@ -2356,7 +2420,7 @@ function KeysHelp({ sketch, onClose }) {
   )
 }
 
-function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete, onOffset, pos }) {
+function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete, onOffset, onMirror, pos }) {
   const opts = applicableCons(sk, sel)
   const n = sel.pts.length + sel.ents.length
   const [off, setOff] = useState('2')
@@ -2389,6 +2453,11 @@ function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete,
       {n > 0 && (
         <button className={'btn small' + (construction ? ' on' : '')} onClick={onConstruction}>
           Hilfslinie
+        </button>
+      )}
+      {canOffset && onMirror && (
+        <button className="btn small" title="Spiegeln: danach die Spiegellinie anklicken (I)" onClick={onMirror}>
+          Spiegeln …
         </button>
       )}
       {canOffset && (

@@ -943,6 +943,36 @@ function rehole(model, f, warn) {
   combine(model, 'cut', [revolveProfile(info, [[0, 0], [0, d / 2], [L, d / 2], [L, 0]])], warn)
 }
 
+/// Boolesch zwischen Körpern: vereinigen, abziehen, Schnittmenge (Körper über eine ihrer Flächen gewählt)
+function booleanOp(model, f, warn) {
+  const pick = (refs, what) => [...new Set((refs ?? []).map((r) => findFace(model, r, what).bi))]
+  const targets = pick(f.targets, 'Boolesch')
+  const tools = pick(f.tools, 'Boolesch').filter((bi) => !targets.includes(bi))
+  if (!targets.length) throw new Problem('Boolesch: Zielkörper im Bild wählen')
+  if (!tools.length) throw new Problem(f.op === 'union' ? 'Boolesch: mindestens zwei Körper wählen' : 'Boolesch: Werkzeugkörper im Bild wählen')
+  const op = f.op ?? 'union'
+  const keep = !!f.keepTools && op !== 'union'
+  const tool = fuseAll(tools.map((bi) => model.bodies[bi].shape)).reduce((a, x) => (a ? a.fuse(x) : x), null)
+  const out = []
+  const vol0 = model.volume()
+  if (op === 'union') {
+    const all = fuseAll([...targets, ...tools].map((bi) => model.bodies[bi].shape))
+    const name = model.bodies[targets[0]].name
+    for (const x of all) out.push({ shape: x, name })
+    if (all.length > 1) warn.push('Die Körper berühren sich nicht – sie bleiben getrennt')
+  } else
+    for (const bi of targets) {
+      const b = model.bodies[bi]
+      const r = solidsOf(op === 'subtract' ? b.shape.cut(tool) : bool('common', b.shape, tool))
+      if (!r.length && op === 'intersect') warn.push(`„${b.name ?? 'Körper'}“ und das Werkzeug überschneiden sich nicht – Körper fällt weg`)
+      for (const x of r) out.push({ shape: x, name: b.name })
+    }
+  const drop = new Set([...targets, ...(keep ? [] : tools)])
+  model.bodies = [...model.bodies.filter((_, i) => !drop.has(i)), ...out]
+  if (!model.bodies.length) throw new Problem('Boolesch: Es bliebe kein Körper übrig')
+  void vol0
+}
+
 /// Schale: Körper aushöhlen, gewählte Flächen bleiben offen
 function shellOp(model, f) {
   const t = Number(f.thickness) || 0
@@ -1175,6 +1205,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'moveface') moveFace(model, f, warn)
   else if (f.type === 'shell') shellOp(model, f)
   else if (f.type === 'removefaces') removeFaces(model, f, warn)
+  else if (f.type === 'boolean') booleanOp(model, f, warn)
   else if (f.type === 'refillet') refillet(model, f, warn)
   else if (f.type === 'rehole') rehole(model, f, warn)
   else throw new Problem(`„${f.type}“ kann der neue Kern noch nicht`)

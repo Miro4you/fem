@@ -368,6 +368,8 @@ selbst starten.
 | 18e.52 | „Radius/Bohrung“: Bohrung anklicken, neuer Ø; Radius anklicken, neuer Radius (0 = scharfe Kante) | Bohrung bzw. Rundung geändert, Volumen plausibel; „In die Rechnung übernehmen“ vernetzt das geänderte Teil | [ ] |
 | 18e.53 | Mehr › Flächen entfernen: Bohrung (mit Senkung/Spitze) bzw. gerade Verrundung anklicken | Bohrung ganz zu bzw. scharfe Kante; ebene Flächen/Fasen werden mit Hinweis abgelehnt | [ ] |
 | 18e.54 | Platte, dann Taste **H** ohne Auswahl (bzw. Deckfläche anklicken, dann H) | Skizze „Bohrpunkte“: Fläche anklicken, Punkte setzen (fangen an Kanten/Mitten, bemaßbar), „Skizze fertig“ → Bohrungsdialog mit diesen Punkten; Enter = Bohrungen | [ ] |
+| 18e.55 | Skizze: senkrechte Hilfslinie (Mittellinie), halbe Kontur rechts davon, Rahmen von rechts nach links darüber ziehen, in der Leiste „Spiegeln …“, Mittellinie anklicken (oder Taste I) | linke Hälfte entsteht, bleibt symmetrisch (rechts ziehen → links folgt); Punkte auf der Mittellinie werden geteilt | [ ] |
+| 18e.56 | Zwei Körper (zweiter mit „Neuer Körper“), Mehr › Boolesch: Vereinigen / Abziehen / Schnittmenge, Körper anklicken | Ergebnis wie gewählt; „Werkzeugkörper behalten“ lässt den zweiten Körper stehen | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

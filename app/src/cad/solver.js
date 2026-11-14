@@ -91,9 +91,16 @@ function build(sk) {
     return (dx * (py - ay) - dy * (px - ax)) / Math.max(hyp(dx, dy), EPS)
   }
 
-  // Bögen: Anfang und Ende gleich weit vom Mittelpunkt
+  // Bögen: Anfang und Ende gleich weit vom Mittelpunkt – außer bei gespiegelten Bögen (alle drei Punkte über
+  // „symmetrisch“ festgelegt; die Gleichung wäre dann überzählig)
+  const symImg = new Set(sk.cons.filter((c) => c.t === 'sym').map((c) => c.q))
   for (const e of sk.ents) {
     if (e.t !== 'arc') continue
+    if (symImg.has(e.a) && symImg.has(e.b) && symImg.has(e.c)) continue
+    if (e.mirrorOf) {
+      const o = sk.ents.find((x) => x.id === e.mirrorOf)
+      if (o?.t === 'arc' && [e.a, e.b, e.c].every((q) => symImg.has(q) || q === o.a || q === o.b || q === o.c)) continue
+    }
     const c = P(e.c)
     const a = P(e.a)
     const b = P(e.b)
