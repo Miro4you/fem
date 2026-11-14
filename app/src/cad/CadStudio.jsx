@@ -74,14 +74,36 @@ const SKETCH_TOOLS = [
   ['select', 'Auswählen und ziehen', I.IcSelect, 'S'],
   ['line', 'Linie (Linienzug; Doppelklick oder Esc beendet; auch ziehen)', I.IcLine, 'L'],
   ['rect', 'Rechteck (zwei Ecken; Zahl tippen: 60x40)', I.IcRect, 'R'],
+  ['crect', 'Rechteck aus der Mitte (Mitte, Ecke; Zahl tippen: 60x40)', I.IcRectCenter, 'M'],
   ['circle', 'Kreis (Mitte, Radius; Zahl tippen = Ø)', I.IcCircle, 'C'],
   ['arc', 'Bogen (Mitte, Anfang, Ende – gegen den Uhrzeigersinn)', I.IcArc, 'A'],
+  ['slot', 'Langloch (Mitte 1, Mitte 2, Breite; Zahl tippen = Mittenabstand, dann Breite)', I.IcSlot, 'O'],
+  ['poly', 'Vieleck (Mitte, Ecke; +/− ändert die Eckenzahl; Zahl tippen = Schlüsselweite)', I.IcPolygon, 'V'],
+  ['sfillet', 'Ecke verrunden: Ecke zweier Linien anklicken, Radius eintippen', I.IcSketchFillet, 'F'],
   ['point', 'Punkt (z. B. für Bohrungen)', I.IcPoint, 'P'],
   ['dim', 'Bemaßen: ein Element (Länge, Ø, R) oder zwei Elemente (Abstand, Winkel) anklicken, Maß ablegen, Wert eingeben', I.IcDimension, 'D'],
   ['extend', 'Verlängern: Linie nahe dem Ende anklicken – bis zum nächsten Element', I.IcExtend, 'E'],
   ['trim', 'Trimmen: Stück bis zum nächsten Schnittpunkt anklicken (rot = fällt weg)', I.IcTrim, 'T'],
   ['use', 'Kante des Bauteils übernehmen', I.IcUseEdge, 'U'],
 ]
+
+// kurzer Hinweis zum gewählten Skizzenwerkzeug (Seitenleiste)
+const SKETCH_HELP = {
+  select: 'Klicken wählt (⇧/Strg = mehrere), Rahmen aufziehen wählt mehrere. Punkte und Linien lassen sich ziehen.',
+  line: 'Punkte klicken oder ziehen. Zahl tippen: 50 oder 50@30. Doppelklick oder Esc beendet den Linienzug.',
+  rect: 'Zwei Ecken klicken oder aufziehen. Zahl tippen: 60x40.',
+  crect: 'Mitte klicken, dann eine Ecke. Zahl tippen: 60x40.',
+  circle: 'Mitte klicken, dann den Rand. Zahl tippen = Durchmesser.',
+  arc: 'Mitte, Anfang, Ende (gegen den Uhrzeigersinn). Zahl tippen = Radius.',
+  slot: 'Mitte 1, Mitte 2, dann die Breite. Zahl tippen: erst Mittenabstand, dann Breite.',
+  poly: 'Mitte, dann eine Ecke. + / − ändert die Eckenzahl, Zahl tippen = Schlüsselweite.',
+  sfillet: 'Ecke anklicken und den Radius gleich eintippen. Vorher getippter Radius gilt für alle folgenden Ecken.',
+  point: 'Punkt setzen – z. B. als Mitte für Bohrungen.',
+  dim: 'Ein Element (Länge, Ø, R) oder zwei (Abstand, Winkel) anklicken, Maß ablegen, Wert eintippen.',
+  extend: 'Linie nahe dem Ende anklicken – sie wächst bis zum nächsten Element.',
+  trim: 'Das Stück anklicken, das weg soll (rot = fällt weg).',
+  use: 'Kante des Bauteils anklicken – sie wird als feste Linie übernommen.',
+}
 
 const PART_TOOLS = [
   ['sketch', 'Skizze: Ebene oder ebene Fläche wählen, dann zeichnen'],
@@ -199,6 +221,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     clearTimeout(note.t)
     note.t = setTimeout(() => setMsg(null), 4500)
   }, [])
+  // anderes Werkzeug: alte Meldung weg
+  useEffect(() => setMsg(null), [tool])
 
   // --- Aufbauen --------------------------------------------------------------------------------
   const run = useCallback(
@@ -579,6 +603,12 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         deleteSelection()
+        return
+      }
+      if (ctrl && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        const sk = sketchEdit?.sketch
+        if (sk) setSel({ pts: sk.ents.filter((x) => x.t === 'point').map((x) => x.p), ents: sk.ents.filter((x) => x.t !== 'point').map((x) => x.id), cons: [] })
         return
       }
       if (e.key === 'Escape') {
@@ -1281,6 +1311,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         {edit && (
           <FeatureDialog
             edit={edit}
+            tool={tool}
             features={features}
             setDraft={setDraft}
             linkTools={
@@ -1531,11 +1562,11 @@ function insidePoly(q, loops) {
 
 function SketchStatus({ info }) {
   if (!info) return null
-  if (!info.ok) return <span className="cad-status bad">Nicht lösbar</span>
-  if (info.dof === 0) return <span className="cad-status good">Voll bestimmt</span>
+  if (!info.ok) return <span className="cad-status bad" title="Die Skizze lässt sich so nicht lösen – letzte Änderung zurücknehmen (Strg+Z)">✕ widersprüchlich</span>
+  if (info.dof === 0) return <span className="cad-status good" title="Voll bestimmt: alle Elemente durch Maße und Bedingungen festgelegt">✓ bestimmt</span>
   return (
-    <span className="cad-status" title="Blau = noch frei beweglich. Mit Maßen und Bedingungen festlegen (muss nicht – unbestimmte Skizzen gehen auch)">
-      {info.dof} Freiheitsgrad{info.dof === 1 ? '' : 'e'}
+    <span className="cad-status" title={`${info.dof} Freiheitsgrad${info.dof === 1 ? '' : 'e'} – blau = noch frei beweglich. Mit Maßen und Bedingungen festlegen (muss nicht – unbestimmte Skizzen gehen auch)`}>
+      {info.dof} frei
     </span>
   )
 }
@@ -1574,7 +1605,7 @@ function PickButton({ active, label, value, onClick }) {
   )
 }
 
-function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, linkTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
+function FeatureDialog({ edit, tool, features, setDraft, onOk, onOkNext, regionTools, linkTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
   const d = edit.draft
   const before = features.slice(0, edit.index)
   const sketches = before.filter((f) => f.type === 'sketch' && !f.suppressed)
@@ -1703,12 +1734,21 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
             <>
               <SketchConstraints sk={sk} sel={sel} onCon={onCon} onFix={onFix} onConstruction={onConstruction} construction={construction} onDelete={onDelete} />
               <SketchDims sk={sk} sel={sel} setSel={setSel} onDim={onDim} onDimName={onDimName} />
-              <p className="hint">
-                Klicken oder ziehen zum Zeichnen; Länge und Winkel stehen am Zeiger und rasten auf glatte Werte (⇧ = frei). Beim Zeichnen einfach
-                die Zahl tippen und Enter: Linie <b>50</b> (oder <b>50@30</b> für 30°), Rechteck <b>60x40</b>, Kreis <b>Ø</b> – daraus werden Maße.
-                Bemaßen (D): ein Element oder zwei anklicken, ablegen, Wert eintippen; Doppelklick auf ein Maß ändert es. Elemente anklicken zeigt
-                die passenden Bedingungen gleich daneben.
-              </p>
+              {SKETCH_HELP[tool] && (
+                <p className="hint tool-hint">
+                  <b>{SKETCH_TOOLS.find(([k]) => k === tool)?.[1].split(' (')[0].split(':')[0]}:</b> {SKETCH_HELP[tool]}
+                </p>
+              )}
+              <details className="sk-help">
+                <summary>Bedienung beim Skizzieren</summary>
+                <p className="hint">
+                  Klicken oder ziehen zum Zeichnen; Länge und Winkel stehen am Zeiger und rasten auf glatte Werte (⇧ = frei). Beim Zeichnen die Zahl
+                  tippen und Enter: Linie <b>50</b> (oder <b>50@30</b> für 30°), Rechteck <b>60x40</b>, Kreis <b>Ø</b> – daraus werden Maße. Bemaßen (D):
+                  ein Element oder zwei anklicken, ablegen, Wert eintippen; Doppelklick auf ein Maß ändert es. Elemente anklicken zeigt die passenden
+                  Bedingungen gleich daneben. Rahmen aufziehen wählt (→ ganz drin, ← berührt), Strg+A wählt alles, Entf löscht, Strg+Z nimmt zurück.
+                  Mausrad zoomt, rechte/mittlere Taste verschiebt.
+                </p>
+              </details>
               {sketchInfo && !sketchInfo.ok && <p className="hint bad">Die Skizze lässt sich so nicht lösen – letzte Änderung zurücknehmen (Strg+Z).</p>}
             </>
           )}
@@ -2193,7 +2233,7 @@ function SketchDims({ sk, sel, setSel, onDim, onDimName }) {
       {dims.length > 0 && <span className="field-label">Maße (Name für Parameterstudien)</span>}
       {dims.map((c) => (
         <div key={c.id} className={'cad-dim-row' + (sel.cons.includes(c.id) ? ' on' : '')} onClick={() => setSel({ pts: [], ents: [], cons: [c.id] })}>
-          <input className="cad-dim-name" placeholder={CON_LABEL[c.t]} value={c.name ?? ''} onChange={(e) => onDimName(c.id, e.target.value)} />
+          <input className="cad-dim-name" placeholder={c.label ?? CON_LABEL[c.t]} value={c.name ?? ''} onChange={(e) => onDimName(c.id, e.target.value)} />
           <DimValue c={c} sk={sk} onDim={onDim} />
         </div>
       ))}

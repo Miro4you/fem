@@ -227,6 +227,40 @@ export const IcArc = (p) => (
   </Svg>
 )
 
+export const IcRectCenter = (p) => (
+  <Svg {...p}>
+    <rect x="4" y="6" width="16" height="12" className={A} />
+    <path d="M4 6 20 18" className={M} strokeDasharray="1.6 1.6" />
+    <circle cx="12" cy="12" r="1.6" className={F} />
+    <circle cx="20" cy="18" r="1.6" className={F} />
+  </Svg>
+)
+
+export const IcSlot = (p) => (
+  <Svg {...p}>
+    <path d="M8 7.5h8a4.5 4.5 0 0 1 0 9H8a4.5 4.5 0 0 1 0-9z" className={A} />
+    <path d="M8 12h8" className={M} strokeDasharray="1.6 1.6" />
+    <circle cx="8" cy="12" r="1.3" className={F} />
+    <circle cx="16" cy="12" r="1.3" className={F} />
+  </Svg>
+)
+
+export const IcPolygon = (p) => (
+  <Svg {...p}>
+    <path d="M12 3.5l7.4 4.25v8.5L12 20.5l-7.4-4.25v-8.5z" className={A} />
+    <circle cx="12" cy="12" r="8.5" className={M} strokeDasharray="1.6 1.6" />
+    <circle cx="12" cy="12" r="1.3" className={F} />
+  </Svg>
+)
+
+export const IcSketchFillet = (p) => (
+  <Svg {...p}>
+    <path d="M4 20V11a7 7 0 0 1 7-7h9" className={A} />
+    <path d="M4 11V4h7" className={M} strokeDasharray="1.6 1.6" />
+    <path d="M9.2 9.2 6.2 6.2" />
+  </Svg>
+)
+
 export const IcPoint = (p) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="3" className={F} />

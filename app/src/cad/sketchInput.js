@@ -46,6 +46,36 @@ export function snapRect(a, q, { step, free = false }) {
   return [a[0] + r(q[0] - a[0]), a[1] + r(q[1] - a[1])]
 }
 
+/// Rechteck aus der Mitte: ganze Breite und Höhe rasten
+export function snapRectCenter(m, q, { step, free = false }) {
+  if (free || !(step > 0)) return q
+  const r = (v) => (Math.sign(v) || 1) * (Math.max(step, Math.round((2 * Math.abs(v)) / step) * step) / 2)
+  return [m[0] + r(q[0] - m[0]), m[1] + r(q[1] - m[1])]
+}
+
+/// Vieleck: Schlüsselweite (gerade Eckenzahl) bzw. Umkreis-Ø glatt, Drehung in 15°-Schritten
+export function snapPolygon(c, q, { step, free = false, n = 6 }) {
+  const dx = q[0] - c[0]
+  const dy = q[1] - c[1]
+  const R = Math.hypot(dx, dy)
+  if (free || !(step > 0) || R < 1e-9) return q
+  const k = n % 2 === 0 ? 2 * Math.cos(Math.PI / n) : 2
+  const size = Math.max(step, Math.round((R * k) / step) * step)
+  const a = (Math.round(((Math.atan2(dy, dx) * 180) / Math.PI) / 15) * 15 * Math.PI) / 180
+  return [c[0] + (size / k) * Math.cos(a), c[1] + (size / k) * Math.sin(a)]
+}
+
+/// Langloch: Breite aus dem Abstand des Zeigers zur Mittellinie (glatt)
+export function slotWidth(a, b, q, { step, free = false }) {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const L = Math.hypot(dx, dy) || 1
+  const d = Math.abs((q[0] - a[0]) * dy - (q[1] - a[1]) * dx) / L
+  const w = 2 * d
+  if (free || !(step > 0)) return Math.max(w, 1e-6)
+  return Math.max(step, Math.round(w / step) * step)
+}
+
 /// Kreis/Bogen: Radius rasten (Durchmesser glatt), Richtung bleibt
 export function snapRadius(c, q, { step, free = false }) {
   const dx = q[0] - c[0]
@@ -57,9 +87,9 @@ export function snapRadius(c, q, { step, free = false }) {
 }
 
 /// Text der Maßanzeige am Zeiger
-export function measureText(tool, pts) {
+export function measureText(tool, pts, opts = {}) {
   const n = pts.length
-  if (tool === 'line' && n >= 2) {
+  if ((tool === 'line' && n >= 2) || (tool === 'slot' && n === 2)) {
     const [a, b] = pts.slice(-2)
     const L = Math.hypot(b[0] - a[0], b[1] - a[1])
     let ang = deg(Math.atan2(b[1] - a[1], b[0] - a[0]))
@@ -67,6 +97,14 @@ export function measureText(tool, pts) {
     return `${fmt(L)} mm · ${fmt(Math.round(ang * 10) / 10)}°`
   }
   if (tool === 'rect' && n === 2) return `${fmt(Math.abs(pts[1][0] - pts[0][0]))} × ${fmt(Math.abs(pts[1][1] - pts[0][1]))} mm`
+  if (tool === 'crect' && n === 2) return `${fmt(2 * Math.abs(pts[1][0] - pts[0][0]))} × ${fmt(2 * Math.abs(pts[1][1] - pts[0][1]))} mm`
+  if (tool === 'slot' && n === 3) return `Breite ${fmt(opts.width ?? 0)} mm`
+  if (tool === 'poly' && n === 2) {
+    const k = opts.n ?? 6
+    const R = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
+    return k % 2 === 0 ? `${k}-Eck · SW ${fmt(2 * R * Math.cos(Math.PI / k))} mm` : `${k}-Eck · Ø ${fmt(2 * R)} mm`
+  }
+  if (tool === 'sfillet') return opts.radius ? `R ${fmt(opts.radius)} mm` : 'Ecke anklicken'
   if (tool === 'circle' && n === 2) return `Ø ${fmt(2 * Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]))} mm`
   if (tool === 'arc' && n >= 2) {
     const r = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
@@ -82,14 +120,21 @@ export function measureText(tool, pts) {
 export const TYPE_HINT = {
   line: 'Länge (oder Länge@Winkel), Enter',
   rect: 'Breite x Höhe, Enter',
+  crect: 'Breite x Höhe, Enter',
   circle: 'Durchmesser, Enter',
   arc: 'Radius, Enter',
+  slot: 'Mittenabstand (oder Länge@Winkel) bzw. Breite, Enter',
+  poly: 'Schlüsselweite (ungerade Eckenzahl: Umkreis-Ø), Enter',
+  sfillet: 'Radius, Enter – dann Ecken anklicken',
 }
 
 /// Eingetippten Text lesen: Linie „50“ oder „50@30“, Rechteck „60x40“ / „60 40“ / „60;40“, Kreis „20“
-export function parseTyped(tool, text) {
+export function parseTyped(tool, text, nPts = 1) {
   const t = String(text ?? '').trim()
   if (!t) return null
+  if (tool === 'slot') return parseTyped(nPts >= 2 ? 'circle' : 'line', t)
+  if (tool === 'crect') return parseTyped('rect', t)
+  if (tool === 'poly' || tool === 'sfillet') return parseTyped('circle', t)
   if (tool === 'line') {
     const [l, a] = t.split('@')
     const L = num(l)

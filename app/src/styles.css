@@ -906,3 +906,9 @@ select.chip { padding-right: 26px; max-width: 120px; }
   padding: 6px 8px 6px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.12); font-size: 13px; }
 .cad-next .btn { display: inline-flex; align-items: center; gap: 5px; }
 .cad-next kbd { font: inherit; font-size: 10px; padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; opacity: .7; }
+/* Auswahlrahmen im Skizzierer: links → rechts = ganz drin (durchgezogen), rechts → links = berührt (gestrichelt) */
+.sk-box { position: absolute; pointer-events: none; border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); z-index: 6; }
+.sk-box.cross { border-style: dashed; border-color: #16a34a; background: color-mix(in srgb, #16a34a 10%, transparent); }
+.tool-hint { background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 8px; padding: 7px 9px; }
+.sk-help summary { cursor: pointer; font-size: 12px; color: var(--muted); margin: 4px 0; }
+.sk-help[open] summary { color: var(--text); }

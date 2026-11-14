@@ -161,6 +161,42 @@ function build(sk) {
       if (!e1 || !e2) continue
       const line = e1.t === 'line' ? e1 : e2.t === 'line' ? e2 : null
       const round = e1.t !== 'line' ? e1 : e2
+      // gemeinsamer Endpunkt (Ecke verrundet, Langloch): Radius dort rechtwinklig zur Linie bzw. Mittelpunkte
+      // und Punkt auf einer Geraden – regulär, anders als „Abstand Mitte–Linie = r“ mit Punkt auf dem Bogen
+      const shared = (a, b) => [a.a, a.b].find((p) => p != null && (p === b.a || p === b.b))
+      if (line && round.t === 'arc' && shared(line, round)) {
+        const tp = shared(line, round)
+        const T = P(tp)
+        const O = P(tp === line.a ? line.b : line.a)
+        const ctr = P(round.c)
+        eq(c, [T, O, ctr], (v) => {
+          const [tx, ty] = T.get(v)
+          const [ox, oy] = O.get(v)
+          const [cx, cy] = ctr.get(v)
+          const ux = tx - cx
+          const uy = ty - cy
+          const wx = ox - tx
+          const wy = oy - ty
+          return (L * (ux * wx + uy * wy)) / Math.max(hyp(ux, uy) * hyp(wx, wy), EPS)
+        })
+        continue
+      }
+      if (!line && e1.t === 'arc' && e2.t === 'arc' && shared(e1, e2)) {
+        const T = P(shared(e1, e2))
+        const c1 = P(e1.c)
+        const c2 = P(e2.c)
+        eq(c, [T, c1, c2], (v) => {
+          const [tx, ty] = T.get(v)
+          const [ax, ay] = c1.get(v)
+          const [bx, by] = c2.get(v)
+          const ux = tx - ax
+          const uy = ty - ay
+          const wx = tx - bx
+          const wy = ty - by
+          return (L * (ux * wy - uy * wx)) / Math.max(hyp(ux, uy) * hyp(wx, wy), EPS)
+        })
+        continue
+      }
       if (line && round.t !== 'line') {
         const a = P(line.a)
         const b = P(line.b)

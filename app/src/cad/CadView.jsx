@@ -5,7 +5,8 @@ import { CadControls, createViewCamera, setCameraAspect, worldPerPx, fitCamera }
 import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
 import { IcHome, IcFit } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
-import { lengthStep, snapFrom, snapRect, snapRadius, measureText, parseTyped, TYPE_HINT } from './sketchInput.js'
+import { lengthStep, snapFrom, snapRect, snapRadius, snapRectCenter, snapPolygon, slotWidth, measureText, parseTyped, TYPE_HINT } from './sketchInput.js'
+import { filletCorner, filletPreview, suggestFilletRadius, cornerLines, addSlot, addPolygon, addCenterRect } from './sketchTools.js'
 import { IcSection as IcSectionView, IcMeasure as IcMeasureTool } from './icons.jsx'
 import { num } from './features.js'
 import {
@@ -101,6 +102,7 @@ export default function CadView({
   const tmp = useRef(null) // laufende Zeichenaktion
   const [section, setSection] = useState({ on: false, axis: 0, pos: 50, flip: false }) // Schnittansicht
   const [typing, setTyping] = useState(null) // eingetippter Wert beim Zeichnen { text, x, y, tool }
+  const [boxRect, setBoxRect] = useState(null) // Auswahlrahmen { x, y, w, h, cross }
   const [handleScr, setHandleScr] = useState(null) // Ziehgriff auf dem Bild { o:[x,y], t:[x,y] }
   const handleRef = useRef(handle)
   handleRef.current = handle
@@ -770,10 +772,10 @@ export default function CadView({
         count.set(key, k + 1)
         const [x, y] = scr(at)
         const ents = entsOf(c)
-        glyphs.push({ id: c.id, x: x + 11 + 17 * k, y: y - 13, g, t: c.t, ents })
+        glyphs.push({ id: c.id, x: x + 11 + 17 * k, y: y - 13, g, t: c.t, ents, quiet: !!c.quiet })
         if (c.e2) {
           const [x2, y2] = scr(midOf(sk, ent(c.e2)))
-          glyphs.push({ id: c.id + ':2', con: c.id, x: x2 + 11, y: y2 - 13, g, t: c.t, ents })
+          glyphs.push({ id: c.id + ':2', con: c.id, x: x2 + 11, y: y2 - 13, g, t: c.t, ents, quiet: !!c.quiet })
         }
       }
       setOverlay((o) => ({ dims, glyphs, tick: o.tick }))
@@ -884,6 +886,7 @@ export default function CadView({
     let down = null
     let drag = null
     let dragDraw = null // Zeichnen durch Ziehen
+    let box = null // Auswahl mit Rahmen (links → rechts: ganz drin, rechts → links: berührt)
 
     const sketchHit = (ev, sk, plane) => {
       const q = onPlane(ev, plane)
@@ -970,7 +973,7 @@ export default function CadView({
       if (!sk || ev.button !== 0 || ev.shiftKey && sk.tool !== 'select') return
       // Zeichnen durch Ziehen (wie in Draftpad): Linie, Rechteck, Kreis mit gedrückter Taste aufziehen
       const tt = tmp.current
-      if (['line', 'rect', 'circle'].includes(sk.tool) && !(tt?.tool === sk.tool && tt.pts.length)) dragDraw = { x: ev.clientX, y: ev.clientY, started: false }
+      if (['line', 'rect', 'crect', 'circle'].includes(sk.tool) && !(tt?.tool === sk.tool && tt.pts.length)) dragDraw = { x: ev.clientX, y: ev.clientY, started: false }
       const plane = sk.plane
       const data = sk.data
       if (sk.tool === 'select') {
@@ -982,6 +985,9 @@ export default function CadView({
           drag = { q0: h.q, pts: pts.filter((p) => !data.pts[p].fix).map((p) => [p, data.pts[p].x, data.pts[p].y]), circle: e?.t === 'circle' ? e : null, moved: false, hit: h }
           ctx.current.controls.enabled = false
           canvas.setPointerCapture(ev.pointerId)
+        } else {
+          box = { x0: ev.clientX, y0: ev.clientY, x1: ev.clientX, y1: ev.clientY, add: ev.shiftKey || ev.ctrlKey || ev.metaKey, moved: false }
+          canvas.setPointerCapture(ev.pointerId)
         }
       }
     }
@@ -989,10 +995,23 @@ export default function CadView({
     const onMove = (ev) => {
       const sk = cb.current.sketch
       const s = ctx.current
+      {
+        const r = host.current.getBoundingClientRect()
+        s.mouse = [ev.clientX - r.left, ev.clientY - r.top]
+      }
       if (dragDraw && sk && !dragDraw.started && (ev.buttons & 1) && Math.hypot(ev.clientX - dragDraw.x, ev.clientY - dragDraw.y) > 6) {
         // erster Punkt dort, wo gedrückt wurde
         dragDraw.started = true
         sketchClick({ clientX: dragDraw.x, clientY: dragDraw.y, shiftKey: ev.shiftKey }, sk)
+      }
+      if (box && sk) {
+        box.x1 = ev.clientX
+        box.y1 = ev.clientY
+        if (!box.moved && Math.hypot(box.x1 - box.x0, box.y1 - box.y0) < 5) return
+        box.moved = true
+        const r = host.current.getBoundingClientRect()
+        setBoxRect({ x: Math.min(box.x0, box.x1) - r.left, y: Math.min(box.y0, box.y1) - r.top, w: Math.abs(box.x1 - box.x0), h: Math.abs(box.y1 - box.y0), cross: box.x1 < box.x0 })
+        return
       }
       if (drag && sk) {
         const q = onPlane(ev, sk.plane)
@@ -1039,22 +1058,32 @@ export default function CadView({
     function resolveDraw(ev, sk, t, q) {
       const data = sk.data
       const per = mmPerPx(sk.plane)
-      const hit = sk.tool === 'dim' ? null : snap(data, q, 9 * per, refsOf(sk.plane))
+      const n = t.pts.length
+      // Langloch-Breite und Vieleck-Ecke: kein Fang an Punkten (nur Maß)
+      const noSnap = sk.tool === 'dim' || (sk.tool === 'slot' && n === 2) || (sk.tool === 'poly' && n === 1)
+      const hit = noSnap ? null : snap(data, q, 9 * per, refsOf(sk.plane))
       const free = !!ev.shiftKey
       const step = lengthStep(per)
-      const last = t.pts[t.pts.length - 1]
+      const last = t.pts[n - 1]
       let at = hit ? hit.at : q
       let hv = null
-      if (!hit && last) {
-        if (sk.tool === 'line') ({ at, hv } = snapFrom(last.at, q, { step, free }))
-        else if (sk.tool === 'rect' && t.pts.length === 1) at = snapRect(last.at, q, { step, free })
-        else if ((sk.tool === 'circle' || sk.tool === 'arc') && t.pts.length === 1) at = snapRadius(t.pts[0].at, q, { step, free })
-      } else if (hit && last && sk.tool === 'line') hv = hvHint(last.at, hit.at)
-      else if (!hit && !last && !free && ['line', 'rect', 'circle', 'arc', 'point'].includes(sk.tool)) {
+      let width = null
+      const lineLike = sk.tool === 'line' || (sk.tool === 'slot' && n === 1)
+      if (sk.tool === 'slot' && n === 2) {
+        width = slotWidth(t.pts[0].at, t.pts[1].at, q, { step, free })
+        at = q
+      } else if (!hit && last) {
+        if (lineLike) ({ at, hv } = snapFrom(last.at, q, { step, free }))
+        else if (sk.tool === 'rect' && n === 1) at = snapRect(last.at, q, { step, free })
+        else if (sk.tool === 'crect' && n === 1) at = snapRectCenter(last.at, q, { step, free })
+        else if ((sk.tool === 'circle' || sk.tool === 'arc') && n === 1) at = snapRadius(t.pts[0].at, q, { step, free })
+        else if (sk.tool === 'poly' && n === 1) at = snapPolygon(last.at, q, { step, free, n: ctx.current.polyN ?? 6 })
+      } else if (hit && last && lineLike) hv = hvHint(last.at, hit.at)
+      else if (!hit && !last && !free && ['line', 'rect', 'crect', 'circle', 'arc', 'point', 'slot', 'poly'].includes(sk.tool)) {
         // erster Punkt auf glatte Koordinaten
         at = [Math.round(q[0] / step) * step, Math.round(q[1] / step) * step]
       }
-      return { at, hit, hv }
+      return { at, hit, hv, width }
     }
 
     // Anzeige am Zeiger: Maß, erkannte Bedingungen, Fangart
@@ -1072,13 +1101,14 @@ export default function CadView({
       else if (h?.ref) badges.push('ref')
       if (res.hv) badges.push(res.hv)
       const pts = [...t.pts.map((p) => p.at), res.at]
-      const text = measureText(sk.tool, pts)
+      const text = measureText(sk.tool, pts, { n: ctx.current.polyN ?? 6, width: res.width, radius: res.radius })
       let snapScr = null
       if (h) {
         const p = new THREE.Vector3(...to3d(sk.plane, h.at)).project(ctx.current.camera)
         snapScr = { x: ((p.x + 1) / 2) * r.width, y: ((1 - p.y) / 2) * r.height, kind: badges[0] }
       }
-      return { x, y, badges, text, snapScr, canType: !!TYPE_HINT[sk.tool] && t.pts.length > 0 }
+      if (sk.tool === 'poly' && !t.pts.length) badges.push('n' + (ctx.current.polyN ?? 6))
+      return { x, y, badges, text, snapScr, canType: !!TYPE_HINT[sk.tool] && (t.pts.length > 0 || sk.tool === 'sfillet') }
     }
 
     function updatePreview(ev, sk) {
@@ -1090,12 +1120,12 @@ export default function CadView({
         tmp.current = null
         return
       }
-      const res = resolveDraw(ev, sk, t, q)
+      const res = sk.tool === 'sfillet' ? filletHover(ev, sk) : resolveDraw(ev, sk, t, q)
       const { at, hit } = res
-      t.cur = { at, hit, hv: res.hv }
+      t.cur = { at, hit, hv: res.hv, width: res.width, corner: res.corner ?? null }
       t.snapAt = null
-      t.hint = ['line', 'rect', 'circle', 'arc', 'point'].includes(sk.tool) ? cursorHint(ev, sk, t, res) : null
-      t.preview = previewOf(sk.tool, t, data)
+      t.hint = ['line', 'rect', 'crect', 'circle', 'arc', 'point', 'slot', 'poly', 'sfillet'].includes(sk.tool) ? cursorHint(ev, sk, t, res) : null
+      t.preview = res.preview ?? previewOf(sk.tool, t, data)
       t.cut = null
       if (sk.tool === 'trim') {
         // Trimmen: das Stück unter dem Zeiger rot zeigen
@@ -1113,6 +1143,20 @@ export default function CadView({
       setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
     }
 
+    // Ecke verrunden: Ecke unter dem Zeiger suchen, Bogen als Vorschau
+    function filletHover(ev, sk) {
+      const q = onPlane(ev, sk.plane)
+      const per = mmPerPx(sk.plane)
+      let best = null
+      for (const [id, p] of Object.entries(sk.data.pts)) {
+        const d = Math.hypot(q[0] - p.x, q[1] - p.y)
+        if (d < 12 * per && (!best || d < best.d) && cornerLines(sk.data, id).length === 2) best = { id, d }
+      }
+      const radius = ctx.current.filletR ?? (best ? suggestFilletRadius(sk.data, best.id) : null)
+      const arc = best && radius ? filletPreview(sk.data, best.id, radius) : null
+      return { at: q, hit: best ? { pt: best.id, at: [sk.data.pts[best.id].x, sk.data.pts[best.id].y] } : null, corner: best?.id ?? null, radius, preview: arc ? [arc] : [] }
+    }
+
     function previewOf(tool, t, data) {
       const pts = [...t.pts.map((p) => p.at), t.cur.at]
       if (tool === 'line' && pts.length >= 2) return [[pts[pts.length - 2], pts[pts.length - 1]]]
@@ -1123,6 +1167,35 @@ export default function CadView({
       if (tool === 'circle' && pts.length === 2) {
         const r = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
         return [Array.from({ length: 65 }, (_, i) => [pts[0][0] + r * Math.cos((i * Math.PI) / 32), pts[0][1] + r * Math.sin((i * Math.PI) / 32)])]
+      }
+      if (tool === 'crect' && pts.length === 2) {
+        const [m, b] = pts
+        const dx = b[0] - m[0]
+        const dy = b[1] - m[1]
+        return [
+          [[m[0] - dx, m[1] - dy], [m[0] + dx, m[1] - dy], [m[0] + dx, m[1] + dy], [m[0] - dx, m[1] + dy], [m[0] - dx, m[1] - dy]],
+          [[m[0] - dx, m[1] - dy], [m[0] + dx, m[1] + dy]],
+        ]
+      }
+      if (tool === 'slot' && pts.length >= 2) {
+        const [a, b] = pts
+        if (pts.length === 2) return [[a, b]]
+        const r = (t.cur.width ?? 0) / 2
+        const d = [b[0] - a[0], b[1] - a[1]]
+        const L = Math.hypot(d[0], d[1]) || 1
+        const u = [d[0] / L, d[1] / L]
+        const n = [-u[1], u[0]]
+        const ang = Math.atan2(n[1], n[0])
+        const half = (c, a0) => Array.from({ length: 17 }, (_, i) => [c[0] + r * Math.cos(a0 + (Math.PI * i) / 16), c[1] + r * Math.sin(a0 + (Math.PI * i) / 16)])
+        // oben von a nach b, Bogen um b, unten zurück, Bogen um a
+        return [[...half(a, ang), ...half(b, ang + Math.PI), [a[0] + n[0] * r, a[1] + n[1] * r]], [a, b]]
+      }
+      if (tool === 'poly' && pts.length === 2) {
+        const [c, v] = pts
+        const k = ctx.current.polyN ?? 6
+        const R = Math.hypot(v[0] - c[0], v[1] - c[1])
+        const a0 = Math.atan2(v[1] - c[1], v[0] - c[0])
+        return [Array.from({ length: k + 1 }, (_, i) => [c[0] + R * Math.cos(a0 + (2 * Math.PI * i) / k), c[1] + R * Math.sin(a0 + (2 * Math.PI * i) / k)])]
       }
       if (tool === 'arc' && pts.length >= 2) {
         const c = pts[0]
@@ -1154,6 +1227,16 @@ export default function CadView({
           return
         }
       }
+      if (box) {
+        const b = box
+        box = null
+        if (canvas.hasPointerCapture(ev.pointerId)) canvas.releasePointerCapture(ev.pointerId)
+        if (b.moved && sk) {
+          setBoxRect(null)
+          boxSelect(sk, b)
+          return
+        }
+      }
       if (drag) {
         const was = drag
         drag = null
@@ -1176,6 +1259,49 @@ export default function CadView({
       }
       const h = pick3d(ev, want)
       cb.current.onPick?.(h, ev)
+    }
+
+    // Rahmenauswahl: Elemente (und Einzelpunkte) im Rahmen bzw. vom Rahmen berührt
+    function boxSelect(sk, b) {
+      const el = host.current
+      const r = el.getBoundingClientRect()
+      const x0 = Math.min(b.x0, b.x1) - r.left
+      const x1 = Math.max(b.x0, b.x1) - r.left
+      const y0 = Math.min(b.y0, b.y1) - r.top
+      const y1 = Math.max(b.y0, b.y1) - r.top
+      const crossing = b.x1 < b.x0
+      const scr = (q) => {
+        const v = new THREE.Vector3(...to3d(sk.plane, q)).project(ctx.current.camera)
+        return [((v.x + 1) / 2) * el.clientWidth, ((1 - v.y) / 2) * el.clientHeight]
+      }
+      const inside = (p) => p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1
+      const segHits = (a, c) => {
+        if (inside(a) || inside(c)) return true
+        // Schnitt mit den vier Rahmenkanten
+        const cr = (p, q, u, v) => {
+          const d = (q[0] - p[0]) * (v[1] - u[1]) - (q[1] - p[1]) * (v[0] - u[0])
+          if (Math.abs(d) < 1e-12) return false
+          const t = ((u[0] - p[0]) * (v[1] - u[1]) - (u[1] - p[1]) * (v[0] - u[0])) / d
+          const s = ((u[0] - p[0]) * (q[1] - p[1]) - (u[1] - p[1]) * (q[0] - p[0])) / d
+          return t >= 0 && t <= 1 && s >= 0 && s <= 1
+        }
+        const R = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+        return R.some((u, i) => cr(a, c, u, R[(i + 1) % 4]))
+      }
+      const data = sk.data
+      const ents = []
+      const pts = []
+      for (const e of data.ents) {
+        const poly = polyline(data, e, 48).map(scr)
+        const hit = e.t === 'point' ? inside(poly[0]) : crossing ? poly.some((p, i) => i > 0 && segHits(poly[i - 1], p)) : poly.every(inside)
+        if (!hit) continue
+        if (e.t === 'point') pts.push(e.p)
+        else ents.push(e.id)
+      }
+      const cur = sk.sel ?? { pts: [], ents: [], cons: [] }
+      const next = b.add ? { pts: [...new Set([...cur.pts, ...pts])], ents: [...new Set([...cur.ents, ...ents])], cons: cur.cons } : { pts, ents, cons: [] }
+      sk.onSel(next)
+      if (ents.length || pts.length) sk.onSelAt?.([Math.max(b.x0, b.x1) - r.left, Math.max(b.y0, b.y1) - r.top])
     }
 
     function sketchClick(ev, sk, forced = null) {
@@ -1293,9 +1419,24 @@ export default function CadView({
         setEdit({ id: c.id, x: ev.clientX - el.left, y: ev.clientY - el.top, value: fmtN(c.v), fresh: true })
         return
       }
+      if (sk.tool === 'sfillet') {
+        // Ecke verrunden: Ecke anklicken; Radius = zuletzt benutzter oder Vorschlag, danach gleich änderbar
+        const fh = filletHover(ev, sk)
+        if (!fh.corner) return sk.onMessage?.('Verrunden: eine Ecke anklicken, an der zwei Linien zusammenkommen')
+        const r = filletCorner(data, fh.corner, fh.radius)
+        if (r.error) return sk.onMessage?.(r.error)
+        const sv = solved(r.sketch)
+        if (!sv.info.ok) return sk.onMessage?.('Die Verrundung passt nicht zu den vorhandenen Bedingungen')
+        tmp.current = null
+        sk.onChange(sv.sketch, sv.info)
+        const el = host.current.getBoundingClientRect()
+        ctx.current.filletDim = r.dim.id
+        setEdit({ id: r.dim.id, x: ev.clientX - el.left + 14, y: ev.clientY - el.top - 30, value: fmtN(r.dim.v), fresh: true })
+        return
+      }
       const res = forced ?? resolveDraw(ev, sk, t, q)
       const { at, hit } = res
-      t.pts.push({ at, hit, hv: res.hv })
+      t.pts.push({ at, hit, hv: res.hv, width: res.width })
       tmp.current = t
       const s2 = structuredClone(data)
       if (sk.tool === 'point') {
@@ -1381,6 +1522,47 @@ export default function CadView({
         commit(s2)
         return finishTool()
       }
+      if (sk.tool === 'crect' && t.pts.length === 2) {
+        const [M, B] = t.pts
+        if (Math.abs(M.at[0] - B.at[0]) < tol / 6 || Math.abs(M.at[1] - B.at[1]) < tol / 6) {
+          t.pts.pop()
+          return
+        }
+        addCenterRect(s2, M.at, B.at, { hitM: M.hit, w: res.dims?.w ?? null, h: res.dims?.h ?? null, construction: sk.construction })
+        commit(s2)
+        return finishTool()
+      }
+      if (sk.tool === 'slot' && t.pts.length === 2) {
+        const [A, B] = t.pts
+        if (Math.hypot(A.at[0] - B.at[0], A.at[1] - B.at[1]) < tol / 3) {
+          t.pts.pop()
+          return
+        }
+        if (res.dims?.dist) t.slotDist = res.dims.dist
+        setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
+        return
+      }
+      if (sk.tool === 'slot' && t.pts.length === 3) {
+        const [A, B, W] = t.pts
+        const w = res.dims?.w ?? W.width ?? slotWidth(A.at, B.at, W.at, { step: 0 })
+        if (!(w > 1e-6)) {
+          t.pts.pop()
+          return
+        }
+        addSlot(s2, A.at, B.at, w / 2, { hitA: A.hit, hitB: B.hit, dist: t.slotDist ?? null, width: res.dims?.w ?? null, construction: sk.construction, gap: 16 * mmPerPx(plane) })
+        commit(s2)
+        return finishTool()
+      }
+      if (sk.tool === 'poly' && t.pts.length === 2) {
+        const [C, V] = t.pts
+        if (Math.hypot(V.at[0] - C.at[0], V.at[1] - C.at[1]) < tol / 3) {
+          t.pts.pop()
+          return
+        }
+        addPolygon(s2, C.at, V.at, ctx.current.polyN ?? 6, { hitC: C.hit, size: res.dims?.size ?? null, construction: sk.construction })
+        commit(s2)
+        return finishTool()
+      }
       if (sk.tool === 'arc' && t.pts.length === 3) {
         const [C, A, B] = t.pts
         const r = Math.hypot(A.at[0] - C.at[0], A.at[1] - C.at[1])
@@ -1429,10 +1611,20 @@ export default function CadView({
       }
       // Zahl tippen beim Zeichnen: genaues Maß (Linie: Länge, Rechteck: B x H, Kreis: Ø, Bogen: R)
       const tt = tmp.current
-      if (/^[0-9.,]$/.test(ev.key) && !ev.ctrlKey && !ev.metaKey && !ev.altKey && tt?.tool === sk.tool && tt.pts.length && TYPE_HINT[sk.tool]) {
+      if (sk.tool === 'poly' && (ev.key === '+' || ev.key === '-')) {
         ev.preventDefault()
         ev.stopPropagation()
-        setTyping({ text: ev.key, tool: sk.tool, x: tt.hint?.x ?? 100, y: tt.hint?.y ?? 100 })
+        ctx.current.polyN = Math.max(3, Math.min(24, (ctx.current.polyN ?? 6) + (ev.key === '+' ? 1 : -1)))
+        sk.onMessage?.(`Vieleck: ${ctx.current.polyN} Ecken (+/− ändert)`)
+        if (tt?.hint) setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
+        return
+      }
+      const canType = (tt?.tool === sk.tool && tt.pts.length && TYPE_HINT[sk.tool]) || sk.tool === 'sfillet'
+      if (/^[0-9.,]$/.test(ev.key) && !ev.ctrlKey && !ev.metaKey && !ev.altKey && canType) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        const m = ctx.current.mouse ?? [100, 100]
+        setTyping({ text: ev.key, tool: sk.tool, x: tt?.hint?.x ?? m[0], y: tt?.hint?.y ?? m[1] })
       }
     }
 
@@ -1440,8 +1632,17 @@ export default function CadView({
     ctx.current.placeTyped = (text) => {
       const sk = cb.current.sketch
       const t = tmp.current
+      if (sk?.tool === 'sfillet') {
+        const v = parseTyped('sfillet', text)
+        if (!v) return false
+        ctx.current.filletR = v.value
+        sk.onMessage?.(`Verrunden: R ${fmtN(v.value)} – jetzt Ecken anklicken`)
+        if (t) t.hint = t.hint ? { ...t.hint, text: `R ${fmtN(v.value)} mm` } : null
+        setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
+        return true
+      }
       if (!sk || !t?.pts.length) return false
-      const v = parseTyped(sk.tool, text)
+      const v = parseTyped(sk.tool, text, t.pts.length)
       if (!v) {
         sk.onMessage?.(`Bitte ${TYPE_HINT[sk.tool] ?? 'eine Zahl'} eingeben`)
         return false
@@ -1457,6 +1658,34 @@ export default function CadView({
         const at = [last[0] + d[0] * v.length, last[1] + d[1] * v.length]
         const hv = Math.abs(d[1]) < 1e-9 ? 'h' : Math.abs(d[0]) < 1e-9 ? 'v' : null
         sketchClick(ev0, sk, { at, hit: null, hv, dims: { dist: v.length } })
+        return true
+      }
+      if (sk.tool === 'slot' && t.pts.length === 1) {
+        let d = [cur[0] - last[0], cur[1] - last[1]]
+        if (v.angle != null) d = [Math.cos((v.angle * Math.PI) / 180), Math.sin((v.angle * Math.PI) / 180)]
+        const L = Math.hypot(d[0], d[1])
+        d = L > 1e-9 ? [d[0] / L, d[1] / L] : [1, 0]
+        sketchClick(ev0, sk, { at: [last[0] + d[0] * v.length, last[1] + d[1] * v.length], hit: null, dims: { dist: v.length } })
+        return true
+      }
+      if (sk.tool === 'slot' && t.pts.length === 2) {
+        sketchClick(ev0, sk, { at: cur, hit: null, width: v.value, dims: { w: v.value } })
+        return true
+      }
+      if (sk.tool === 'poly') {
+        const k = ctx.current.polyN ?? 6
+        const R = k % 2 === 0 ? v.value / (2 * Math.cos(Math.PI / k)) : v.value / 2
+        let d = [cur[0] - last[0], cur[1] - last[1]]
+        const L = Math.hypot(d[0], d[1])
+        d = L > 1e-9 ? [d[0] / L, d[1] / L] : [1, 0]
+        sketchClick(ev0, sk, { at: [last[0] + d[0] * R, last[1] + d[1] * R], hit: null, dims: { size: v.value } })
+        return true
+      }
+      if (sk.tool === 'crect') {
+        const sx = Math.sign(cur[0] - last[0]) || 1
+        const sy = Math.sign(cur[1] - last[1]) || 1
+        const h = v.h ?? (Math.abs(cur[1] - last[1]) > 1e-9 ? 2 * Math.abs(cur[1] - last[1]) : v.w)
+        sketchClick(ev0, sk, { at: [last[0] + (sx * v.w) / 2, last[1] + (sy * h) / 2], hit: null, dims: { w: v.w, h: v.h ?? null } })
         return true
       }
       if (sk.tool === 'rect') {
@@ -1558,9 +1787,12 @@ export default function CadView({
     const s2 = structuredClone(sk.data)
     const c = s2.cons.find((x) => x.id === id)
     if (!c) return
+    if (c.v === v) return
     c.v = v
     const r = solved(s2)
     if (!r.info.ok) return sk.onMessage?.('Dieser Wert lässt sich nicht einhalten (widerspricht anderen Maßen oder Bedingungen)')
+    // Radius der gerade angelegten Verrundung: gilt auch für die nächsten Ecken
+    if (id === ctx.current.filletDim) ctx.current.filletR = v
     sk.onChange(r.sketch, r.info)
   }
 
@@ -1575,6 +1807,7 @@ export default function CadView({
             {l.text}
           </span>
         ))}
+      {sketch && boxRect && <div className={'sk-box' + (boxRect.cross ? ' cross' : '')} style={{ left: boxRect.x, top: boxRect.y, width: boxRect.w, height: boxRect.h }} />}
       {sketch && tmp.current?.hint && !typing && (() => {
         const h = tmp.current.hint
         return (
@@ -1582,12 +1815,12 @@ export default function CadView({
             {h.snapScr && <span className={'sk-snap ' + (h.snapScr.kind ?? '')} style={{ left: h.snapScr.x, top: h.snapScr.y }} />}
             <div className="sk-cursor" style={{ left: h.x + 16, top: h.y + 14 }}>
               {h.badges.map((b) => (
-                <span key={b} className={'sk-badge ' + b} title={BADGE_TITLE[b]}>
-                  {BADGE[b]}
+                <span key={b} className={'sk-badge ' + b} title={BADGE_TITLE[b] ?? (b[0] === 'n' ? '+/− ändert die Eckenzahl' : '')}>
+                  {BADGE[b] ?? (b[0] === 'n' ? `${b.slice(1)} Ecken` : b)}
                 </span>
               ))}
               {h.text && <span className="sk-pill">{h.text}</span>}
-              {h.canType && <span className="sk-type-hint">Zahl tippen = Maß</span>}
+              {h.canType && <span className="sk-type-hint">{tmp.current?.tool === 'sfillet' ? 'Zahl tippen = Radius' : 'Zahl tippen = Maß'}</span>}
             </div>
           </>
         )
@@ -1718,7 +1951,8 @@ export default function CadView({
           if (hover?.pt) for (const e of sketch.data?.ents ?? []) if (entPoints(e).includes(hover.pt)) focus.add(e.id)
           const selCons = new Set(sketch.sel?.cons ?? [])
           return overlay.glyphs
-            .filter((g) => all || selCons.has(g.con ?? g.id) || g.ents?.some((e) => focus.has(e)) || hover?.glyph === (g.con ?? g.id))
+            // Bedingungen, die ein Werkzeug mitbringt (Langloch, Vieleck, Verrundung): nur am gewählten/überfahrenen Element
+            .filter((g) => (all && !g.quiet) || selCons.has(g.con ?? g.id) || g.ents?.some((e) => focus.has(e)) || hover?.glyph === (g.con ?? g.id))
             .map((g) => (
               <button
                 key={g.id}
