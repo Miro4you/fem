@@ -533,3 +533,34 @@ test('Teilen an einer Ebene: Hälfte für Symmetrie, beide Seiten', () => {
   assert.deepEqual(b.bodies_info.map((x) => x.name).sort(), ['Platte (1)', 'Platte (2)'])
   near(b.volume, full, 1e-6, 'beide Hälften')
 })
+
+test('Zeichnung (SVG): drei Ansichten mit verdeckten Kanten, Mittellinien, Maßstab und Gesamtmaße', () => {
+  clearCache()
+  const top = { origin: [0, 0, 12], normal: [0, 0, 1], u: [1, 0, 0] }
+  const features = [
+    { id: 1, type: 'sketch', plane: xy, ents: [{ t: 'circle', c: [0, 0], r: 50 }, { t: 'circle', c: [0, 0], r: 20 }] },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 12, dir: 1 },
+    { id: 3, type: 'sketch', plane: top, ents: [], pts: [[35, 0]] },
+    { id: 4, type: 'hole', sketch: 3, diameter: 9, through: true },
+    { id: 5, type: 'pattern', kind: 'circular', features: [4], axis: { point: [0, 0, 0], dir: [0, 0, 1] }, count: 6, angle: 360 },
+  ]
+  const r = build({ features, svg: { title: 'Flansch <A&B>', date: '14.11.2026' }, tess: false })
+  allOk(r)
+  const svg = r.svg
+  assert.ok(svg.startsWith('<?xml') && svg.includes('</svg>'))
+  for (const t of ['Vorderansicht', 'Seitenansicht von links', 'Draufsicht', 'Isometrie', 'Flansch &lt;A&amp;B&gt;', '14.11.2026']) assert.ok(svg.includes(t), t)
+  // 100 × 100 × 12 passt im Maßstab 1:1 auf A4
+  assert.ok(svg.includes('viewBox="0 0 297 210"') && svg.includes('>1:1<'))
+  assert.ok(svg.includes('>100<') && svg.includes('>12<'), 'Gesamtmaße')
+  // Bohrungen verdeckt (gestrichelt) in Vorder- und Seitenansicht
+  assert.ok((svg.match(/class="hid"/g) ?? []).length >= 2)
+  // Mittelkreuze: 6 Bohrungen + Ring innen/außen (eine Achse) in der Draufsicht → 7 × 2 Linien
+  const ctr = svg.match(/<g class="ctr">(.*?)<\/g>/g) ?? []
+  assert.equal(ctr.length, 3)
+  const counts = ctr.map((g) => (g.match(/<line/g) ?? []).length).sort((a, b) => a - b)
+  assert.equal(counts[2], 14)
+  // großes Teil: kleinerer Maßstab
+  clearCache()
+  const big = build({ features: [{ id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 900, 300) }, { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 200, dir: 1 }], svg: true, tess: false })
+  assert.ok(/>1:(5|10)</.test(big.svg), big.svg.match(/>\d+:\d+</)?.[0])
+})

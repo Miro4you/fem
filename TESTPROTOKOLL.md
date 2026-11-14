@@ -391,6 +391,7 @@ selbst starten.
 | 18e.75 | Konstruktion › Messen: zwei Ecken anklicken | „Punkt (x; y; z)“ je Ecke und „Abstand der Punkte … mm (Δx, Δy, Δz)“ | [ ] |
 | 18e.76 | Körperliste: Werkstoff oben rechts umstellen (Stahl → PLA), „Stückliste (CSV)“ | Masse je Körper passt sich an (gemerkt); CSV mit Pos, Name, Volumen, Masse, Schwerpunkt (öffnet in Excel mit Umlauten) | [ ] |
 | 18e.77 | Platte um den Ursprung, Mehr › Teilen (Ebene YZ, „Vorne behalten“) | Volumen halbiert, nur die Hälfte x > 0 bleibt; „Beide“ ergibt zwei Körper „… (1)“ / „… (2)“ | [ ] |
+| 18e.78 | Flansch mit Bohrungen (oder Normteil-Schraube), „Zeichnung (SVG)“ | Datei „… - Zeichnung.svg“: Vorderansicht, Seitenansicht von links, Draufsicht, Isometrie; Bohrungen gestrichelt, Mittellinien/-kreuze, Gesamtmaße, Maßstab (z. B. 1:1 bzw. 2:1), Masse mit Werkstoff im Schriftfeld | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

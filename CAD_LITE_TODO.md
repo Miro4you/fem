@@ -187,8 +187,12 @@ anordnen, benennen); Lagebedingungen bleiben einmalig (keine dauerhaften Mates, 
 Dazu: Normteile (Schraube/Mutter/Scheibe, direkt in Bohrungen), Rippe, Formschräge, STL-Export, Ebene durch drei
 Punkte. Ausrichten ist ein Feature im Verlauf und wird bei Änderungen neu angewandt (folgt verschobenen Flächen).
 
+**Zeichnung (SVG):** Vorderansicht, Seitenansicht von links, Draufsicht (Projektionsmethode 1, verdeckte Kanten
+gestrichelt über HLR), Isometrie, Gesamtmaße, Mittellinien/-kreuze an Bohrungen und Wellen, genormter Maßstab,
+A4/A3 und Schriftfeld (Benennung, Masse mit Werkstoff, Datum, ISO 2768-m).
+
 Offen: Bewegung/Gelenke (kinematische Lagebedingungen), Torusflächen (Ecken zweier Rundungen) beim
-Flächen-Entfernen, Zeichnungsableitung.
+Flächen-Entfernen; in der Zeichnung Einzelmaße, Schnitte und Einzelteilzeichnungen je Körper.
 
 ## G6. Baugruppen (bis ~50 Teile)
 

@@ -124,3 +124,13 @@ export async function cadBuildStl(args) {
   if (!r.stlBlob) throw new Error('Die Konstruktion hat noch keinen Körper')
   return r.stlBlob
 }
+
+/// Technische Zeichnung (SVG-Text): Vorder-, Seiten-, Draufsicht und Isometrie mit Schriftfeld.
+/// info: { title, date, mass } fürs Schriftfeld
+export async function cadBuildSvg(args, info = {}) {
+  const r = await kernelBuild({ ...args, svg: info, tess: false })
+  const bad = r.status?.find((x) => !x.ok && !x.skipped)
+  if (bad) throw new Error(bad.error)
+  if (!r.svg) throw new Error('Die Konstruktion hat noch keinen Körper')
+  return r.svg
+}

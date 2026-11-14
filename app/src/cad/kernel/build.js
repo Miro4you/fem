@@ -2,6 +2,7 @@
 // und liefert dieselbe Antwort ({ status, volume, bodies, bodies_info, tess, regions }).
 // Läuft im Web Worker (worker.js) und in Node (Tests). Vorher: setOC(oc) aus replicad.
 import { makeCompound, getOC, cast, makeLine, makeCircle, makeThreePointArc, makePolygon, basicFaceExtrusion, revolution, measureArea, measureShapeVolumeProperties, measureDistanceBetween, exportSTEP, Vector, assembleWire, genericSweep, loft } from 'replicad'
+import { drawingSvg } from './drawing.js'
 import { arcAngles, entRadius, pruneOpen, crossings, insidePoly, interiorPoint, inFills, chainLoops } from './geom2d.js'
 
 export class Problem extends Error {}
@@ -1681,6 +1682,37 @@ function importBase(key, text) {
   return m
 }
 
+// Achsen der Bohrungen/Wellen für die Mittellinien der Zeichnung (nur volle Zylinder bzw. Kegel, keine Verrundungen)
+function drawingAxes(model) {
+  const axes = []
+  for (const b of model.bodies)
+    for (const f of b.shape.faces) {
+      let ri = null
+      try {
+        ri = revInfo(f)
+      } catch {
+        ri = null
+      }
+      if (!ri || ri.span < Math.PI * 0.99) continue
+      const ss = ri.sr.map((q) => q[0])
+      const r = Math.max(...ri.sr.map((q) => q[1]))
+      let s0 = Math.min(...ss)
+      let s1 = Math.max(...ss)
+      // gleiche Achse (z. B. Welle mit Absätzen, Bohrung mit Senkung) zusammenfassen
+      const same = axes.find((a) => Math.abs(dot(a.axis, ri.axis)) > 0.9999 && dist3(cross(sub(ri.c0, a.c0), a.axis), [0, 0, 0]) < 1e-4)
+      if (same) {
+        const off = dot(sub(ri.c0, same.c0), same.axis)
+        const sg = dot(ri.axis, same.axis) > 0 ? 1 : -1
+        const a0 = off + sg * s0
+        const a1 = off + sg * s1
+        same.s0 = Math.min(same.s0, a0, a1)
+        same.s1 = Math.max(same.s1, a0, a1)
+        same.r = Math.max(same.r, r)
+      } else axes.push({ c0: ri.c0, axis: ri.axis, s0, s1, r })
+    }
+  return axes
+}
+
 export function build(job) {
   const t0 = performance.now()
   let features = job.features ?? []
@@ -1791,6 +1823,12 @@ export function build(job) {
   if (job.stl && model.bodies.length && !failed) {
     const all = model.bodies.length === 1 ? model.bodies[0].shape : makeCompound(model.shapes)
     result.stlBlob = all.blobSTL({ binary: true, tolerance: Number(job.stlTol) || 0.02, angularTolerance: 0.15 })
+  }
+  // technische Zeichnung (SVG) mit drei Ansichten, Isometrie und Schriftfeld
+  if (job.svg && model.bodies.length && !failed) {
+    const all = model.bodies.length === 1 ? model.bodies[0].shape : makeCompound(model.shapes)
+    const volume = model.bodies.reduce((a, b) => a + massOf(b).volume, 0)
+    result.svg = drawingSvg(all, bboxOf(model.shapes), { volume, axes: drawingAxes(model), ...(job.svg === true ? {} : job.svg) })
   }
   if (job.tess !== false) result.tess = model.bodies.length ? tessellate(model, Number(job.quality) || 1) : null
   result.timing = { build: Math.round(tBuild - t0), total: Math.round(performance.now() - t0), cached: start }

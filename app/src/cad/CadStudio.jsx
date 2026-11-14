@@ -26,6 +26,7 @@ import {
   ExternalLink,
   Unlink,
   Keyboard,
+  FileText,
 } from 'lucide-react'
 import CadView, { fmtN, BODY_TINT_HEX } from './CadView.jsx'
 import * as api from '../api.js'
@@ -54,7 +55,7 @@ import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
 import NumInput from './NumInput.jsx'
 import * as I from './icons.jsx'
 import { describe as describePick, between as betweenPicks } from '../measure.js'
-import { cadBuildView, cadBuildStl, kernelReady } from './kernel/client.js'
+import { cadBuildView, cadBuildStl, cadBuildSvg, kernelReady } from './kernel/client.js'
 
 const FEATURE_ICON = {
   sketch: I.IcSketch,
@@ -1802,6 +1803,28 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                   <Download size={15} /> Als STL
                 </button>
               </div>
+              <button
+                className="btn wide"
+                disabled={!hasBody || busy}
+                title="Technische Zeichnung als SVG: Vorderansicht, Seitenansicht von links, Draufsicht (Projektionsmethode 1), Isometrie, Gesamtmaße, Mittellinien und Schriftfeld – im Browser öffnen und als PDF drucken"
+                onClick={async () => {
+                  try {
+                    const infos = built?.bodies_info ?? []
+                    const title = infos.length === 1 && infos[0].named ? infos[0].name : infos.find((b) => b.named)?.name ?? 'Konstruktion'
+                    const vol = infos.reduce((a, b) => a + b.volume, 0)
+                    const mat = DENSITIES.find(([, v]) => String(v) === String(density))
+                    const mass = vol > 0 ? `${fmtMass((vol / 1000) * Number(density))}${mat ? ` (${mat[0]})` : ''}` : ''
+                    const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                    const svg = await cadBuildSvg({ base: cad.base ?? null, features: kernelFeatures(live) }, { title, date, mass })
+                    const safe = title.replace(/×/g, 'x').replace(/[^\p{L}\p{N} _.-]+/gu, '').trim() || 'Konstruktion'
+                    await api.saveBlob(new Blob([svg], { type: 'image/svg+xml' }), `${safe} - Zeichnung.svg`, 'SVG-Zeichnung', 'svg')
+                  } catch (e) {
+                    onError(String(e?.message ?? e))
+                  }
+                }}
+              >
+                <FileText size={15} /> Zeichnung (SVG)
+              </button>
             </section>
           </>
         )}
