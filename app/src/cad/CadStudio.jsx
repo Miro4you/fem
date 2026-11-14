@@ -68,6 +68,7 @@ const FEATURE_ICON = {
   moveface: I.IcMoveFace,
   shell: I.IcShell,
   boolean: I.IcBoolean,
+  movebody: I.IcMoveBody,
   sweep: I.IcSweep,
   loft: I.IcLoft,
   refillet: I.IcFillet,
@@ -134,6 +135,7 @@ const MORE_TOOLS = [
   ['moveface', 'Ebene Fläche verschieben (z. B. Wand dicker)'],
   ['removefaces', 'Flächen entfernen (z. B. Bohrung oder Radius weg)'],
   ['boolean', 'Boolesch: Körper vereinigen, voneinander abziehen oder Schnittmenge'],
+  ['movebody', 'Körper verschieben oder drehen (auch als Kopie) – z. B. Teile zueinander anordnen'],
 ]
 
 const emptySel = { pts: [], ents: [], cons: [] }
@@ -470,7 +472,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (type === 'sketch') {
       setPickFor('plane')
       draft.sketch = null
-    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces', boolean: 'btarget' }[type] ?? null)
+    } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces', boolean: 'btarget', movebody: 'mbody' }[type] ?? null)
   }
 
   // Feature mit einer bestimmten Skizze anlegen (Kontextmenü, „weiter mit“)
@@ -581,6 +583,15 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     list[i] = g
     list[j] = f
     commitFeatures(list)
+  }
+  // Körper umbenennen: der Name gehört zum Feature, das den Körper angelegt hat
+  const renameBody = (b, name) => {
+    setRenaming(null)
+    const f = features.find((g) => g.id === b.src)
+    if (!f || !['extrude', 'revolve', 'sweep', 'loft'].includes(f.type)) return note(b.src === 'base' ? 'Der Name kommt aus der STEP-Datei' : 'Diesen Körper kann man hier nicht umbenennen')
+    const n = name.trim()
+    if ((f.bodyName ?? '') === n) return
+    commitFeatures(features.map((g) => (g.id === f.id ? { ...g, bodyName: n || undefined } : g)))
   }
   const renameFeature = (f, name) => {
     const n = name.trim()
@@ -815,6 +826,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         return edit?.draft.type === 'moveface' ? { planar: true } : { faces: true }
       case 'btarget':
       case 'btool':
+      case 'mbody':
         return { faces: true }
       case 'upto':
         return { planar: true }
@@ -883,6 +895,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       }
       return
     }
+    if (pickFor === 'mbody' && h.face) {
+      setDraft({ body: faceRef(h.face) })
+      setPickFor(null)
+      return
+    }
     if (pickFor === 'upto' && h.face?.normal) {
       setDraft({ upto: faceRef(h.face), through: false })
       setPickFor(null)
@@ -945,7 +962,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // Stand vor dem bearbeiteten Feature (zum Wählen von Kanten/Flächen)
   const [before, setBefore] = useState(null)
-  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
+  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean', 'movebody'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
   useEffect(() => {
     if (!beforeKey) {
       setBefore(null)
@@ -971,7 +988,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const pickEdges = edgeFeature && pickFor === 'edges' && before?.tess && preview?.tess && edit.draft.edges?.length ? before.tess.curves : null
   const viewTess = pickEdges
     ? preview.tess
-    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool', 'upto'].includes(pickFor) && before?.tess
+    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool', 'upto', 'mbody'].includes(pickFor) && before?.tess
       ? before.tess
       : sketchEdit
         ? (preview?.tess ?? null)
@@ -995,6 +1012,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (d.edges) out.edges = matchEdges(pickEdges ? before.tess : viewTess, d.edges)
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
     if (d.type === 'extrude' && d.upto) out.faces = matchFaces(viewTess, [d.upto])
+    if (d.type === 'movebody' && d.body && viewTess) {
+      const tag = [...matchFaces(viewTess, [d.body])][0]
+      const body = viewTess.surfaces.find((x) => x.tag === tag)?.body
+      for (const x of viewTess.surfaces) if (x.body === body) out.faces.add(x.tag)
+    }
     if (d.type === 'boolean') {
       // ganze Körper zeigen: alle Flächen der Körper, zu denen eine gewählte Fläche gehört
       const t = viewTess
@@ -1531,7 +1553,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 </p>
               ))}
             </section>
-            {bodyCount > 1 && built?.bodies_info && (
+            {bodyCount > 0 && built?.bodies_info && (
               <section className="section">
                 <h2>
                   <Boxes size={15} /> Körper ({bodyCount})
@@ -1545,7 +1567,24 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     title="Überfahren = im Bild markieren"
                   >
                     <Boxes size={14} />
-                    <span className="cad-feat-name">{b.name}</span>
+                    {renaming === `body:${i}` ? (
+                      <input
+                        className="cad-feat-rename"
+                        autoFocus
+                        defaultValue={b.named ? b.name : ''}
+                        placeholder={b.name}
+                        onFocus={(e) => e.target.select()}
+                        onBlur={(e) => renameBody(b, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') renameBody(b, e.target.value)
+                          if (e.key === 'Escape') setRenaming(null)
+                        }}
+                      />
+                    ) : (
+                      <span className="cad-feat-name" onDoubleClick={() => setRenaming(`body:${i}`)} title="Doppelklick: umbenennen (der Name erscheint in der Rechnung)">
+                        {b.name}
+                      </span>
+                    )}
                     <span className="muted small">{fmtN(b.volume / 1000)} cm³</span>
                     <span className="spacer" />
                     <button
@@ -1820,6 +1859,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 btarget: edit?.draft.op === 'union' ? 'Körper anklicken, die vereinigt werden (mindestens zwei)' : 'Zielkörper anklicken (von dem abgezogen bzw. geschnitten wird)',
                 btool: 'Werkzeugkörper anklicken',
                 upto: 'Ebene Fläche anklicken, bis zu der extrudiert wird (parallel zur Skizze)',
+                mbody: 'Körper anklicken, der verschoben/gedreht wird',
               }[pickFor]}
           </div>
         )}
@@ -2386,6 +2426,34 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
             <input type="checkbox" checked={!!d.ruled} onChange={(e) => setDraft({ ruled: e.target.checked })} /> Gerade Übergänge (statt weich)
           </label>
           {modeSel}
+        </>
+      )}
+
+      {d.type === 'movebody' && (
+        <>
+          <PickButton active={pickFor === 'mbody'} label="Körper" value={d.body ? 'gewählt' : 'im Bild anklicken'} onClick={() => setPickFor(pickFor === 'mbody' ? null : 'mbody')} />
+          <span className="field-label">Verschieben</span>
+          <div className="grid3">
+            <Num label="x" value={d.dx} onChange={(dx) => setDraft({ dx })} />
+            <Num label="y" value={d.dy} onChange={(dy) => setDraft({ dy })} />
+            <Num label="z" value={d.dz} onChange={(dz) => setDraft({ dz })} />
+          </div>
+          <span className="field-label">Drehen um die Achse durch den Schwerpunkt</span>
+          <div className="grid2">
+            <Seg
+              value={d.axis}
+              onChange={(axis) => setDraft({ axis })}
+              options={[
+                ['x', 'X'],
+                ['y', 'Y'],
+                ['z', 'Z'],
+              ]}
+            />
+            <Num label="Winkel" unit="°" value={d.angle} onChange={(angle) => setDraft({ angle })} />
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={!!d.copy} onChange={(e) => setDraft({ copy: e.target.checked })} /> Als Kopie (Original bleibt)
+          </label>
         </>
       )}
 

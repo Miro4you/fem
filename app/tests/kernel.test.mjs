@@ -356,3 +356,23 @@ test('Flächen entfernen: Fase außen (ergänzen) und innen (abziehen)', () => {
   allOk(r2)
   near(r2.volume, v0, 1e-6, 'beide Fasen entfernt')
 })
+
+test('Körper verschieben/drehen (auch als Kopie), Namen bleiben am Körper', () => {
+  clearCache()
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 40, 20) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1, bodyName: 'Platte' },
+  ]
+  const top = { center: [20, 10, 10], kind: 'plane', normal: [0, 0, 1] }
+  const r = build({ features: [...base, { id: 3, type: 'movebody', body: top, d: [0, 0, 30], axis: 'z', angle: 90, copy: true }] })
+  allOk(r)
+  assert.equal(r.bodies, 2)
+  near(r.volume, 2 * 8000, 1e-6, 'zwei Platten')
+  assert.deepEqual(r.bodies_info.map((b) => b.name), ['Platte', 'Platte (Kopie)'])
+  assert.equal(r.bodies_info[0].src, 2)
+  const c = r.bodies_info[1].center
+  assert.ok(Math.abs(c[0] - 20) < 1e-6 && Math.abs(c[1] - 10) < 1e-6 && Math.abs(c[2] - 35) < 1e-6, `Kopie um 30 nach oben: ${c}`)
+  const m = build({ features: [...base, { id: 3, type: 'movebody', body: top, d: [100, 0, 0], axis: 'z', angle: 0 }] })
+  assert.equal(m.bodies, 1)
+  assert.ok(Math.abs(m.bodies_info[0].center[0] - 120) < 1e-6)
+})

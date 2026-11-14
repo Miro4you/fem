@@ -14,6 +14,7 @@ export const FEATURE_LABEL = {
   moveface: 'Fläche verschieben',
   shell: 'Schale',
   boolean: 'Boolesch',
+  movebody: 'Körper verschieben',
   sweep: 'Sweep',
   loft: 'Loft',
   refillet: 'Radius ändern',
@@ -147,6 +148,8 @@ export function defaults(type) {
       return { faces: [], thickness: '2' }
     case 'boolean':
       return { op: 'union', targets: [], tools: [], keepTools: false }
+    case 'movebody':
+      return { body: null, dx: '0', dy: '0', dz: '0', axis: 'z', angle: '0', copy: false }
     case 'sweep':
       return { sketch: null, path: null, mode: 'add' }
     case 'loft':
@@ -227,6 +230,9 @@ export function problemOf(f, features) {
       return (f.sketches ?? []).length >= 2 ? null : 'mindestens zwei Skizzen wählen'
     case 'shell':
       return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
+    case 'movebody':
+      if (!f.body) return 'Körper im Bild anklicken'
+      return num(f.dx) || num(f.dy) || num(f.dz) || num(f.angle) ? null : 'Weg (x, y, z) oder Winkel angeben'
     case 'boolean':
       if (!f.targets?.length) return f.op === 'union' ? 'Körper im Bild anklicken (mindestens zwei)' : 'Zielkörper im Bild anklicken'
       return f.tools?.length ? null : f.op === 'union' ? 'noch einen Körper anklicken' : 'Werkzeugkörper anklicken'
@@ -257,12 +263,12 @@ export function kernelFeature(f, features) {
     case 'sketch':
       return kernelSketch(f.id, f.sketch)
     case 'extrude':
-      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through && !f.upto, ...(f.upto ? { upto: faceHint(f.upto) } : {}) }
+      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.bodyName || undefined, subtract: f.subtract !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through && !f.upto, ...(f.upto ? { upto: faceHint(f.upto) } : {}) }
     case 'revolve': {
       const s = sk(f.sketch)?.sketch
       const line = s?.ents.find((e) => e.id === f.axis)
       const axis = line ? { a: [s.pts[line.a].x, s.pts[line.a].y], b: [s.pts[line.b].x, s.pts[line.b].y] } : null
-      return { id: f.id, type: 'revolve', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false, axis, angle: num(f.angle), mode: f.mode, symmetric: !!f.symmetric }
+      return { id: f.id, type: 'revolve', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.bodyName || undefined, subtract: f.subtract !== false, axis, angle: num(f.angle), mode: f.mode, symmetric: !!f.symmetric }
     }
     case 'hole':
       return {
@@ -305,11 +311,13 @@ export function kernelFeature(f, features) {
     case 'moveface':
       return { id: f.id, type: 'moveface', faces: f.faces.map(faceHint), distance: num(f.distance) }
     case 'sweep':
-      return { id: f.id, type: 'sweep', sketch: f.sketch, path: f.path, mode: f.mode, bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false }
+      return { id: f.id, type: 'sweep', sketch: f.sketch, path: f.path, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'loft':
-      return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false }
+      return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
+    case 'movebody':
+      return { id: f.id, type: 'movebody', body: f.body ? faceHint(f.body) : null, d: [num(f.dx) || 0, num(f.dy) || 0, num(f.dz) || 0], axis: f.axis, angle: num(f.angle) || 0, copy: !!f.copy }
     case 'boolean':
       return { id: f.id, type: 'boolean', op: f.op, targets: f.targets.map(faceHint), tools: f.tools.map(faceHint), keepTools: !!f.keepTools }
     case 'refillet':
@@ -334,7 +342,7 @@ export function cadParams(features) {
   const out = []
   for (const f of features) {
     if (f.suppressed) continue
-    const field = { extrude: ['depth', 'Tiefe'], revolve: ['angle', 'Winkel'], hole: ['diameter', 'Ø'], fillet: ['radius', 'Radius'], chamfer: ['distance', 'Fase'], moveface: ['distance', 'Abstand'], shell: ['thickness', 'Wandstärke'], refillet: ['radius', 'Radius'], rehole: ['diameter', 'Ø'] }[f.type]
+    const field = { movebody: ['angle', 'Winkel'], extrude: ['depth', 'Tiefe'], revolve: ['angle', 'Winkel'], hole: ['diameter', 'Ø'], fillet: ['radius', 'Radius'], chamfer: ['distance', 'Fase'], moveface: ['distance', 'Abstand'], shell: ['thickness', 'Wandstärke'], refillet: ['radius', 'Radius'], rehole: ['diameter', 'Ø'] }[f.type]
     if (field && !(f.type === 'extrude' && f.through)) out.push({ key: `cad:${f.id}:${field[0]}`, label: `${f.name}: ${field[1]}`, unit: f.type === 'revolve' ? '°' : 'mm', value: num(f[field[0]]) })
     if (f.type === 'pattern') out.push({ key: `cad:${f.id}:count`, label: `${f.name}: Anzahl`, unit: '', value: num(f.count) })
     if (f.type === 'sketch')

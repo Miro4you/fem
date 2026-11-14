@@ -203,7 +203,7 @@ class Model {
   }
   clone() {
     // gemeinsamer Merkzettel (Netz, Volumen): was später am Original berechnet wird, hat auch die Kopie
-    return new Model(this.bodies.map((b) => ({ shape: b.shape.clone(), name: b.name, memo: (b.memo ??= {}) })))
+    return new Model(this.bodies.map((b) => ({ shape: b.shape.clone(), name: b.name, src: b.src, memo: (b.memo ??= {}) })))
   }
   get shapes() {
     return this.bodies.map((b) => b.shape)
@@ -221,7 +221,7 @@ class Model {
 function combine(model, mode, tools, warn, name = null) {
   if (!tools.length) throw new Problem('Es ist kein Körper entstanden')
   if (mode === 'new' || (mode === 'add' && !model.bodies.length)) {
-    for (const s of fuseAll(tools)) model.bodies.push({ shape: s, name })
+    for (const s of fuseAll(tools)) model.bodies.push({ shape: s, name, src: CUR.src })
     return
   }
   if (mode === 'add') {
@@ -229,14 +229,14 @@ function combine(model, mode, tools, warn, name = null) {
     const tb = bboxOf(tools)
     const near = model.bodies.filter((b) => boxesTouch(bboxOf([b.shape]), tb, tol))
     if (!near.length) {
-      for (const s of fuseAll(tools)) model.bodies.push({ shape: s, name: null })
+      for (const s of fuseAll(tools)) model.bodies.push({ shape: s, name: null, src: CUR.src })
       warn.push('Das neue Material berührt das Bauteil nicht – es ist ein eigener, loser Körper')
       return
     }
     const before = model.bodies.length
     const merged = fuseAll([...near.map((b) => b.shape), ...tools])
-    const keepName = near.find((b) => b.name)?.name ?? null
-    model.bodies = [...model.bodies.filter((b) => !near.includes(b)), ...merged.map((s) => ({ shape: s, name: keepName }))]
+    const keep = near.find((b) => b.name) ?? near[0]
+    model.bodies = [...model.bodies.filter((b) => !near.includes(b)), ...merged.map((s) => ({ shape: s, name: keep.name ?? null, src: keep.src }))]
     if (model.bodies.length > before) warn.push('Das neue Material berührt das Bauteil nicht – es ist ein eigener, loser Körper')
     return
   }
@@ -252,7 +252,7 @@ function combine(model, mode, tools, warn, name = null) {
         out.push(b)
         continue
       }
-      for (const s of solidsOf(b.shape.cut(tool))) out.push({ shape: s, name: b.name })
+      for (const s of solidsOf(b.shape.cut(tool))) out.push({ shape: s, name: b.name, src: b.src })
     }
     model.bodies = out
     if (!out.length) throw new Problem('Entfernen: Es bliebe nichts übrig')
@@ -560,7 +560,7 @@ function edgeOp(model, f, kind) {
     }
     const s = cast(mk.Shape())
     mk.delete()
-    model.bodies[bi] = { shape: solidsOf(s)[0] ?? s, name: body.name }
+    model.bodies[bi] = { shape: solidsOf(s)[0] ?? s, name: body.name, src: body.src }
   }
 }
 
@@ -620,8 +620,8 @@ function repeat(model, f, trsfs, sketches, byId, warn, what) {
   if (src === 'body') {
     if (!model.bodies.length) throw new Problem(`${what}: Es gibt noch keinen Körper`)
     const copies = model.bodies.flatMap((b) => trsfs.map((T) => transformed(b.shape, T)))
-    const name = model.bodies.find((b) => b.name)?.name ?? null
-    model.bodies = fuseAll([...model.shapes, ...copies]).map((s) => ({ shape: s, name }))
+    const first = model.bodies.find((b) => b.name) ?? model.bodies[0]
+    model.bodies = fuseAll([...model.shapes, ...copies]).map((s) => ({ shape: s, name: first.name ?? null, src: first.src }))
     return
   }
   if (!src?.length) throw new Problem(`${what}: kein Feature gewählt`)
@@ -967,7 +967,7 @@ function removeFaces(model, f, warn, what = 'Flächen entfernen') {
   for (const [bi, faces] of per) {
     const body = model.bodies[bi]
     const r = removeFacesOf(body.shape, faces, what, size)
-    model.bodies[bi] = { shape: r.shape, name: body.name }
+    model.bodies[bi] = { shape: r.shape, name: body.name, src: body.src }
     sharp.push(...r.sharp.map((w) => ({ ...w, bi })))
   }
   if (Math.abs(model.volume() - vol0) < 1e-9 * Math.max(vol0, 1)) warn?.push('Es hat sich nichts geändert – Flächen einer Bohrung oder Verrundung wählen')
@@ -1012,7 +1012,7 @@ function refillet(model, f, warn) {
     }
     const s = cast(mk.Shape())
     mk.delete()
-    model.bodies[bi] = { shape: solidsOf(s)[0] ?? s, name: body.name }
+    model.bodies[bi] = { shape: solidsOf(s)[0] ?? s, name: body.name, src: body.src }
   }
   void warn
 }
@@ -1042,20 +1042,39 @@ function booleanOp(model, f, warn) {
   const vol0 = model.volume()
   if (op === 'union') {
     const all = fuseAll([...targets, ...tools].map((bi) => model.bodies[bi].shape))
-    const name = model.bodies[targets[0]].name
-    for (const x of all) out.push({ shape: x, name })
+    const { name, src } = model.bodies[targets[0]]
+    for (const x of all) out.push({ shape: x, name, src })
     if (all.length > 1) warn.push('Die Körper berühren sich nicht – sie bleiben getrennt')
   } else
     for (const bi of targets) {
       const b = model.bodies[bi]
       const r = solidsOf(op === 'subtract' ? b.shape.cut(tool) : bool('common', b.shape, tool))
       if (!r.length && op === 'intersect') warn.push(`„${b.name ?? 'Körper'}“ und das Werkzeug überschneiden sich nicht – Körper fällt weg`)
-      for (const x of r) out.push({ shape: x, name: b.name })
+      for (const x of r) out.push({ shape: x, name: b.name, src: b.src })
     }
   const drop = new Set([...targets, ...(keep ? [] : tools)])
   model.bodies = [...model.bodies.filter((_, i) => !drop.has(i)), ...out]
   if (!model.bodies.length) throw new Problem('Boolesch: Es bliebe kein Körper übrig')
   void vol0
+}
+
+/// Körper verschieben und/oder um eine Achse durch seinen Schwerpunkt drehen (wahlweise als Kopie)
+function moveBody(model, f, warn) {
+  if (!f.body) throw new Problem('Körper verschieben: Körper im Bild anklicken')
+  const { bi } = findFace(model, f.body, 'Körper verschieben')
+  const b = model.bodies[bi]
+  const d = (f.d ?? [0, 0, 0]).map((x) => Number(x) || 0)
+  const ang = ((Number(f.angle) || 0) * Math.PI) / 180
+  if (!norm(d) && !ang) throw new Problem('Körper verschieben: Weg oder Winkel angeben')
+  let shape = b.shape.clone()
+  if (ang) {
+    const ax = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }[f.axis] ?? [0, 0, 1]
+    shape = transformed(shape, trsfRotate(massOf(b).center, ax, ang))
+  }
+  if (norm(d)) shape = transformed(shape, trsfTranslate(d))
+  if (f.copy) model.bodies.push({ shape, name: b.name ? `${b.name} (Kopie)` : null, src: CUR.src })
+  else model.bodies[bi] = { shape, name: b.name, src: b.src }
+  void warn
 }
 
 /// Schale: Körper aushöhlen, gewählte Flächen bleiben offen
@@ -1092,7 +1111,7 @@ function shellOp(model, f) {
       if (!(v1 > 0) || Math.abs(v1 - v0) < 1e-6 * v0) solid = null
     }
     if (!solid) throw new Problem(`Schale: Wandstärke ${t} mm lässt sich hier nicht erzeugen – zu dick für den Körper oder für enge Radien?`)
-    model.bodies[bi] = { shape: solid, name: body.name }
+    model.bodies[bi] = { shape: solid, name: body.name, src: body.src }
   }
 }
 
@@ -1256,7 +1275,11 @@ function tessellate(model, quality = 1) {
 const CACHE = []
 const CACHE_MAX = 40
 
+// Feature, das gerade läuft (neue Körper merken sich, woher sie kommen – zum Umbenennen in der Körperliste)
+const CUR = { src: null }
+
 function runFeature(model, f, sketches, warn, byId) {
+  CUR.src = f.id
   const before = new Set(model.bodies)
   if (f.type === 'hole') {
     // Bohrung: trifft die Standardrichtung (kaum) Material, die Gegenrichtung aber schon, dann dorthin bohren
@@ -1283,7 +1306,7 @@ function runFeature(model, f, sketches, warn, byId) {
     else warn.push(...use.w.filter((w) => !w.startsWith('Es wurde nichts entfernt')))
   } else if (TOOLS[f.type]) {
     const tools = TOOLS[f.type](model, f, sketches, warn)
-    combine(model, modeOf(f), tools, warn, f.mode === 'new' ? (f.bodyName ?? '').trim() || null : null)
+    combine(model, modeOf(f), tools, warn, (f.bodyName ?? '').trim() || null)
   } else if (f.type === 'fillet' || f.type === 'chamfer') edgeOp(model, f, f.type)
   else if (f.type === 'pattern') repeat(model, f, instances(f), sketches, byId, warn, 'Muster')
   else if (f.type === 'mirror') mirrorFeature(model, f, sketches, byId, warn)
@@ -1291,6 +1314,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'shell') shellOp(model, f)
   else if (f.type === 'removefaces') removeFaces(model, f, warn)
   else if (f.type === 'boolean') booleanOp(model, f, warn)
+  else if (f.type === 'movebody') moveBody(model, f, warn)
   else if (f.type === 'refillet') refillet(model, f, warn)
   else if (f.type === 'rehole') rehole(model, f, warn)
   else throw new Problem(`„${f.type}“ kann der neue Kern noch nicht`)
@@ -1313,7 +1337,7 @@ function newBodies(model, f, before, warn) {
       }
     const tol = 1e-6 * Math.min(...model.bodies.map((b) => massOf(b).volume))
     if (overlap > tol) {
-      const cut = fresh.flatMap((b) => solidsOf(b.shape.cut(oldU)).map((s) => ({ shape: s, name: b.name })))
+      const cut = fresh.flatMap((b) => solidsOf(b.shape.cut(oldU)).map((s) => ({ shape: s, name: b.name, src: b.src })))
       model.bodies = [...old, ...cut]
       warn.push(`überschneidet ein anderes Teil um ${overlap.toFixed(0)} mm³ – die Überschneidung wurde vom neuen Teil abgezogen`)
     }
@@ -1372,7 +1396,7 @@ function importBase(key, text) {
   const solids = shape ? solidsOf(shape) : []
   if (!solids.length) throw new Problem('Ausgangsteil: Die STEP-Datei enthält keinen Volumenkörper')
   const names = stepNames(text, solids.length)
-  m = new Model(solids.map((sh, i) => ({ shape: sh, name: names[i] || null })))
+  m = new Model(solids.map((sh, i) => ({ shape: sh, name: names[i] || null, src: 'base' })))
   BASE_CACHE.set(key, m)
   if (BASE_CACHE.size > 4) BASE_CACHE.delete(BASE_CACHE.keys().next().value)
   return m
@@ -1455,7 +1479,7 @@ export function build(job) {
     let unnamed = 0
     result.bodies_info = model.bodies.map((b) => {
       const p = massOf(b)
-      return { name: b.name ?? `Körper ${++unnamed}`, volume: p.volume, center: p.center }
+      return { name: b.name ?? `Körper ${++unnamed}`, volume: p.volume, center: p.center, src: b.src ?? null, named: !!b.name }
     })
   }
   if (job.step && model.bodies.length && !failed) {

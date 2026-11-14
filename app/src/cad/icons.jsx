@@ -125,6 +125,18 @@ export const IcBoolean = (p) => (
   </Svg>
 )
 
+export const IcMoveBody = (p) => {
+  const c = cube(-2, 1, 0.8)
+  return (
+    <Svg {...p}>
+      <path d={c.top} className={F} />
+      <path d={c.left} />
+      <path d={c.right} />
+      <path d="M14 18h7M18.5 15.5 21 18l-2.5 2.5" className={A} />
+    </Svg>
+  )
+}
+
 export const IcSweep = (p) => (
   <Svg {...p}>
     <ellipse cx="5.5" cy="17.5" rx="2.5" ry="3" className={F} />

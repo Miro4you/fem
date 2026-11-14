@@ -374,10 +374,11 @@ selbst starten.
 | 18e.58 | Skizze mit „Abstand zur Ebene“ über dem Teil, Extrudieren › „Bis Fläche“, Deckfläche anklicken | Körper reicht genau bis zur Fläche (Richtung automatisch) | [ ] |
 | 18e.59 | Rechtsklick auf ein Feature › „Duplizieren“ | Kopie direkt dahinter („… (Kopie)“), z. B. zum Ändern der Kanten/Skizze | [ ] |
 | 18e.60 | Skizze: „Neigung“ 30°, um Achse „waagrecht“; Kreis, Extrudieren | schräg stehender Zylinder (Skizzenebene um ihre x-Achse gedreht); mit „Abstand zur Ebene“ kombinierbar | [ ] |
-| 18e.61 | Teil mit zwei Körpern (z. B. „Neuer Körper“) | Abschnitt „Körper (2)“ mit Name und Volumen; Überfahren markiert den Körper im Bild, Auge blendet ihn aus (nur Ansicht) | [ ] |
+| 18e.61 | Teil mit zwei Körpern (z. B. „Neuer Körper“) | Abschnitt „Körper (2)“ mit Name und Volumen; Überfahren markiert den Körper im Bild, Auge blendet ihn aus (nur Ansicht); Doppelklick auf den Namen benennt ihn um (Name erscheint in der Rechnung) | [ ] |
 | 18e.62 | Skizze: Linie, dann Tangentenbogen (G) am Linienende beginnen, Ende klicken; Q schaltet Hilfslinie um | Bogen schließt tangential an (Vorschau mit „R … · …°“), nächster Bogen gleich weiter, Esc beendet | [ ] |
 | 18e.63 | Im Verlauf eine (ausgeblendete) Skizze mit der Maus überfahren | Skizze erscheint solange blau im Bild | [ ] |
 | 18e.64 | Skizze: Kreis Ø100 um den Ursprung, Kreis Ø9 bei (35, 0) anklicken › „Muster …“ › Kreis × 6 › OK; Extrudieren | Lochkreis mit 6 Bohrungen (um den Ursprung bzw. einen mitgewählten Punkt); Extrudieren wählt die Scheibe mit Löchern automatisch | [ ] |
+| 18e.65 | Mehr › Körper verschieben: Körper anklicken, z = 25, Drehen um Z 45°, „Als Kopie“ | Kopie 25 mm höher und um 45° gedreht, Name „… (Kopie)“; ohne Kopie wird der Körper selbst bewegt | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
