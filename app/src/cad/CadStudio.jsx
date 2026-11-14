@@ -48,6 +48,7 @@ import {
   anchorRefs,
   anchorSketchPlane,
   sketchPlaneNow,
+  rebaseFeature,
 } from './features.js'
 import { offsetEnts } from './sketch.js'
 import { patternEnts, copyEntsInto, entsCenter } from './sketchTools.js'
@@ -566,7 +567,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (edit) return note('Erst das offene Feature bestätigen oder abbrechen')
     setSelSketch(null)
     const index = features.findIndex((g) => g.id === f.id)
-    setEdit({ id: f.id, draft: structuredClone(f), isNew: false, index })
+    // Bezüge an die aktuelle Lage (Skizze/Tiefe davor geändert): Markierungen im Bild stimmen, Kern bekommt dasselbe
+    setEdit({ id: f.id, draft: rebaseFeature(structuredClone(f), features), isNew: false, index })
     setSel(emptySel)
     setTool('select')
     setPickFor(null)

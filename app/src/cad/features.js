@@ -377,6 +377,35 @@ export function sketchPlaneNow(f, features) {
   return Math.abs(sh) < 1e-12 ? plane : { ...plane, origin: v3.add(plane.origin, v3.mul(n, sh)) }
 }
 
+// Bezug auf die aktuelle Lage nachziehen (Anker gleich mit), z. B. beim Öffnen zum Bearbeiten – ergibt für den Kern dasselbe
+function rebaseRef(r, features) {
+  const a = r?.anchor
+  if (!a || typeof r !== 'object') return r
+  const f = features.find((g) => g.id === a.s && g.type === 'sketch' && !g.suppressed)
+  const now = f?.sketch ? anchorPos(f.sketch, a) : null
+  if (!now) return r
+  const out = { ...r }
+  for (const k of ['center', 'mid', 'point', 'origin']) if (Array.isArray(r[k]) && r[k].length === 3) out[k] = follow(r, k, features)
+  const g = a.x != null ? features.find((h) => h.id === a.x && h.type === 'extrude') : null
+  const d1 = num(g?.depth)
+  out.anchor = { ...a, at: now, ...(g && a.d0 > 0 && d1 > 0 && !g.through && !g.upto ? { hz: (a.hz * d1) / a.d0, d0: d1 } : {}) }
+  return out
+}
+
+/// Feature zum Bearbeiten öffnen: Bezüge und Skizzenebene (auf Fläche) an die aktuelle Lage
+export function rebaseFeature(f, features) {
+  if (f.type === 'sketch') {
+    const face = f.sketch?.planeRef?.face
+    if (!face?.anchor) return f
+    const plane = sketchPlaneNow(f, features)
+    return { ...f, sketch: { ...f.sketch, plane, planeRef: { ...f.sketch.planeRef, face: rebaseRef(face, features) } } }
+  }
+  const out = { ...f }
+  for (const k of ['edges', 'faces', 'targets', 'tools']) if (Array.isArray(f[k])) out[k] = f[k].map((r) => rebaseRef(r, features))
+  for (const k of ['upto', 'at', 'moving', 'target', 'body']) if (f[k] && typeof f[k] === 'object' && !Array.isArray(f[k])) out[k] = rebaseRef(f[k], features)
+  return out
+}
+
 /// Skizze auf einer Fläche beim Bestätigen verankern
 export function anchorSketchPlane(f, before) {
   const face = f?.sketch?.planeRef?.face

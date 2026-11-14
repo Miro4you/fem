@@ -123,3 +123,22 @@ test('Skizze auf der Oberseite wandert mit, wenn die Platte dicker wird (Zapfen 
   const r2 = build({ features: kernelFeatures(old) })
   assert.ok(Math.abs(r2.tess.bbox[1][2] - 25) < 1e-6)
 })
+
+test('Zum Bearbeiten öffnen: nachgezogene Bezüge ergeben für den Kern dasselbe', async () => {
+  const { rebaseFeature, planeFromFace, anchorSketchPlane } = await import('../src/cad/features.js')
+  const { sk, features, ca } = model()
+  const edge = { mid: [24, 20, 10], dir: [0, 1, 0], kind: 'circle', center: [20, 20, 10], axis: [0, 0, 1], radius: 4, length: 25 }
+  const top = { center: [50, 20, 10], kind: 'plane', normal: [0, 0, 1] }
+  const fil = anchorRefs({ id: 3, type: 'fillet', name: 'Verrunden 1', edges: [edge], radius: '1' }, features)
+  const s2 = anchorSketchPlane({ id: 4, type: 'sketch', name: 'Skizze 2', sketch: (() => { const k = newSketch(planeFromFace(top), { face: top }); addEnt(k, { t: 'circle', c: addPoint(k, [70, 20]), r: 3 }); return k })() }, features)
+  const all = [...features, fil, s2]
+  sk.pts[ca].x = 60
+  all[1] = { ...all[1], depth: '25' }
+  const before = kernelFeatures(all)
+  const re = all.map((f) => rebaseFeature(f, all))
+  const after = kernelFeatures(re)
+  const close = (a, b) => JSON.stringify(a, (k, v) => (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v)) === JSON.stringify(b, (k, v) => (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v))
+  assert.ok(close(before, after), 'gleiches Ergebnis')
+  assert.ok(Math.abs(re[2].edges[0].center[0] - 60) < 1e-9 && Math.abs(re[2].edges[0].center[2] - 25) < 1e-9, JSON.stringify(re[2].edges[0].center))
+  assert.ok(Math.abs(re[3].sketch.plane.origin[2] - 25) < 1e-9, 'Skizze auf neuer Höhe')
+})
