@@ -865,6 +865,30 @@ export default function CadView({
     const hit = s.surf ? r.intersectObject(s.surf, false)[0] : null
     const depth = hit ? hit.distance : Infinity
     const curves = s.pickCurves ?? s.curves
+    if (want.vertices && curves?.length) {
+      // Eckpunkte (Kantenenden) und Kreismitten, nächster in Bildschirmpixeln, nicht hinter der getroffenen Fläche
+      const el = host.current
+      const rect = el.getBoundingClientRect()
+      const mx = ev.clientX - rect.left
+      const my = ev.clientY - rect.top
+      const v = new THREE.Vector3()
+      let best = null
+      const test = (p) => {
+        v.set(p[0], p[1], p[2])
+        const dist = v.clone().sub(r.ray.origin).dot(r.ray.direction)
+        v.project(s.camera)
+        const d = Math.hypot(((v.x + 1) / 2) * el.clientWidth - mx, ((1 - v.y) / 2) * el.clientHeight - my)
+        if (d < 12 && dist <= depth + 0.01 * s.size && (!best || d < best.d)) best = { d, p }
+      }
+      for (const c of curves) {
+        const n = c.pts.length
+        if (n >= 3) test(c.pts.slice(0, 3))
+        if (n >= 6) test(c.pts.slice(n - 3))
+        if (c.kind === 'circle' && c.center) test(c.center)
+      }
+      if (best) return { vertex: best.p, point: best.p }
+      if (!want.edges && !want.faces) return null
+    }
     if (want.edges && curves?.length) {
       // nächste Kante in Bildschirmpixeln, die nicht hinter der getroffenen Fläche liegt
       const el = host.current

@@ -191,8 +191,18 @@ function matchFaces(tess, refs) {
 const edgeRef = (c) => ({ mid: c.mid, dir: c.dir, kind: c.kind, ...(c.kind === 'circle' ? { center: c.center, axis: c.axis, radius: c.radius } : {}), length: c.length })
 /// Ebene parallel verschieben (Abstand entlang der Normalen)
 const shiftPlane = (plane, d) => (d ? { ...plane, origin: plane.origin.map((x, i) => x + basis(plane).n[i] * d) } : plane)
+/// Ebene durch drei Punkte (Ursprung im ersten, u zum zweiten) oder null, wenn sie auf einer Geraden liegen
+function planeFrom3([a, b, c]) {
+  const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+  const w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
+  const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]]
+  const l = Math.hypot(...n)
+  if (l < 1e-9 * Math.max(1, Math.hypot(...u) * Math.hypot(...w))) return null
+  return { origin: a, normal: n.map((x) => x / l), u }
+}
 /// Grundebene einer Skizze (ohne Abstand) aus ihrem Bezug
-const basePlaneOf = (sk) => (sk.planeRef?.std ? STD_PLANES[sk.planeRef.std] : sk.planeRef?.face?.normal ? planeFromFace(sk.planeRef.face) : null)
+const basePlaneOf = (sk) =>
+  sk.planeRef?.std ? STD_PLANES[sk.planeRef.std] : sk.planeRef?.face?.normal ? planeFromFace(sk.planeRef.face) : sk.planeRef?.pts3 ? planeFrom3(sk.planeRef.pts3) : null
 /// Ebene um ihre waagrechte (u) bzw. senkrechte (v) Achse durch den Ursprung neigen
 function tiltPlane(plane, axis, deg) {
   const a = (Number(deg) || 0) * (Math.PI / 180)
@@ -508,6 +518,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   // Feature mit einer bestimmten Skizze anlegen (Kontextmenü, „weiter mit“)
   // Bohrung: Punkte auf einer Fläche setzen (Skizze), nach „Skizze fertig“ geht der Bohrungsdialog auf
   const afterSketch = useRef(null)
+  const p3 = useRef(null) // Ebene durch drei Punkte: bisher angeklickte Punkte
+  useEffect(() => {
+    if (pickFor !== 'p3') p3.current = null
+  }, [pickFor])
   const startHolePoints = (face) => {
     afterSketch.current = 'hole'
     startSketch(face, 'point', `Bohrpunkte ${features.filter((f) => f.type === 'hole').length + 1}`)
@@ -867,6 +881,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     switch (pickFor) {
       case 'plane':
         return { std: true, planar: true }
+      case 'p3':
+        return { vertices: true }
       case 'edges':
         return { edges: true }
       case 'faces':
@@ -920,6 +936,23 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     }
     if (!edit || !h) return
     const d = edit.draft
+    if (pickFor === 'p3') {
+      if (!h.vertex) return note('Eine Ecke oder Kreismitte anklicken')
+      const pts = [...(p3.current ?? []), h.vertex]
+      p3.current = pts
+      if (pts.length < 3) return note(`Punkt ${pts.length} von 3 – nächsten Punkt anklicken`)
+      p3.current = null
+      const plane = planeFrom3(pts)
+      if (!plane) return note('Die drei Punkte liegen auf einer Geraden – andere wählen')
+      const ref = { pts3: pts }
+      if (d.sketch) setDraft({ sketch: { ...d.sketch, plane: sketchPlaneOf(plane, d.sketch), planeRef: ref } })
+      else setDraft({ sketch: newSketch(plane, ref) })
+      setSkInfo({ ok: true, dof: 0, free: new Set(), redundant: 0 })
+      setPickFor(null)
+      setTool(afterSketch.current === 'hole' ? 'point' : 'line')
+      setTimeout(() => viewRef.current?.lookAt(plane), 0)
+      return
+    }
     if (pickFor === 'plane') {
       const plane = h.std ? STD_PLANES[h.std] : h.face?.normal ? planeFromFace(h.face) : null
       if (!plane) return note('Eine Hauptebene oder eine ebene Fläche anklicken')
@@ -1954,6 +1987,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 mplane: 'Spiegelebene: Hauptebene oder ebene Fläche anklicken',
                 cyl: 'Radius- oder Bohrungsfläche (Zylinder) anklicken',
                 skaxis: 'Drehachse: eine gerade Linie der Skizze anklicken (Esc bricht ab)',
+                p3: 'Ebene durch 3 Punkte: Ecken oder Kreismitten des Bauteils nacheinander anklicken',
                 btarget: edit?.draft.op === 'union' ? 'Körper anklicken, die vereinigt werden (mindestens zwei)' : 'Zielkörper anklicken (von dem abgezogen bzw. geschnitten wird)',
                 btool: 'Werkzeugkörper anklicken',
                 upto: 'Ebene Fläche anklicken, bis zu der extrudiert wird (parallel zur Skizze)',
@@ -2146,7 +2180,10 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
 
       {d.type === 'sketch' && (
         <>
-          <PickButton active={pickFor === 'plane'} label="Ebene" value={sk ? (sk.planeRef?.std ? `Ebene ${sk.planeRef.std}` : 'Fläche') : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'plane' ? null : 'plane')} />
+          <PickButton active={pickFor === 'plane'} label="Ebene" value={sk ? (sk.planeRef?.std ? `Ebene ${sk.planeRef.std}` : sk.planeRef?.pts3 ? 'durch 3 Punkte' : 'Fläche') : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'plane' ? null : 'plane')} />
+          <button className={'btn small' + (pickFor === 'p3' ? ' on' : '')} title="Drei Ecken oder Kreismitten des Bauteils anklicken" onClick={() => setPickFor(pickFor === 'p3' ? null : 'p3')}>
+            Ebene durch 3 Punkte …
+          </button>
           {sk && basePlaneOf(sk) && (
             <>
               <Num

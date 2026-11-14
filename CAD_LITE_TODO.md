@@ -184,8 +184,11 @@ Weiter am 14.11.: Rippe, Formschräge, Tangentenbogen, Muster und Kopieren/Einf�
 Achse/Achse), Warnung bei Überschneidungen, Darstellungsmodi. Damit ist G6 in einer ersten Stufe da (Teile einfügen,
 anordnen, benennen); Lagebedingungen bleiben einmalig (keine dauerhaften Mates, keine Bewegung).
 
-Offen: dauerhafte Lagebedingungen, Normteile (Schraube/Mutter als Körper), Ebene durch drei Punkte, Torusflächen
-(Ecken zweier Rundungen) beim Flächen-Entfernen.
+Dazu: Normteile (Schraube/Mutter/Scheibe, direkt in Bohrungen), Rippe, Formschräge, STL-Export, Ebene durch drei
+Punkte. Ausrichten ist ein Feature im Verlauf und wird bei Änderungen neu angewandt (folgt verschobenen Flächen).
+
+Offen: Bewegung/Gelenke (kinematische Lagebedingungen), Torusflächen (Ecken zweier Rundungen) beim
+Flächen-Entfernen, Zeichnungsableitung.
 
 ## G6. Baugruppen (bis ~50 Teile)
 
