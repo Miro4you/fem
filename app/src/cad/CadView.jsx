@@ -561,9 +561,9 @@ export default function CadView({
       if (!mesh) continue
       const st = regionState?.[i] ?? {}
       const hov = i === regionHover
-      const col = st.on ? 0x2563eb : st.used ? 0x64748b : 0x94a3b8
-      mesh.material.color.set(st.hl ? 0xf59e0b : hov ? (st.on ? 0x1d4ed8 : 0x60a5fa) : col)
-      mesh.material.opacity = st.hl ? 0.55 : st.on ? (hov ? 0.5 : 0.36) : st.used ? (hov ? 0.4 : 0.28) : hov ? 0.3 : 0.1
+      const col = st.tint ? 0x60a5fa : st.on ? 0x2563eb : st.used ? 0x64748b : 0x94a3b8
+      mesh.material.color.set(st.hl ? 0xf59e0b : hov && !st.tint ? (st.on ? 0x1d4ed8 : 0x60a5fa) : col)
+      mesh.material.opacity = st.tint ? 0.16 : st.hl ? 0.55 : st.on ? (hov ? 0.5 : 0.36) : st.used ? (hov ? 0.4 : 0.28) : hov ? 0.3 : 0.1
     }
     s.dirty = true
   }, [regionState, regionHover, regions?.list])
@@ -697,6 +697,18 @@ export default function CadView({
       g.setAttribute('position', new THREE.Float32BufferAttribute(ptPos, 3))
       g.setAttribute('color', new THREE.Float32BufferAttribute(ptCol, 3))
       add(new THREE.Points(g, front(new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, vertexColors: true }))), 24)
+    }
+    // offene Enden (Kontur nicht geschlossen): rot hinterlegt
+    {
+      const cnt = new Map()
+      for (const e of sk.ents) if (!e.cons && (e.t === 'line' || e.t === 'arc')) for (const id of [e.a, e.b]) cnt.set(id, (cnt.get(id) ?? 0) + 1)
+      const tied = new Set(sk.cons.filter((k) => k.t === 'on' || k.t === 'mid' || k.t === 'co').flatMap((k) => [k.p, k.a, k.b]).filter(Boolean))
+      const open = [...cnt].filter(([id, n]) => n === 1 && !tied.has(id) && sk.pts[id]).map(([id]) => sk.pts[id])
+      if (open.length) {
+        const g = new THREE.BufferGeometry()
+        g.setAttribute('position', new THREE.Float32BufferAttribute(open.flatMap((p) => W([p.x, p.y])), 3))
+        add(new THREE.Points(g, front(new THREE.PointsMaterial({ size: 15, sizeAttenuation: false, color: 0xdc2626, transparent: true, opacity: 0.75 }))), 23)
+      }
     }
     // Ursprung der Welt, wenn er in der Skizzenebene liegt
     {
@@ -2122,7 +2134,7 @@ export default function CadView({
           />
         </form>
       )}
-      {regions?.list?.length > 0 && (
+      {regions?.list?.length > 0 && regions.onToggle && (
         <RegionClicks regions={regions} ctx={ctx} onPlane={onPlane} />
       )}
     </div>
@@ -2157,7 +2169,7 @@ function RegionClicks({ regions, ctx, onPlane }) {
     const u = (e) => {
       if (!down || down[2] !== 0 || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return
       const i = find(e)
-      if (i >= 0) ref.current.onToggle(i, e.altKey)
+      if (i >= 0) ref.current.onToggle?.(i, e.altKey)
     }
     const m = (e) => {
       if (pending) return

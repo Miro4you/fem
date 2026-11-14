@@ -1210,6 +1210,24 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regionKey])
   const regionInfo = regionKey ? (regionCache.get(regionKey) ?? null) : null
+  // beim Skizzieren: geschlossene Flächen leicht einfärben (kurz nach jeder Änderung neu bestimmt)
+  const skDraftKey = sketchEdit ? JSON.stringify(kernelSketch(sketchEdit.id, sketchEdit.sketch)) : null
+  const [skRegions, setSkRegions] = useState(null)
+  useEffect(() => {
+    if (!skDraftKey) return setSkRegions(null)
+    let stop = false
+    const t = setTimeout(() => {
+      const sk = JSON.parse(skDraftKey)
+      if (!sk.ents?.length) return !stop && setSkRegions(null)
+      cadBuildView({ base: null, features: [sk], regions_of: sk.id, tess: false })
+        .then((r) => !stop && setSkRegions({ plane: sk.plane, list: r.regions ?? [] }))
+        .catch(() => !stop && setSkRegions(null))
+    }, 250)
+    return () => {
+      stop = true
+      clearTimeout(t)
+    }
+  }, [skDraftKey])
   const anyFill = !!regionInfo?.some((r) => r.fill)
   const pickPt = (p) => (Array.isArray(p) ? p : p.pt)
   const onOf = (d, r) =>
@@ -2121,7 +2139,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           selected={shownSel}
           sketch={sketchProps}
           showPlanes={!sketchEdit && (showStd || !hasBody || pickFor === 'plane' || pickFor === 'mplane' || editingSketchEmpty)}
-          regions={regions}
+          regions={regions ?? (skRegions?.list?.length ? { plane: skRegions.plane, list: skRegions.list, state: skRegions.list.map((r) => ({ tint: r.evenodd !== false })) } : null)}
           axisLine={axisLine}
           sketches={bgSketches}
           onSketchPick={onSketchPick}

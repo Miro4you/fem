@@ -409,6 +409,8 @@ selbst starten.
 | 18e.93 | Skizze: Linie wählen, dreimal „Waagrecht“ | Nur eine Bedingung; danach Hinweis „ist schon gesetzt“. Ältere Skizzen mit Doppelten werden beim Öffnen bereinigt |  [ ] |
 | 18e.94 | Zwei Linien wählen → „Kollinear“ | Beide liegen auf einer Geraden (Zeichen ≡) |  [ ] |
 | 18e.95 | Zwei Linien + Mittellinie wählen → „Symmetrisch“; ebenso zwei Kreise + Linie | Linien spiegelbildlich zur Mittellinie (Achse wird automatisch erkannt); Kreise: Mitten spiegelbildlich, Radien gleich |  [ ] |
+| 18e.96 | Skizze: „Skizze fertig“ und der blaue Haken rechts im Bild | Beide schließen die Skizze; „Skizze fertig“ steht oben im Dialog, ✕ bricht ab |  [ ] |
+| 18e.97 | Skizze: geschlossenes Rechteck mit Kreis darin, daneben offener Linienzug | Rechteckfläche leicht blau, Kreis bleibt frei; die beiden offenen Enden des Linienzugs rot markiert |  [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
