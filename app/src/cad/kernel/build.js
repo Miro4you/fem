@@ -1,7 +1,7 @@
 // Neuer Geometriekern: OpenCASCADE (WebAssembly, über replicad) – führt die Feature-Liste aus wie cad.py
 // und liefert dieselbe Antwort ({ status, volume, bodies, bodies_info, tess, regions }).
 // Läuft im Web Worker (worker.js) und in Node (Tests). Vorher: setOC(oc) aus replicad.
-import { getOC, cast, makeLine, makeCircle, makeThreePointArc, makePolygon, basicFaceExtrusion, revolution, measureArea, measureShapeVolumeProperties, exportSTEP, Vector, assembleWire, genericSweep, loft } from 'replicad'
+import { getOC, cast, makeLine, makeCircle, makeThreePointArc, makePolygon, basicFaceExtrusion, revolution, measureArea, measureShapeVolumeProperties, measureDistanceBetween, exportSTEP, Vector, assembleWire, genericSweep, loft } from 'replicad'
 import { arcAngles, entRadius, pruneOpen, crossings, insidePoly, interiorPoint, inFills, chainLoops } from './geom2d.js'
 
 export class Problem extends Error {}
@@ -1058,6 +1058,68 @@ function booleanOp(model, f, warn) {
   void vol0
 }
 
+/// Rippe: je Linie der Skizze den Spalt zwischen Linie und Bauteil (in der Skizzenebene) mit der Dicke t füllen.
+/// Für beide Seiten der Linie wird ein Streifen bis weit hinaus gebildet; vom Streifen ohne Bauteil bleibt das Stück,
+/// das an der Linie liegt – auf der Seite, wo es endlich (kleiner) ist.
+function ribOp(model, f, sketches, warn) {
+  const sk = sketchOf(f, sketches, 'Rippe')
+  const t = Number(f.thickness) || 0
+  if (t <= 0) throw new Problem('Rippe: Dicke muss größer als 0 sein')
+  if (!model.bodies.length) throw new Problem('Rippe: Es gibt noch keinen Körper')
+  const lines = (sk.ents ?? []).filter((e) => e.t === 'line')
+  if (!lines.length) throw new Problem('Rippe: Die Skizze braucht mindestens eine Linie (von Wand zu Wand)')
+  const B = planeBasis(sk.plane)
+  const D = 2 * model.diag()
+  const part = fuseAll(model.shapes).reduce((a, x) => (a ? a.fuse(x) : x), null)
+  const ribs = []
+  for (const e of lines) {
+    const a = e.a
+    const b = e.b
+    const d = [b[0] - a[0], b[1] - a[1]]
+    const L = Math.hypot(d[0], d[1])
+    if (L < 1e-9) continue
+    const u = [d[0] / L, d[1] / L]
+    const n = [-u[1], u[0]]
+    const best = []
+    for (const sgn of [1, -1]) {
+      const q = (p, k) => [p[0] + n[0] * k * sgn, p[1] + n[1] * k * sgn]
+      // Streifen: Linie, dann senkrecht weit hinaus (Linie minimal überstehend)
+      const ext = 1e-3 * L
+      const a0 = [a[0] - u[0] * ext, a[1] - u[1] * ext]
+      const b0 = [b[0] + u[0] * ext, b[1] + u[1] * ext]
+      const poly = [a0, b0, q(b0, D), q(a0, D)].map((p) => to3(B, p))
+      const face = makePolygon(poly).translate(mul(B.n, -t / 2))
+      const strip = basicFaceExtrusion(face, new Vector(mul(B.n, t)))
+      let pieces = []
+      try {
+        pieces = solidsOf(strip.cut(part))
+      } catch {
+        pieces = []
+      }
+      // nur Stücke, die an der Linie anliegen (Abstand zur Linie ≈ 0)
+      const seg = makeLine(to3(B, [a[0] + u[0] * 0.25 * L, a[1] + u[1] * 0.25 * L]), to3(B, [b[0] - u[0] * 0.25 * L, b[1] - u[1] * 0.25 * L]))
+      const touch = pieces.filter((x) => {
+        try {
+          return measureDistanceBetween(x, seg) < 1e-6 * D
+        } catch {
+          return false
+        }
+      })
+      const vol = touch.reduce((s2, x) => s2 + volumeOf(x), 0)
+      best.push({ touch, vol })
+    }
+    best.sort((x, y) => x.vol - y.vol)
+    const pick = best.find((x) => x.touch.length && x.vol > 0)
+    if (!pick || pick.vol > 0.5 * t * D * L) {
+      warn.push('Rippe: eine Linie liegt nicht zwischen zwei Wänden – sie wurde ausgelassen')
+      continue
+    }
+    ribs.push(...pick.touch)
+  }
+  if (!ribs.length) throw new Problem('Rippe: keine Linie verbindet zwei Wände des Bauteils – Linie von Wand zu Wand zeichnen')
+  combine(model, 'add', ribs, warn)
+}
+
 /// Drehung, die Richtung a auf Richtung b dreht (kürzester Weg), um einen Punkt
 function trsfAlign(p, a, b) {
   const ax = cross(a, b)
@@ -1365,6 +1427,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'boolean') booleanOp(model, f, warn)
   else if (f.type === 'movebody') moveBody(model, f, warn)
   else if (f.type === 'align') alignBody(model, f, warn)
+  else if (f.type === 'rib') ribOp(model, f, sketches, warn)
   else if (f.type === 'import') importPart(model, f)
   else if (f.type === 'refillet') refillet(model, f, warn)
   else if (f.type === 'rehole') rehole(model, f, warn)

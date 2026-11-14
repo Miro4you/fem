@@ -424,3 +424,23 @@ test('Ausrichten: Fläche auf Fläche und Bolzen in Bohrung', () => {
   const c2 = r2.bodies_info.find((b) => b.name === 'Bolzen').center
   assert.ok(Math.abs(c2[2] - 25) < 1e-6 && Math.abs(c2[0] - 100) < 1e-6, `Bolzen steht auf der Platte: ${c2}`)
 })
+
+test('Rippe: Linie quer durch die Ecke eines Winkels', () => {
+  clearCache()
+  // Winkel: L-Profil (Schenkel 40 lang, 5 dick) in XZ, 30 tief in y
+  const L = [[0, 0], [40, 0], [40, 5], [5, 5], [5, 40], [0, 40]]
+  const ents = L.map((a, i) => ({ t: 'line', a, b: L[(i + 1) % L.length] }))
+  const xzp = { origin: [0, 0, 0], normal: [0, -1, 0], u: [1, 0, 0] }
+  const mid = { origin: [0, 15, 0], normal: [0, -1, 0], u: [1, 0, 0] }
+  const features = [
+    { id: 1, type: 'sketch', plane: xzp, ents },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 30, dir: -1 },
+    { id: 3, type: 'sketch', plane: mid, ents: [{ t: 'line', a: [30, 5], b: [5, 30] }] },
+    { id: 4, type: 'rib', sketch: 3, thickness: 4 },
+  ]
+  const r = build({ features })
+  allOk(r)
+  assert.equal(r.bodies, 1)
+  const angle = (40 * 5 + 35 * 5) * 30
+  near(r.volume, angle + 0.5 * 25 * 25 * 4, 1e-6, 'Winkel + dreieckige Rippe 25 × 25 × 4')
+})

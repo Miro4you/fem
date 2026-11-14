@@ -71,6 +71,7 @@ const FEATURE_ICON = {
   movebody: I.IcMoveBody,
   import: I.IcImportPart,
   align: I.IcAlign,
+  rib: I.IcRib,
   sweep: I.IcSweep,
   loft: I.IcLoft,
   refillet: I.IcFillet,
@@ -132,6 +133,7 @@ const PART_KEYS = { s: 'sketch', e: 'extrude', r: 'revolve', h: 'hole', f: 'fill
 const PART_KEY_OF = Object.fromEntries(Object.entries(PART_KEYS).map(([k, v]) => [v, k.toUpperCase()]))
 // seltener gebraucht: im Menü „Mehr“
 const MORE_TOOLS = [
+  ['rib', 'Rippe: Linie in einer Skizze quer durch die Ecke – füllt mit der Dicke bis zu den Wänden'],
   ['sweep', 'Sweep: Profil-Skizze entlang einer Pfad-Skizze (z. B. Rohr, Bügel)'],
   ['loft', 'Loft: Übergang zwischen zwei oder mehr Skizzen'],
   ['moveface', 'Ebene Fläche verschieben (z. B. Wand dicker)'],
@@ -476,7 +478,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (['shell', 'removefaces'].includes(type) && pre.faces.length) draft.faces = pre.faces
     if (type === 'moveface' && pre.faces.length) draft.faces = pre.faces.filter((f) => f.kind === 'plane')
     const lastSketch = [...live].reverse().find((f) => f.type === 'sketch' && !f.suppressed)
-    if (['extrude', 'revolve', 'hole'].includes(type) && lastSketch) draft.sketch = lastSketch.id
+    if (['extrude', 'revolve', 'hole', 'rib'].includes(type) && lastSketch) draft.sketch = lastSketch.id
     // Skizze schon von einem anderen Feature benutzt: nichts vorwählen, Flächen im Bild anklicken
     if ((type === 'extrude' || type === 'revolve') && lastSketch && features.some((f) => (f.type === 'extrude' || f.type === 'revolve') && f.sketch === lastSketch.id && !f.suppressed))
       draft.regions = []
@@ -2473,6 +2475,14 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
             <input type="checkbox" checked={!!d.ruled} onChange={(e) => setDraft({ ruled: e.target.checked })} /> Gerade Übergänge (statt weich)
           </label>
           {modeSel}
+        </>
+      )}
+
+      {d.type === 'rib' && (
+        <>
+          {sketchSel}
+          <Num label="Dicke" value={d.thickness} onChange={(thickness) => setDraft({ thickness })} />
+          <p className="hint">Skizze in einer Ebene quer durch das Teil (z. B. Mittelebene mit „Abstand zur Ebene“), darin eine Linie von Wand zu Wand. Die Rippe füllt den Spalt zwischen Linie und Wänden, symmetrisch zur Skizzenebene.</p>
         </>
       )}
 

@@ -158,6 +158,14 @@ export const IcAlign = (p) => (
   </Svg>
 )
 
+export const IcRib = (p) => (
+  <Svg {...p}>
+    <path d="M3 20h18M3 20V4" />
+    <path d="M3 20V4h3v13h15v3z" className={F} />
+    <path d="M6 17 18 5M6 13l8-8" className={A} />
+  </Svg>
+)
+
 export const IcSweep = (p) => (
   <Svg {...p}>
     <ellipse cx="5.5" cy="17.5" rx="2.5" ry="3" className={F} />
