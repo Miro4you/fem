@@ -290,6 +290,7 @@ export function problemOf(f, features) {
 const ANCHOR_TOL = 1e-3
 
 function anchorPos(sk, a) {
+  if (a.q) return to3d(sk.plane, a.q)
   if (a.p != null) {
     const q = sk.pts?.[a.p]
     return q ? to3d(sk.plane, [q.x, q.y]) : null
@@ -302,7 +303,7 @@ function anchorPos(sk, a) {
 }
 
 /// Anker eines Punkts im Raum: Skizzenpunkt oder Linienmitte einer der Skizzen, auf die er senkrecht fällt (spätere Skizze gewinnt)
-export function anchorFor(features, p) {
+export function anchorFor(features, p, normal = null) {
   if (!Array.isArray(p) || p.length !== 3) return null
   let best = null
   for (const f of features) {
@@ -325,7 +326,7 @@ export function anchorFor(features, p) {
       if (dist < ANCHOR_TOL && (!best || dist <= best.dist)) best = { dist, f, a: { s: f.id, ...c, at } }
     }
   }
-  if (!best) return null
+  if (!best) return normal ? capAnchor(features, p, normal) : null
   // Höhe innerhalb einer Extrusion dieser Skizze: ändert sich die Tiefe, wandert der Bezug anteilig mit (Deckel ganz)
   const b = basis(best.f.sketch.plane)
   const hz = v3.dot(v3.sub(p, best.a.at), b.n)
@@ -340,6 +341,50 @@ export function anchorFor(features, p) {
   return best.a
 }
 
+// Ebene Fläche parallel zu einer Skizze genau auf Höhe eines Extrusionsendes (Deckel): folgt Tiefe und Skizzenebene
+function capAnchor(features, p, normal) {
+  let out = null
+  const nn = v3.unit(normal)
+  for (const f of features) {
+    if (f.type !== 'sketch' || f.suppressed || !f.sketch?.plane) continue
+    const b = basis(f.sketch.plane)
+    if (Math.abs(v3.dot(nn, b.n)) < 0.9999) continue
+    const q = to2d(f.sketch.plane, p)
+    const at = to3d(f.sketch.plane, q)
+    const hz = v3.dot(v3.sub(p, at), b.n)
+    for (const g of features) {
+      if (g.type !== 'extrude' || g.sketch !== f.id || g.suppressed || g.through || g.upto) continue
+      const d = num(g.depth)
+      if (!(d > 0)) continue
+      const lo = g.symmetric ? -d / 2 : g.flip ? -d : 0
+      const hi = g.symmetric ? d / 2 : g.flip ? 0 : d
+      if (Math.abs(hz - hi) < ANCHOR_TOL || Math.abs(hz - lo) < ANCHOR_TOL) out = { s: f.id, q, at, ...(Math.abs(hz) > ANCHOR_TOL ? { x: g.id, hz, d0: d } : {}) }
+    }
+  }
+  return out
+}
+
+/// Ebene einer Skizze auf einer Fläche, wie sie jetzt liegt: die Fläche ist (über ihren Anker) mitgewandert,
+/// die Skizze folgt entlang ihrer Normalen (z. B. Platte dicker → Skizze auf der Oberseite wandert mit)
+export function sketchPlaneNow(f, features) {
+  const plane = f?.sketch?.plane
+  const face = f?.sketch?.planeRef?.face
+  if (!plane || !face?.anchor || !features) return plane
+  const now = follow(face, 'center', features)
+  if (!now || !face.center) return plane
+  const n = basis(plane).n
+  const sh = v3.dot(v3.sub(now, face.center), n)
+  return Math.abs(sh) < 1e-12 ? plane : { ...plane, origin: v3.add(plane.origin, v3.mul(n, sh)) }
+}
+
+/// Skizze auf einer Fläche beim Bestätigen verankern
+export function anchorSketchPlane(f, before) {
+  const face = f?.sketch?.planeRef?.face
+  if (!face || face.anchor != null || !face.center) return f
+  const anchor = anchorFor(before, face.center, face.kind === 'plane' || face.normal ? face.normal : null) ?? false
+  return { ...f, sketch: { ...f.sketch, planeRef: { ...f.sketch.planeRef, face: { ...face, anchor } } } }
+}
+
 // Bezugspunkt einer Kante/Fläche für den Anker: Kreiskante über ihre Mitte, sonst Kantenmitte bzw. Flächenmitte
 const refPoint = (r) => (r?.kind === 'circle' && r.center ? r.center : r?.mid ?? r?.center)
 
@@ -349,7 +394,7 @@ export function anchorRefs(f, before) {
     if (!r || typeof r !== 'object' || Array.isArray(r) || r.anchor != null) return r
     const pt = refPoint(r)
     if (!pt) return r
-    return { ...r, anchor: anchorFor(before, pt) ?? false }
+    return { ...r, anchor: anchorFor(before, pt, r.kind === 'plane' ? r.normal : null) ?? false }
   }
   const out = { ...f }
   for (const k of ['edges', 'faces', 'targets', 'tools']) if (Array.isArray(f[k])) out[k] = f[k].map(one)
@@ -396,8 +441,11 @@ const fillsArg = (f) => (f.regions != null ? false : f.fillGroup ? { group: f.fi
 export function kernelFeature(f, features) {
   const sk = (id) => features.find((g) => g.id === id)
   switch (f.type) {
-    case 'sketch':
-      return kernelSketch(f.id, f.sketch)
+    case 'sketch': {
+      const ks = kernelSketch(f.id, f.sketch)
+      const plane = sketchPlaneNow(f, features)
+      return plane === ks.plane ? ks : { ...ks, plane }
+    }
     case 'extrude':
       return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.bodyName || undefined, subtract: f.subtract !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through && !f.upto, ...(f.upto ? { upto: faceHint(f.upto, features) } : {}) }
     case 'revolve': {

@@ -398,6 +398,7 @@ selbst starten.
 | 18e.82 | Rechteck 60 × 40 (Zahl tippen), extrudieren, senkrechte Kante bei (60; 40) mit R5 verrunden; dann Skizze 1 öffnen, Maß 60 per Doppelklick auf 200 ändern | Rundung sitzt danach an der Ecke bei x = 200 (nicht bei x = 0); Volumen 79,946 cm³ |  [ ] |
 | 18e.83 | Platte extrudieren (Tiefe 10), obere Längskante verrunden, dann im Extrudieren die Tiefe auf 25 stellen | Rundung bleibt oben an der Kante (nicht unten) |  [ ] |
 | 18e.84 | Älteres Projekt (vor heute gespeichert) mit Verrundung öffnen, davor ein Skizzenmaß stark ändern | Liegt die Rundung danach nicht mehr eindeutig: Warnsymbol am Feature „Kante nicht eindeutig wiedergefunden – im Bild prüfen“; in neuen Projekten (18e.82/83) keine Warnung |  [ ] |
+| 18e.85 | Platte 60 × 40 × 10, Skizze auf der Oberseite mit Kreis Ø10, extrudieren 10 (Zapfen); dann Extrudieren 1 auf Tiefe 25 | Zapfen sitzt oben auf der dickeren Platte (Höhe gesamt 35), Volumen 60,785 cm³ |  [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

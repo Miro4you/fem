@@ -97,3 +97,29 @@ test('Verrundung an der oberen Kante bleibt oben, wenn die Platte dicker wird (T
   const vol = 100 * 40 * 25 - 2 * Math.PI * 16 * 25 - (1 - Math.PI / 4) * 16 * 100
   assert.ok(Math.abs(r.volume - vol) < 1e-6 * vol, `${r.volume} statt ${vol}`)
 })
+
+test('Skizze auf der Oberseite wandert mit, wenn die Platte dicker wird (Zapfen bleibt oben)', async () => {
+  clearCache()
+  const { planeFromFace } = await import('../src/cad/features.js')
+  const { anchorSketchPlane } = await import('../src/cad/features.js')
+  const { features } = model()
+  const top = { center: [50, 20, 10], kind: 'plane', normal: [0, 0, 1] }
+  const sk2 = newSketch(planeFromFace(top), { face: top })
+  addEnt(sk2, { t: 'circle', c: addPoint(sk2, [70, 20]), r: 5 })
+  let s2 = { id: 3, type: 'sketch', name: 'Skizze 2', sketch: sk2 }
+  s2 = anchorSketchPlane(s2, features)
+  assert.ok(s2.sketch.planeRef.face.anchor, 'Fläche verankert')
+  const boss = { id: 4, type: 'extrude', name: 'Zapfen', sketch: 3, regions: null, useFills: true, mode: 'add', depth: '10', flip: false, symmetric: false, through: false }
+  const all = [...features, s2, boss]
+  const r0 = build({ features: kernelFeatures(all), tess: false })
+  assert.ok(r0.status.every((s) => s.ok), JSON.stringify(r0.status))
+  all[1] = { ...all[1], depth: '25' }
+  const r = build({ features: kernelFeatures(all) })
+  assert.ok(r.status.every((s) => s.ok), JSON.stringify(r.status))
+  assert.ok(Math.abs(r.tess.bbox[1][2] - 35) < 1e-6, `Oberkante ${r.tess.bbox[1][2]} statt 35`)
+  // ohne Anker (alte Projekte): Zapfen bliebe in der Platte stecken
+  const old = [...all]
+  old[2] = { ...s2, sketch: { ...s2.sketch, planeRef: { face: top } } }
+  const r2 = build({ features: kernelFeatures(old) })
+  assert.ok(Math.abs(r2.tess.bbox[1][2] - 25) < 1e-6)
+})

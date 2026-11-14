@@ -212,7 +212,8 @@ Tastenkürzel.
    **Bis hier zurückrollen** (neue Features kommen an die Marke), Löschen. Fehler stehen rot am Feature.
    Gewählte Kanten und Flächen (Verrunden, Fase, Bohrung ändern, bis Fläche …) merken sich den Skizzenpunkt, über
    dem sie liegen (Ecke, Kreismitte, Linie) und die Höhe in der Extrusion: wird die Skizze oder die Tiefe später
-   geändert, wandern sie mit. Ist ein Bezug trotzdem nicht eindeutig, warnt das Feature (Symbol im Verlauf).
+   geändert, wandern sie mit – ebenso Skizzen auf Flächen (Platte dicker → Zapfen bleibt oben). Ist ein Bezug
+   trotzdem nicht eindeutig, warnt das Feature (Symbol im Verlauf).
 6. **Messen**, **Schnittansicht** und **Darstellung** (mit/ohne Kanten, durchsichtig, Drahtgitter) rechts oben im Bild; **„In die Rechnung übernehmen“** baut das Teil als STEP,
    vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP“** bzw. **„Als STL“** (3D-Druck) exportiert es,
    **„Zeichnung …“** zeigt ein Blatt mit drei Ansichten (verdeckte Kanten gestrichelt), Isometrie, Gesamtmaßen,

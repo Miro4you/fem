@@ -46,6 +46,8 @@ import {
   num,
   fmtField,
   anchorRefs,
+  anchorSketchPlane,
+  sketchPlaneNow,
 } from './features.js'
 import { offsetEnts } from './sketch.js'
 import { patternEnts, copyEntsInto, entsCenter } from './sketchTools.js'
@@ -582,7 +584,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (!edit) return
     // gewählte Kanten/Flächen an ihre Skizzenpunkte binden (folgen späteren Änderungen der Skizze)
     const at = edit.isNew ? edit.index : features.findIndex((f) => f.id === edit.draft.id)
-    const d = edit.draft.type === 'sketch' ? edit.draft : anchorRefs(edit.draft, features.slice(0, at < 0 ? features.length : at))
+    const before = features.slice(0, at < 0 ? features.length : at)
+    const d = edit.draft.type === 'sketch' ? anchorSketchPlane(edit.draft, before) : anchorRefs(edit.draft, before)
     if (d.type === 'sketch' && !d.sketch) return cancel()
     const prob = problemOf(d, [...features.slice(0, edit.index), d])
     if (prob && d.type !== 'sketch') return note(prob)
@@ -1357,7 +1360,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     const used = edit?.draft?.sketch
     return features
       .filter((f) => f.type === 'sketch' && !f.suppressed && f.id !== sketchEdit?.id && f.sketch?.ents?.length && (!sketchHidden(f) || used === f.id || selSketch === f.id || hotSketch === f.id))
-      .map((f) => ({ id: f.id, plane: f.sketch.plane, data: f.sketch, active: used === f.id || selSketch === f.id || hotSketch === f.id, highlightEnts: pickFor === 'skaxis' && used === f.id }))
+      .map((f) => ({ id: f.id, plane: sketchPlaneNow(f, features), data: f.sketch, active: used === f.id || selSketch === f.id || hotSketch === f.id, highlightEnts: pickFor === 'skaxis' && used === f.id }))
   }, [features, showSketches, edit?.draft?.sketch, sketchEdit?.id, selSketch, pickFor, hotSketch])
   const onSketchPick = (id, open, ent) => {
     if (edit) {
