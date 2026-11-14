@@ -1058,6 +1058,51 @@ function booleanOp(model, f, warn) {
   void vol0
 }
 
+/// Teilen an einer Ebene: alle Körper (oder einer) zerschneiden; behalten: beide Seiten, nur vorne (Normalenseite)
+/// oder nur hinten – z. B. für Symmetrie in der Rechnung
+function splitOp(model, f, warn) {
+  const pl = f.plane
+  if (!pl) throw new Problem('Teilen: Ebene wählen')
+  const n = unit(pl.normal)
+  const D = 4 * model.diag() + 10
+  // großer Quader auf der Normalenseite der Ebene
+  const w = unit(Math.abs(n[0]) < 0.9 ? cross(n, [1, 0, 0]) : cross(n, [0, 1, 0]))
+  const v = cross(n, w)
+  const c = pl.origin
+  const corner = (a, b) => add(add(c, mul(w, a * D)), mul(v, b * D))
+  const face = makePolygon([corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)])
+  const front = basicFaceExtrusion(face, new Vector(mul(n, D)))
+  const keep = f.keep ?? 'both'
+  const out = []
+  let cutAny = false
+  for (const b of model.bodies) {
+    const pieces = []
+    let a = []
+    let z = []
+    try {
+      if (keep !== 'back') a = solidsOf(bool('common', b.shape, front))
+      if (keep !== 'front') z = solidsOf(b.shape.cut(front))
+    } catch {
+      throw new Problem('Teilen: dieser Körper lässt sich an der Ebene nicht zerschneiden')
+    }
+    const va = a.reduce((s2, x) => s2 + volumeOf(x), 0)
+    const vz = z.reduce((s2, x) => s2 + volumeOf(x), 0)
+    const v0 = massOf(b).volume
+    if ((keep === 'both' && (va < 1e-9 * v0 || vz < 1e-9 * v0)) || (keep === 'front' && Math.abs(va - v0) < 1e-9 * v0) || (keep === 'back' && Math.abs(vz - v0) < 1e-9 * v0)) {
+      // Ebene trifft den Körper nicht: unverändert lassen (bzw. ganz weg, wenn er auf der verworfenen Seite liegt)
+      if ((keep === 'front' && va > 0) || (keep === 'back' && vz > 0) || keep === 'both') out.push(b)
+      continue
+    }
+    cutAny = true
+    pieces.push(...a.map((x, i) => ({ shape: x, name: b.name ? (keep === 'both' ? `${b.name} (1)` : b.name) : null, src: b.src, k: i })))
+    pieces.push(...z.map((x, i) => ({ shape: x, name: b.name ? (keep === 'both' ? `${b.name} (2)` : b.name) : null, src: b.src, k: i })))
+    for (const p of pieces) out.push({ shape: p.shape, name: p.name, src: p.src })
+  }
+  if (!out.length) throw new Problem('Teilen: es bliebe nichts übrig – andere Seite behalten')
+  if (!cutAny) warn.push('Die Ebene schneidet keinen Körper')
+  model.bodies = out
+}
+
 // Normteile (vereinfacht, ohne Gewinde): Zylinderschraube ISO 4762, Sechskantmutter ISO 4032, Scheibe ISO 7089
 const STD = {
   M3: { d: 3, dk: 5.5, k: 3, s: 2.5, t: 1.3, ns: 5.5, m: 2.4, w1: 3.2, w2: 7, h: 0.5 },
@@ -1537,6 +1582,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'rib') ribOp(model, f, sketches, warn)
   else if (f.type === 'draft') draftOp(model, f, warn)
   else if (f.type === 'stdpart') stdPart(model, f)
+  else if (f.type === 'split') splitOp(model, f, warn)
   else if (f.type === 'import') importPart(model, f)
   else if (f.type === 'refillet') refillet(model, f, warn)
   else if (f.type === 'rehole') rehole(model, f, warn)

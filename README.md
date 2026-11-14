@@ -202,7 +202,8 @@ Tastenkürzel.
    Material.
 4. **Verrunden / Fase** (F/C): Kanten anklicken (tangentiale Kette kommt mit, Alt = nur eine), Vorschau sofort.
    **Muster**, **Spiegeln**, **Schale**; im Menü „Mehr“: *Formen* – Rippe, Sweep, Loft; *Ändern* – Fläche verschieben,
-   **Flächen entfernen** (Bohrung, Senkung, gerade Verrundung, Fase), **Formschräge**; *Körper und Baugruppe* –
+   **Flächen entfernen** (Bohrung, Senkung, gerade Verrundung, Fase), **Teilen** an einer Ebene (z. B. nur die Hälfte
+   rechnen), **Formschräge**; *Körper und Baugruppe* –
    **Boolesch**, **Körper verschieben/drehen** (auch als Kopie), **Teil einfügen** (STEP), **Ausrichten** (Fläche auf
    Fläche, Bolzen in Bohrung), **Normteil** (Zylinderschraube ISO 4762, Mutter ISO 4032, Scheibe ISO 7089 – direkt in
    eine Bohrung setzbar). Beim importierten Teil **Radius/Bohrung ändern**. Die **Körperliste** zeigt alle Körper

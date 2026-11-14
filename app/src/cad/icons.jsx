@@ -184,6 +184,14 @@ export const IcStdPart = (p) => (
   </Svg>
 )
 
+export const IcSplit = (p) => (
+  <Svg {...p}>
+    <path d="M4 7h7v10H4z" className={F} />
+    <path d="M4 7h7v10H4zM13 7h7v10h-7z" />
+    <path d="M12 3v18" className={A} strokeDasharray="2 1.6" />
+  </Svg>
+)
+
 export const IcSweep = (p) => (
   <Svg {...p}>
     <ellipse cx="5.5" cy="17.5" rx="2.5" ry="3" className={F} />

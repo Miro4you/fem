@@ -20,6 +20,7 @@ export const FEATURE_LABEL = {
   rib: 'Rippe',
   draft: 'Formschräge',
   stdpart: 'Normteil',
+  split: 'Teilen',
   sweep: 'Sweep',
   loft: 'Loft',
   refillet: 'Radius ändern',
@@ -164,6 +165,8 @@ export function defaults(type) {
       return { faces: [], plane: { std: 'XY' }, angle: '3', flip: false }
     case 'stdpart':
       return { kind: 'bolt', size: 'M8', length: '30' }
+    case 'split':
+      return { plane: { std: 'YZ' }, keep: 'front' }
     case 'movebody':
       return { body: null, dx: '0', dy: '0', dz: '0', axis: 'z', angle: '0', copy: false }
     case 'sweep':
@@ -248,6 +251,8 @@ export function problemOf(f, features) {
       return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
     case 'import':
       return f.text ? null : 'STEP-Datei fehlt'
+    case 'split':
+      return planeOf(f.plane) ? null : 'Ebene wählen'
     case 'stdpart':
       return f.kind !== 'bolt' || pos(f.length) ? null : 'Schraubenlänge angeben'
     case 'draft':
@@ -345,6 +350,8 @@ export function kernelFeature(f, features) {
       return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
+    case 'split':
+      return { id: f.id, type: 'split', plane: planeOf(f.plane), keep: f.keep }
     case 'stdpart':
       return { id: f.id, type: 'stdpart', kind: f.kind, size: f.size, length: num(f.length), name: f.bodyName, at: f.at ? faceHint(f.at) : null, otherSide: !!f.otherSide }
     case 'draft':

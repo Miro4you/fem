@@ -513,3 +513,23 @@ test('STL für den 3D-Druck', async () => {
   assert.equal(buf.length, 84 + 50 * n, 'binäres STL')
   assert.ok(n >= 12, `${n} Dreiecke`)
 })
+
+test('Teilen an einer Ebene: Hälfte für Symmetrie, beide Seiten', () => {
+  clearCache()
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: [...rect(-30, -20, 30, 20), { t: 'circle', c: [0, 0], r: 5 }] },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1, bodyName: 'Platte' },
+  ]
+  const full = 60 * 40 * 10 - PI * 25 * 10
+  const yz = { origin: [0, 0, 0], normal: [1, 0, 0] }
+  const h = build({ features: [...base, { id: 3, type: 'split', plane: yz, keep: 'front' }] })
+  allOk(h)
+  assert.equal(h.bodies, 1)
+  near(h.volume, full / 2, 1e-6, 'Hälfte (x > 0)')
+  assert.ok(h.bodies_info[0].center[0] > 0)
+  const b = build({ features: [...base, { id: 3, type: 'split', plane: yz, keep: 'both' }] })
+  allOk(b)
+  assert.equal(b.bodies, 2)
+  assert.deepEqual(b.bodies_info.map((x) => x.name).sort(), ['Platte (1)', 'Platte (2)'])
+  near(b.volume, full, 1e-6, 'beide Hälften')
+})

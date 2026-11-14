@@ -75,6 +75,7 @@ const FEATURE_ICON = {
   rib: I.IcRib,
   draft: I.IcDraft,
   stdpart: I.IcStdPart,
+  split: I.IcSplit,
   sweep: I.IcSweep,
   loft: I.IcLoft,
   refillet: I.IcFillet,
@@ -143,6 +144,7 @@ const MORE_TOOLS = [
   ['loft', 'Loft: Übergang zwischen zwei oder mehr Skizzen'],
   ['moveface', 'Ebene Fläche verschieben (z. B. Wand dicker)'],
   ['removefaces', 'Flächen entfernen (z. B. Bohrung oder Radius weg)'],
+  ['split', 'Teilen: Körper an einer Ebene zerschneiden – z. B. nur die Hälfte rechnen (Symmetrie)'],
   ['draft', 'Formschräge: Seitenflächen neigen (Guss, Spritzguss) – neutrale Ebene behält das Maß'],
   ['boolean', 'Boolesch: Körper vereinigen, voneinander abziehen oder Schnittmenge'],
   ['movebody', 'Körper verschieben oder drehen (auch als Kopie) – z. B. Teile zueinander anordnen'],
@@ -1142,7 +1144,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       const bs = new Set([...bodiesOf(d.targets ?? []), ...bodiesOf(d.tools ?? [])])
       for (const x of t?.surfaces ?? []) if (bs.has(x.body)) out.faces.add(x.tag)
     }
-    if ((d.type === 'mirror' || d.type === 'draft') && d.plane?.std) out.std.add(d.plane.std)
+    if ((d.type === 'mirror' || d.type === 'draft' || d.type === 'split') && d.plane?.std) out.std.add(d.plane.std)
     if (d.type === 'draft' && d.plane?.face) for (const t of matchFaces(viewTess, [d.plane.face])) out.faces.add(t)
     if (d.type === 'mirror' && d.plane?.face) out.faces = matchFaces(viewTess, [d.plane.face])
     if ((d.type === 'refillet' || d.type === 'rehole') && d.surfaces) out.faces = matchFaces(viewTess, d.surfaces.map((c) => ({ center: c })))
@@ -2621,6 +2623,22 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
             <input type="checkbox" checked={!!d.ruled} onChange={(e) => setDraft({ ruled: e.target.checked })} /> Gerade Übergänge (statt weich)
           </label>
           {modeSel}
+        </>
+      )}
+
+      {d.type === 'split' && (
+        <>
+          <PickButton active={pickFor === 'mplane'} label="Ebene" value={d.plane?.std ? `Ebene ${d.plane.std}` : d.plane?.face ? 'Fläche' : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'mplane' ? null : 'mplane')} />
+          <Seg
+            value={d.keep}
+            onChange={(keep) => setDraft({ keep })}
+            options={[
+              ['front', 'Vorne behalten'],
+              ['back', 'Hinten behalten'],
+              ['both', 'Beide (2 Körper)'],
+            ]}
+          />
+          <p className="hint">„Vorne“ ist die Seite, in die die Normale der Ebene zeigt (YZ: +x, XZ: −y, XY: +z). Für Symmetrie in der Rechnung: eine Hälfte behalten und auf der Schnittfläche später eine Symmetrie-Lagerung setzen.</p>
         </>
       )}
 
