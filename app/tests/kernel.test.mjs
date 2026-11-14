@@ -316,3 +316,18 @@ test('Boolesch: zwei Körper vereinigen, abziehen, Schnittmenge', () => {
   allOk(i)
   near(i.volume, common, 1e-6, 'Schnittmenge')
 })
+
+test('Extrudieren bis Fläche: Tiefe und Richtung aus einer parallelen Fläche', () => {
+  clearCache()
+  const high = { origin: [0, 0, 30], normal: [0, 0, 1], u: [1, 0, 0] }
+  const features = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 40, 40) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1 },
+    { id: 3, type: 'sketch', plane: high, ents: [{ t: 'circle', c: [20, 20], r: 5 }] },
+    { id: 4, type: 'extrude', sketch: 3, mode: 'add', depth: 1, dir: 1, upto: { center: [20, 20, 10], kind: 'plane', normal: [0, 0, 1] } },
+  ]
+  const r = build({ features })
+  allOk(r)
+  assert.equal(r.bodies, 1)
+  near(r.volume, 40 * 40 * 10 + PI * 25 * 20, 1e-6, 'Zapfen bis zur Platte')
+})

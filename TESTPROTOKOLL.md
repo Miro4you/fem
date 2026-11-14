@@ -371,6 +371,8 @@ selbst starten.
 | 18e.55 | Skizze: senkrechte Hilfslinie (Mittellinie), halbe Kontur rechts davon, Rahmen von rechts nach links darüber ziehen, in der Leiste „Spiegeln …“, Mittellinie anklicken (oder Taste I) | linke Hälfte entsteht, bleibt symmetrisch (rechts ziehen → links folgt); Punkte auf der Mittellinie werden geteilt | [ ] |
 | 18e.56 | Zwei Körper (zweiter mit „Neuer Körper“), Mehr › Boolesch: Vereinigen / Abziehen / Schnittmenge, Körper anklicken | Ergebnis wie gewählt; „Werkzeugkörper behalten“ lässt den zweiten Körper stehen | [ ] |
 | 18e.57 | Verlauf: Rechtsklick auf ein früheres Feature › „Bis hier zurückrollen“, dann ein neues Feature anlegen | Bild zeigt den Stand bis zur Marke, spätere Features blass; das neue Feature landet an der Marke; ▲/▼ verschiebt die Marke, „Ans Ende“ baut alles; Übernehmen erst am Ende möglich | [ ] |
+| 18e.58 | Skizze mit „Abstand zur Ebene“ über dem Teil, Extrudieren › „Bis Fläche“, Deckfläche anklicken | Körper reicht genau bis zur Fläche (Richtung automatisch) | [ ] |
+| 18e.59 | Rechtsklick auf ein Feature › „Duplizieren“ | Kopie direkt dahinter („… (Kopie)“), z. B. zum Ändern der Kanten/Skizze | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

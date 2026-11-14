@@ -195,7 +195,7 @@ export function problemOf(f, features) {
     case 'extrude':
       if (!has(f.sketch)) return 'Skizze wählen'
       if (Array.isArray(f.regions) && !f.regions.length) return 'Flächen der Skizze im Bild anklicken'
-      return f.through || pos(f.depth) ? null : 'Tiefe > 0 angeben'
+      return f.through || f.upto || pos(f.depth) ? null : 'Tiefe > 0 angeben'
     case 'revolve':
       if (!has(f.sketch)) return 'Skizze wählen'
       if (Array.isArray(f.regions) && !f.regions.length) return 'Flächen der Skizze im Bild anklicken'
@@ -257,7 +257,7 @@ export function kernelFeature(f, features) {
     case 'sketch':
       return kernelSketch(f.id, f.sketch)
     case 'extrude':
-      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through }
+      return { id: f.id, type: 'extrude', sketch: f.sketch, regions: f.regions, fills: fillsArg(f), bodyName: f.mode === 'new' ? f.bodyName : undefined, subtract: f.subtract !== false, mode: f.mode, depth: num(f.depth), dir: f.flip ? -1 : 1, symmetric: !!f.symmetric, through: !!f.through && !f.upto, ...(f.upto ? { upto: faceHint(f.upto) } : {}) }
     case 'revolve': {
       const s = sk(f.sketch)?.sketch
       const line = s?.ents.find((e) => e.id === f.axis)

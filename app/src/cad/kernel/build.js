@@ -275,9 +275,21 @@ function toolsExtrude(model, f, sketches) {
   const sk = sketchOf(f, sketches, 'Extrudieren')
   let faces = sketchFaces(sk, f.regions, 'Extrudieren', f.fills)
   const B = planeBasis(sk.plane)
-  const d = f.dir || 1
-  const through = !!f.through
+  let d = f.dir || 1
+  const through = !!f.through && !f.upto
   let depth = Number(f.depth) || 0
+  if (f.upto) {
+    // bis zu einer ebenen Fläche (parallel zur Skizze): Tiefe und Richtung ergeben sich daraus
+    const { face } = findFace(model, f.upto, 'Extrudieren bis Fläche')
+    if (face.geomType !== 'PLANE') throw new Problem('Extrudieren bis Fläche: eine ebene Fläche wählen')
+    const nf = unit(tuple(face.normalAt()))
+    if (Math.abs(dot(nf, B.n)) < 0.9999) throw new Problem('Extrudieren bis Fläche: die Fläche muss parallel zur Skizze liegen')
+    const dist = dot(sub(tuple(face.center), B.o), B.n)
+    if (Math.abs(dist) < 1e-6) throw new Problem('Extrudieren bis Fläche: die Fläche liegt in der Skizzenebene')
+    depth = Math.abs(dist)
+    d = Math.sign(dist)
+    if (f.symmetric) throw new Problem('Extrudieren bis Fläche: geht nicht symmetrisch')
+  }
   if (through) {
     const bb = bboxOf(model.shapes)
     depth = 2 * model.diag(faces) + 2 * (bb ? dist3(B.o, bb[0]) : 0)

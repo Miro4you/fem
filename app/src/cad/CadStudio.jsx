@@ -758,6 +758,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       case 'btarget':
       case 'btool':
         return { faces: true }
+      case 'upto':
+        return { planar: true }
       case 'dir':
       case 'dir2':
         return { edges: 'line', planar: true, cyl: true }
@@ -823,6 +825,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       }
       return
     }
+    if (pickFor === 'upto' && h.face?.normal) {
+      setDraft({ upto: faceRef(h.face), through: false })
+      setPickFor(null)
+      return
+    }
     if ((pickFor === 'btarget' || pickFor === 'btool') && h.face) {
       // Körper wählen (über eine seiner Flächen); nochmal anklicken = weg
       const t = shownTessBefore
@@ -880,7 +887,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   // Stand vor dem bearbeiteten Feature (zum Wählen von Kanten/Flächen)
   const [before, setBefore] = useState(null)
-  const beforeKey = edit && ['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean'].includes(edit.draft.type) ? `${edit.index}|${builtKey}` : null
+  const beforeKey = edit && (['fillet', 'chamfer', 'removefaces', 'moveface', 'shell', 'refillet', 'rehole', 'pattern', 'mirror', 'boolean'].includes(edit.draft.type) || (edit.draft.type === 'extrude' && pickFor === 'upto')) ? `${edit.index}|${builtKey}` : null
   useEffect(() => {
     if (!beforeKey) {
       setBefore(null)
@@ -906,7 +913,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const pickEdges = edgeFeature && pickFor === 'edges' && before?.tess && preview?.tess && edit.draft.edges?.length ? before.tess.curves : null
   const viewTess = pickEdges
     ? preview.tess
-    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool'].includes(pickFor) && before?.tess
+    : edit && pickFor && ['edges', 'faces', 'cyl', 'btarget', 'btool', 'upto'].includes(pickFor) && before?.tess
       ? before.tess
       : sketchEdit
         ? (preview?.tess ?? null)
@@ -929,6 +936,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     }
     if (d.edges) out.edges = matchEdges(pickEdges ? before.tess : viewTess, d.edges)
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
+    if (d.type === 'extrude' && d.upto) out.faces = matchFaces(viewTess, [d.upto])
     if (d.type === 'boolean') {
       // ganze Körper zeigen: alle Flächen der Körper, zu denen eine gewählte Fläche gehört
       const t = viewTess
@@ -1023,7 +1031,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         onChange: (x) => setDraft({ depth: fmtField(x) }),
       }
     }
-    if (d.type !== 'extrude' || d.through || pickFor) return null
+    if (d.type !== 'extrude' || d.through || d.upto || pickFor) return null
     const skF = features.find((f) => f.id === d.sketch && f.type === 'sketch')
     if (!skF) return null
     const depth = num(d.depth)
@@ -1637,6 +1645,16 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               ['Bearbeiten', () => openEdit(ctxMenu.f)],
               ['Umbenennen', () => setRenaming(ctxMenu.f.id)],
               [
+                'Duplizieren',
+                () => {
+                  // Kopie direkt dahinter (gleiche Werte, gleiche Bezüge) – z. B. eine zweite Verrundung mit anderen Kanten
+                  const k = features.findIndex((g) => g.id === ctxMenu.f.id)
+                  const copy = { ...structuredClone(ctxMenu.f), id: featureId(features), name: `${ctxMenu.f.name} (Kopie)` }
+                  delete copy.source
+                  commitFeatures([...features.slice(0, k + 1), copy, ...features.slice(k + 1)])
+                },
+              ],
+              [
                 'Bis hier zurückrollen',
                 () => {
                   const k = features.findIndex((g) => g.id === ctxMenu.f.id)
@@ -1692,6 +1710,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                 skaxis: 'Drehachse: eine gerade Linie der Skizze anklicken (Esc bricht ab)',
                 btarget: edit?.draft.op === 'union' ? 'Körper anklicken, die vereinigt werden (mindestens zwei)' : 'Zielkörper anklicken (von dem abgezogen bzw. geschnitten wird)',
                 btool: 'Werkzeugkörper anklicken',
+                upto: 'Ebene Fläche anklicken, bis zu der extrudiert wird (parallel zur Skizze)',
               }[pickFor]}
           </div>
         )}
@@ -1943,10 +1962,22 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
         <>
           {sketchSel}
           {modeSel}
-          <label className="check">
-            <input type="checkbox" checked={d.through} onChange={(e) => setDraft({ through: e.target.checked })} /> Durch alles
-          </label>
-          {!d.through && <Num label="Tiefe" value={d.depth} onChange={(depth) => setDraft({ depth })} />}
+          <Seg
+            value={d.through ? 'through' : d.upto || pickFor === 'upto' ? 'upto' : 'depth'}
+            onChange={(k) => {
+              setDraft({ through: k === 'through', upto: k === 'upto' ? (d.upto ?? null) : null })
+              setPickFor(k === 'upto' && !d.upto ? 'upto' : null)
+            }}
+            options={[
+              ['depth', 'Tiefe'],
+              ['upto', 'Bis Fläche'],
+              ['through', 'Durch alles'],
+            ]}
+          />
+          {!d.through && !d.upto && pickFor !== 'upto' && <Num label="Tiefe" value={d.depth} onChange={(depth) => setDraft({ depth })} />}
+          {(d.upto || pickFor === 'upto') && (
+            <PickButton active={pickFor === 'upto'} label="Bis Fläche" value={d.upto ? 'gewählt' : 'ebene Fläche anklicken'} onClick={() => setPickFor(pickFor === 'upto' ? null : 'upto')} />
+          )}
           <div className="row">
             <label className="check">
               <input type="checkbox" checked={d.flip} onChange={(e) => setDraft({ flip: e.target.checked })} /> Richtung umkehren
