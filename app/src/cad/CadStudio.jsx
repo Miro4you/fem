@@ -80,6 +80,7 @@ const SKETCH_TOOLS = [
   ['crect', 'Rechteck aus der Mitte (Mitte, Ecke; Zahl tippen: 60x40)', I.IcRectCenter, 'M'],
   ['circle', 'Kreis (Mitte, Radius; Zahl tippen = Ø)', I.IcCircle, 'C'],
   ['arc', 'Bogen (Mitte, Anfang, Ende – gegen den Uhrzeigersinn)', I.IcArc, 'A'],
+  ['tarc', 'Tangentenbogen: am Linienende beginnen, Ende klicken (weiter mit dem nächsten Bogen, Esc beendet)', I.IcTangentArc, 'G'],
   ['slot', 'Langloch (Mitte 1, Mitte 2, Breite; Zahl tippen = Mittenabstand, dann Breite)', I.IcSlot, 'O'],
   ['poly', 'Vieleck (Mitte, Ecke; +/− ändert die Eckenzahl; Zahl tippen = Schlüsselweite)', I.IcPolygon, 'V'],
   ['sfillet', 'Ecke verrunden: Ecke zweier Linien anklicken, Radius eintippen', I.IcSketchFillet, 'F'],
@@ -99,6 +100,7 @@ const SKETCH_HELP = {
   crect: 'Mitte klicken, dann eine Ecke. Zahl tippen: 60x40.',
   circle: 'Mitte klicken, dann den Rand. Zahl tippen = Durchmesser.',
   arc: 'Mitte, Anfang, Ende (gegen den Uhrzeigersinn). Zahl tippen = Radius.',
+  tarc: 'Am Ende einer Linie (oder eines Bogens) beginnen, dann das Bogenende klicken – der Bogen schließt tangential an. Esc beendet.',
   slot: 'Mitte 1, Mitte 2, dann die Breite. Zahl tippen: erst Mittenabstand, dann Breite.',
   poly: 'Mitte, dann eine Ecke. + / − ändert die Eckenzahl, Zahl tippen = Schlüsselweite.',
   sfillet: 'Ecke anklicken und den Radius gleich eintippen. Vorher getippter Radius gilt für alle folgenden Ecken.',
@@ -765,6 +767,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         return
       }
       if (ctrl || e.altKey) return
+      if (e.key.toLowerCase() === 'q') {
+        e.preventDefault()
+        toggleConstruction()
+        return
+      }
       const t = SKETCH_TOOLS.find(([, , , k]) => k.toLowerCase() === e.key.toLowerCase())
       if (t) setTool(t[0])
     }
@@ -985,6 +992,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   }, [edit?.draft, viewTess, cmeasure, pickEdges, preSel])
   // Körperliste: überfahrener Körper im Bild markiert, ausgeblendete Körper nicht gezeichnet
   const [hotBody, setHotBody] = useState(null)
+  const [hotSketch, setHotSketch] = useState(null) // Skizze im Verlauf überfahren: im Bild zeigen
   const [hiddenBodies, setHiddenBodies] = useState(() => new Set())
   const bodyCount = built?.bodies ?? 0
   useEffect(() => setHiddenBodies(new Set()), [bodyCount])
@@ -1175,9 +1183,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (!showSketches) return []
     const used = edit?.draft?.sketch
     return features
-      .filter((f) => f.type === 'sketch' && !f.suppressed && f.id !== sketchEdit?.id && f.sketch?.ents?.length && (!sketchHidden(f) || used === f.id || selSketch === f.id))
-      .map((f) => ({ id: f.id, plane: f.sketch.plane, data: f.sketch, active: used === f.id || selSketch === f.id, highlightEnts: pickFor === 'skaxis' && used === f.id }))
-  }, [features, showSketches, edit?.draft?.sketch, sketchEdit?.id, selSketch, pickFor])
+      .filter((f) => f.type === 'sketch' && !f.suppressed && f.id !== sketchEdit?.id && f.sketch?.ents?.length && (!sketchHidden(f) || used === f.id || selSketch === f.id || hotSketch === f.id))
+      .map((f) => ({ id: f.id, plane: f.sketch.plane, data: f.sketch, active: used === f.id || selSketch === f.id || hotSketch === f.id, highlightEnts: pickFor === 'skaxis' && used === f.id }))
+  }, [features, showSketches, edit?.draft?.sketch, sketchEdit?.id, selSketch, pickFor, hotSketch])
   const onSketchPick = (id, open, ent) => {
     if (edit) {
       const d = edit.draft
@@ -1429,6 +1437,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     key={f.id}
                     className={'cad-feat' + (i >= rollIdx ? ' rolled' : '') + (f.suppressed ? ' off' : '') + (st && !st.ok && !st.skipped ? ' bad' : '') + (st?.skipped ? ' skipped' : '') + (selSketch === f.id ? ' on' : '')}
                     onDoubleClick={() => openEdit(f)}
+                    onMouseEnter={f.type === 'sketch' ? () => setHotSketch(f.id) : undefined}
+                    onMouseLeave={f.type === 'sketch' ? () => setHotSketch(null) : undefined}
                     onContextMenu={(e) => {
                       e.preventDefault()
                       setCtxMenu({ f, x: e.clientX, y: e.clientY })
@@ -2542,6 +2552,7 @@ function KeysHelp({ sketch, onClose }) {
     ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
     ['Entf', 'Auswahl löschen (Skizze)'],
     ['Strg+A', 'alles wählen (Skizze)'],
+    ['Q', 'Hilfslinie an/aus (Skizze; mit Auswahl: umschalten)'],
     ['Zahl tippen', 'beim Zeichnen: genaues Maß (50, 50@30, 60x40)'],
     ['?  /  F1', 'diese Übersicht'],
   ]

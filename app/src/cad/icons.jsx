@@ -269,6 +269,15 @@ export const IcSketchFillet = (p) => (
   </Svg>
 )
 
+export const IcTangentArc = (p) => (
+  <Svg {...p}>
+    <path d="M3 17h7" />
+    <path d="M10 17a6 6 0 0 0 6-6V5" className={A} />
+    <circle cx="10" cy="17" r="1.4" className={F} />
+    <path d="M10 17h4" className={M} strokeDasharray="1.6 1.6" />
+  </Svg>
+)
+
 export const IcPoint = (p) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="3" className={F} />

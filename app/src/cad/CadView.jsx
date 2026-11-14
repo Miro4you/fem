@@ -6,7 +6,7 @@ import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
 import { IcHome, IcFit } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
 import { lengthStep, snapFrom, snapRect, snapRadius, snapRectCenter, snapPolygon, slotWidth, measureText, parseTyped, TYPE_HINT } from './sketchInput.js'
-import { filletCorner, filletPreview, suggestFilletRadius, cornerLines, addSlot, addPolygon, addCenterRect, mirrorEnts } from './sketchTools.js'
+import { filletCorner, filletPreview, suggestFilletRadius, cornerLines, addSlot, addPolygon, addCenterRect, mirrorEnts, tangentAt, tangentArc } from './sketchTools.js'
 import { IcSection as IcSectionView, IcMeasure as IcMeasureTool } from './icons.jsx'
 import { num } from './features.js'
 import {
@@ -1120,11 +1120,11 @@ export default function CadView({
         tmp.current = null
         return
       }
-      const res = sk.tool === 'sfillet' ? filletHover(ev, sk) : resolveDraw(ev, sk, t, q)
+      const res = sk.tool === 'sfillet' ? filletHover(ev, sk) : sk.tool === 'tarc' ? tarcHover(ev, sk, t, q) : resolveDraw(ev, sk, t, q)
       const { at, hit } = res
       t.cur = { at, hit, hv: res.hv, width: res.width, corner: res.corner ?? null }
       t.snapAt = null
-      t.hint = ['line', 'rect', 'crect', 'circle', 'arc', 'point', 'slot', 'poly', 'sfillet'].includes(sk.tool) ? cursorHint(ev, sk, t, res) : null
+      t.hint = ['line', 'rect', 'crect', 'circle', 'arc', 'point', 'slot', 'poly', 'sfillet'].includes(sk.tool) ? cursorHint(ev, sk, t, res) : sk.tool === 'tarc' ? { ...cursorHint(ev, sk, t, res), text: res.text ?? null, canType: false } : null
       t.preview = res.preview ?? previewOf(sk.tool, t, data)
       t.cut = null
       if (sk.tool === 'trim') {
@@ -1141,6 +1141,24 @@ export default function CadView({
         setHover((o) => (JSON.stringify(o) === JSON.stringify(nh) ? o : nh))
       }
       setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
+    }
+
+    // Tangentenbogen: erst ein Linien-/Bogenende, dann das Ende des Bogens
+    function tarcHover(ev, sk, t, q) {
+      const per = mmPerPx(sk.plane)
+      const hit = snap(sk.data, q, 9 * per, refsOf(sk.plane))
+      if (!t.pts.length) {
+        const ok = hit?.pt && tangentAt(sk.data, hit.pt)
+        return { at: hit?.at ?? q, hit: ok ? hit : null, text: ok ? 'Start hier' : 'an einem Linienende beginnen', preview: [] }
+      }
+      const s0 = t.pts[0]
+      const at = hit ? hit.at : q
+      const ta = tangentArc(s0.at, s0.dir, at)
+      if (!ta) return { at, hit, preview: [[s0.at, at]] }
+      const n = 40
+      const arc = Array.from({ length: n + 1 }, (_, i) => [ta.c[0] + ta.r * Math.cos(ta.a0 + ((ta.a1 - ta.a0) * i) / n), ta.c[1] + ta.r * Math.sin(ta.a0 + ((ta.a1 - ta.a0) * i) / n)])
+      const sweep = Math.round((((ta.a1 - ta.a0) * 180) / Math.PI) * 10) / 10
+      return { at, hit, preview: [arc], text: `R ${fmtN(ta.r)} mm · ${String(sweep).replace('.', ',')}°` }
     }
 
     // Ecke verrunden: Ecke unter dem Zeiger suchen, Bogen als Vorschau
@@ -1431,6 +1449,32 @@ export default function CadView({
         sk.onChange(r.sketch, r.info)
         const el = host.current.getBoundingClientRect()
         setEdit({ id: c.id, x: ev.clientX - el.left, y: ev.clientY - el.top, value: fmtN(c.v), fresh: true })
+        return
+      }
+      if (sk.tool === 'tarc') {
+        const per = mmPerPx(plane)
+        const hit = snap(data, q, 9 * per, refsOf(plane))
+        if (!t.pts?.length) {
+          const tg = hit?.pt && tangentAt(data, hit.pt)
+          if (!tg) return sk.onMessage?.('Tangentenbogen: am Ende einer Linie oder eines Bogens beginnen')
+          tmp.current = { tool: 'tarc', pts: [{ at: hit.at, id: hit.pt, dir: tg.dir, ent: tg.ent }] }
+          setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
+          return
+        }
+        const s0 = t.pts[0]
+        const at = hit ? hit.at : q
+        const ta = tangentArc(s0.at, s0.dir, at)
+        if (!ta) return sk.onMessage?.('Tangentenbogen: das Ende liegt genau in Verlängerung – dort passt eine Linie')
+        const s2 = structuredClone(data)
+        const qid = pointAt(s2, at, hit)
+        const c = addPoint(s2, ta.c)
+        const arc = addEnt(s2, { t: 'arc', c, a: ta.ccw ? s0.id : qid, b: ta.ccw ? qid : s0.id, cons: sk.construction || undefined })
+        addCon(s2, { t: 'tan', e1: s0.ent, e2: arc.id })
+        commit(s2)
+        // weiterzeichnen: nächster Tangentenbogen vom neuen Ende
+        const tg = tangentAt(s2, qid)
+        tmp.current = tg ? { tool: 'tarc', pts: [{ at, id: qid, dir: tg.dir, ent: arc.id }] } : null
+        setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
         return
       }
       if (sk.tool === 'sfillet') {

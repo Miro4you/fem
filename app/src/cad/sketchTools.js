@@ -251,3 +251,40 @@ export function mirrorEnts(sk0, entIds, lineId) {
   if (!added.length) return { error: 'Spiegeln: erst die Elemente wählen, die gespiegelt werden sollen' }
   return { sketch: sk, added }
 }
+
+/// Tangentenbogen: Anfang an einem Linien- oder Bogenende (Richtung von dort weiter), Ende frei.
+/// → { dir } Richtung am Startpunkt (aus dem Element hinaus) oder null
+export function tangentAt(sk, ptId) {
+  for (const e of sk.ents) {
+    if (e.cons) continue
+    if (e.t === 'line' && (e.a === ptId || e.b === ptId)) {
+      const p = P(sk, ptId)
+      const o = P(sk, e.a === ptId ? e.b : e.a)
+      return { dir: unit(sub(p, o)), ent: e.id }
+    }
+    if (e.t === 'arc' && (e.a === ptId || e.b === ptId)) {
+      const c = P(sk, e.c)
+      const r = sub(P(sk, ptId), c)
+      // gegen den Uhrzeigersinn von a nach b: am Ende b läuft der Bogen in Richtung (−ry, rx) weiter, am Anfang a umgekehrt
+      const t = unit([-r[1], r[0]])
+      return { dir: e.b === ptId ? t : mul(t, -1), ent: e.id }
+    }
+  }
+  return null
+}
+
+/// Bogen von P (Tangente t) nach Q → { c, r, ccw, a0, a1 } oder null (gerade weiter)
+export function tangentArc(P0, t, Q) {
+  const n = [-t[1], t[0]]
+  const d = sub(P0, Q)
+  const den = 2 * (n[0] * d[0] + n[1] * d[1])
+  if (Math.abs(den) < 1e-9 * Math.max(1, len(d))) return null
+  const s = -(d[0] * d[0] + d[1] * d[1]) / den
+  const c = add(P0, mul(n, s))
+  const ccw = s > 0
+  const ang = (p) => Math.atan2(p[1] - c[1], p[0] - c[0])
+  let a0 = ang(ccw ? P0 : Q)
+  let a1 = ang(ccw ? Q : P0)
+  while (a1 <= a0) a1 += 2 * Math.PI
+  return { c, r: Math.abs(s), ccw, a0, a1 }
+}
