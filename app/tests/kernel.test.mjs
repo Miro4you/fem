@@ -559,6 +559,9 @@ test('Zeichnung (SVG): drei Ansichten mit verdeckten Kanten, Mittellinien, Maßs
   assert.equal(ctr.length, 3)
   const counts = ctr.map((g) => (g.match(/<line/g) ?? []).length).sort((a, b) => a - b)
   assert.equal(counts[2], 14)
+  // Bohrungsangaben mit Lochkreis, Innenbohrung des Rings
+  assert.ok(svg.includes('6× Ø9, LK Ø70'), 'Lochkreis')
+  assert.ok(svg.includes('>Ø40<'), 'Innenbohrung')
   // großes Teil: kleinerer Maßstab
   clearCache()
   const big = build({ features: [{ id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 900, 300) }, { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 200, dir: 1 }], svg: true, tess: false })

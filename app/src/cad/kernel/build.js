@@ -1700,7 +1700,9 @@ function drawingAxes(model) {
       let s1 = Math.max(...ss)
       // gleiche Achse (z. B. Welle mit Absätzen, Bohrung mit Senkung) zusammenfassen
       const same = axes.find((a) => Math.abs(dot(a.axis, ri.axis)) > 0.9999 && dist3(cross(sub(ri.c0, a.c0), a.axis), [0, 0, 0]) < 1e-4)
+      const bore = ri.kind === 'cyl' && ri.concave ? Math.round(ri.radius * 2000) / 1000 : null
       if (same) {
+        if (bore && !same.bores.includes(bore)) same.bores.push(bore)
         const off = dot(sub(ri.c0, same.c0), same.axis)
         const sg = dot(ri.axis, same.axis) > 0 ? 1 : -1
         const a0 = off + sg * s0
@@ -1708,7 +1710,7 @@ function drawingAxes(model) {
         same.s0 = Math.min(same.s0, a0, a1)
         same.s1 = Math.max(same.s1, a0, a1)
         same.r = Math.max(same.r, r)
-      } else axes.push({ c0: ri.c0, axis: ri.axis, s0, s1, r })
+      } else axes.push({ c0: ri.c0, axis: ri.axis, s0, s1, r, bores: bore ? [bore] : [] })
     }
   return axes
 }

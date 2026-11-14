@@ -213,7 +213,7 @@ Tastenkürzel.
 6. **Messen**, **Schnittansicht** und **Darstellung** (mit/ohne Kanten, durchsichtig, Drahtgitter) rechts oben im Bild; **„In die Rechnung übernehmen“** baut das Teil als STEP,
    vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP“** bzw. **„Als STL“** (3D-Druck) exportiert es,
    **„Zeichnung (SVG)“** gibt ein Blatt mit drei Ansichten (verdeckte Kanten gestrichelt), Isometrie, Gesamtmaßen,
-   Mittellinien und Schriftfeld (zum Drucken als PDF im Browser öffnen).
+   Bohrungsangaben (z. B. „6× Ø9, LK Ø70“), Mittellinien und Schriftfeld (zum Drucken als PDF im Browser öffnen).
 
 **Aus Draftpad:** Startseite „Aus Draftpad“ oder Knopf „Draftpad“ in der Konstruktion öffnet die
 **Online-Ablage von Draftpad** (Adresse des Draftpad-Servers einmal eintragen, z. B. der Raspberry Pi; optional mit

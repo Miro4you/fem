@@ -188,7 +188,7 @@ Dazu: Normteile (Schraube/Mutter/Scheibe, direkt in Bohrungen), Rippe, Formschr�
 Punkte. Ausrichten ist ein Feature im Verlauf und wird bei Änderungen neu angewandt (folgt verschobenen Flächen).
 
 **Zeichnung (SVG):** Vorderansicht, Seitenansicht von links, Draufsicht (Projektionsmethode 1, verdeckte Kanten
-gestrichelt über HLR), Isometrie, Gesamtmaße, Mittellinien/-kreuze an Bohrungen und Wellen, genormter Maßstab,
+gestrichelt über HLR), Isometrie, Gesamtmaße, Mittellinien/-kreuze an Bohrungen und Wellen, Bohrungsangaben „6× Ø9, LK Ø70“, genormter Maßstab,
 A4/A3 und Schriftfeld (Benennung, Masse mit Werkstoff, Datum, ISO 2768-m).
 
 Offen: Bewegung/Gelenke (kinematische Lagebedingungen), Torusflächen (Ecken zweier Rundungen) beim

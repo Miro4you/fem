@@ -83,6 +83,61 @@ function axisLines(axes, v, s, tx, ty) {
   return out.length ? `<g class="ctr">${out.join('')}</g>` : ''
 }
 
+// Bohrungsangaben „n× Ød“ mit Hinweislinie in der Ansicht, in der die Bohrungen als Kreise erscheinen
+// (jeder Durchmesser einmal auf dem Blatt; done merkt sich die schon beschrifteten)
+function boreNotes(axes, v, s, tx, ty, done) {
+  const xd = unit(v.x)
+  const dd = unit(v.dir)
+  const yd = cross(dd, xd)
+  const groups = new Map()
+  for (const a of axes) {
+    if (Math.abs(dot(a.axis, dd)) < 0.999) continue
+    for (const d of a.bores ?? []) {
+      if (done.has(d)) continue
+      if (!groups.has(d)) groups.set(d, [])
+      groups.get(d).push(a)
+    }
+  }
+  const out = []
+  for (const [d, list] of groups) {
+    done.add(d)
+    // Kreis rechts oben als Anker
+    const a = list.reduce((best, x) => (dot(x.c0, xd) - dot(x.c0, yd) > dot(best.c0, xd) - dot(best.c0, yd) ? x : best))
+    const cx = tx + s * dot(a.c0, xd)
+    const cy = ty - s * dot(a.c0, yd)
+    const rr = (s * d) / 2
+    const px = cx + rr * Math.SQRT1_2
+    const py = cy - rr * Math.SQRT1_2
+    const qx = px + 7
+    const qy = py - 7
+    // Lochkreis: mindestens drei gleiche Bohrungen gleich weit von ihrer Mitte → Strich-Punkt-Kreis und „LK Ø…“
+    let lk = ''
+    if (list.length >= 3) {
+      const pts = list.map((x) => [tx + s * dot(x.c0, xd), ty - s * dot(x.c0, yd)])
+      const m = [0, 1].map((k) => pts.reduce((acc, q) => acc + q[k], 0) / pts.length)
+      const rs = pts.map((q) => Math.hypot(q[0] - m[0], q[1] - m[1]))
+      if (rs[0] > 1 && rs.every((r) => Math.abs(r - rs[0]) < 1e-3 * Math.max(1, rs[0]))) {
+        out.push(`<circle class="lk" cx="${m[0].toFixed(3)}" cy="${m[1].toFixed(3)}" r="${rs[0].toFixed(3)}"/>`)
+        lk = `, LK Ø${num((2 * rs[0]) / s)}`
+      }
+    }
+    const text = `${list.length > 1 ? `${list.length}× ` : ''}Ø${num(d)}${lk}`
+    const tw = text.length * 2.1 + 1
+    out.push(`<line x1="${px.toFixed(3)}" y1="${py.toFixed(3)}" x2="${qx.toFixed(3)}" y2="${qy.toFixed(3)}"/>`)
+    out.push(`<line x1="${qx.toFixed(3)}" y1="${qy.toFixed(3)}" x2="${(qx + tw).toFixed(3)}" y2="${qy.toFixed(3)}"/>`)
+    // Pfeil auf den Kreis
+    const ux = Math.SQRT1_2
+    const uy = -Math.SQRT1_2
+    const ah = 2.5
+    const aw = 0.9
+    const bx = px + ux * ah
+    const by = py + uy * ah
+    out.push(`<path class="ar" d="M${px.toFixed(3)} ${py.toFixed(3)} L${(bx - uy * aw).toFixed(3)} ${(by + ux * aw).toFixed(3)} L${(bx + uy * aw).toFixed(3)} ${(by - ux * aw).toFixed(3)} Z"/>`)
+    out.push(`<text x="${(qx + 0.5).toFixed(3)}" y="${(qy - 1).toFixed(3)}">${esc(text)}</text>`)
+  }
+  return out.length ? `<g class="dim">${out.join('')}</g>` : ''
+}
+
 // Maßlinie mit Pfeilen und Zahl (alles in Blatt-mm); vertikal → Zahl gedreht links an der Linie
 function dimLine(a, b, offset, text, vertical) {
   const ah = 2.5
@@ -152,7 +207,9 @@ export function drawingSvg(shape, bbox, opts = {}) {
   }
   const body = []
   const frames = {}
-  for (const k of ['front', 'left', 'top']) {
+  const notes = []
+  const noted = new Set()
+  for (const k of ['top', 'front', 'left']) {
     const v = VIEWS[k]
     const p = project(shape, v, true)
     if (!p.bounds) continue
@@ -169,6 +226,7 @@ export function drawingSvg(shape, bbox, opts = {}) {
     body.push(`<g class="vis" stroke-width="${sw}">${p.visible.map((d) => `<path d="${d}"/>`).join('')}</g>`)
     body.push('</g>')
     body.push(axisLines(opts.axes ?? [], v, s, tx, ty))
+    notes.push(boreNotes(opts.axes ?? [], v, s, tx, ty, noted))
     frames[k] = { x: px, y: py, w: s * (bx1 - bx0), h: s * (by1 - by0) }
   }
   // Gesamtmaße: Breite und Höhe an der Vorderansicht, Tiefe an der Seitenansicht
@@ -230,14 +288,15 @@ export function drawingSvg(shape, bbox, opts = {}) {
   .dim line { stroke-width: 0.25 }
   .dim .ar { fill: #000; stroke: none }
   text { font-family: 'DejaVu Sans', Arial, sans-serif; fill: #000; stroke: none }
-  .dim text { font-size: 3.5px }
+  .dim text { font-size: 3.5px; stroke: #fff; stroke-width: 0.9px; paint-order: stroke; stroke-linejoin: round }
   .lbl { font-size: 3.5px; font-style: italic }
   .tl { font-size: 2.2px; fill: #444 }
   .tv { font-size: 3.5px }
   .tv.big { font-size: 5px; font-weight: bold }
   .frame { stroke-width: 0.5 }
   line { stroke-width: 0.35 }
-  .ctr line { stroke-width: 0.18; stroke-dasharray: 6 1.2 0.6 1.2 }
+  .ctr line, .dim .lk { stroke-width: 0.18; stroke-dasharray: 6 1.2 0.6 1.2 }
+  .dim line { stroke-width: 0.25 }
   .sym path, .sym circle { stroke-width: 0.3 }
   .sym .ctr { stroke-width: 0.18; stroke-dasharray: 2 0.6 0.4 0.6 }
 </style>
@@ -245,6 +304,7 @@ export function drawingSvg(shape, bbox, opts = {}) {
 <rect class="frame" x="${L}" y="${T}" width="${R - L}" height="${B - T}"/>
 ${body.join('\n')}
 ${dims.join('\n')}
+${notes.join('\n')}
 ${labels.join('\n')}
 ${tb.join('\n')}
 </svg>
