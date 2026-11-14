@@ -45,6 +45,7 @@ import {
   fmtField,
 } from './features.js'
 import { offsetEnts } from './sketch.js'
+import { patternEnts } from './sketchTools.js'
 import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, CON_GLYPH, isDim, measure, kernelSketch, polyline, basis, to3d } from './sketch.js'
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
@@ -680,6 +681,22 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     note(`Versatz ${String(d).replace('.', ',')} mm angelegt (geschlossener Zug: + nach außen, − nach innen)`)
   }
 
+  // Muster in der Skizze (Reihe oder Kreis); Kreis um den gewählten Punkt bzw. den Ursprung
+  const applyPattern = (opt) => {
+    const sk = sketchEdit.sketch
+    // Mitte: ein mitgewählter Einzelpunkt (wird nicht kopiert) bzw. der Ursprung
+    const ptEnt = opt.kind === 'circular' ? sk.ents.find((e) => e.t === 'point' && sel.ents.includes(e.id)) : null
+    const cid = sel.pts.length === 1 ? sel.pts[0] : ptEnt?.p
+    const c = cid ? [sk.pts[cid].x, sk.pts[cid].y] : null
+    const ids = sel.ents.filter((id) => id !== ptEnt?.id)
+    const r = patternEnts(sk, ids, { ...opt, center: c ?? [0, 0] })
+    if (r.error) return note(r.error)
+    const sv = solved(r.sketch)
+    changeSketch(sv.info.ok ? sv.sketch : r.sketch, sv.info, false)
+    setSel({ pts: [], ents: r.added, cons: [] })
+    note(`Muster: ${opt.n - 1} Kopien angelegt${opt.kind === 'circular' ? (c ? ' (um den gewählten Punkt)' : ' (um den Ursprung)') : ''}`)
+  }
+
   const toggleFix = () => {
     const s2 = structuredClone(sketchEdit.sketch)
     const ids = [...sel.pts, ...sel.ents.flatMap((id) => {
@@ -1114,7 +1131,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     const k = `${edit.id}|${regionDraft.sketch}`
     if (preChecked.current === k) return
     preChecked.current = k
-    if (regionDraft.regions == null && regionInfo.length > 6) setDraft({ regions: [] })
+    // gezählt werden nur Bereiche, die „automatisch“ Material würden (Löcher z. B. eines Flanschs zählen nicht)
+    if (regionDraft.regions == null && regionInfo.filter((r) => r.evenodd).length > 6) setDraft({ regions: [] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regionInfo, regionDraft?.sketch, edit?.id])
   const setPicks = (on) => setDraft({ regions: regionInfo.filter((_, k) => on[k]).map((r) => ({ pt: r.pt, area: r.area })) })
@@ -1783,7 +1801,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           </div>
         )}
         {sketchEdit && (sel.pts.length > 0 || sel.ents.length > 0 || sel.cons.length > 0) && (
-          <ConBar pos={conPos} sk={sketchEdit.sketch} sel={sel} onOffset={applyOffset} onMirror={() => (setTool('smirror'), note('Spiegellinie anklicken'))} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
+          <ConBar pos={conPos} sk={sketchEdit.sketch} sel={sel} onOffset={applyOffset} onPattern={applyPattern} onMirror={() => (setTool('smirror'), note('Spiegellinie anklicken'))} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
         )}
         {(msg || pickFor || regionHint) && (
           <div className="cad-hint">
@@ -2597,7 +2615,8 @@ function KeysHelp({ sketch, onClose }) {
   )
 }
 
-function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete, onOffset, onMirror, pos }) {
+function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete, onOffset, onMirror, onPattern, pos }) {
+  const [pat, setPat] = useState(null) // { kind, n, dx, dy, angle }
   const opts = applicableCons(sk, sel)
   const n = sel.pts.length + sel.ents.length
   const [off, setOff] = useState('2')
@@ -2636,6 +2655,48 @@ function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete,
         <button className="btn small" title="Spiegeln: danach die Spiegellinie anklicken (I)" onClick={onMirror}>
           Spiegeln …
         </button>
+      )}
+      {sel.ents.length > 0 && onPattern && !pat && (
+        <button className="btn small" title="Muster: Reihe oder Kreis (Lochkreis) – um einen mitgewählten Punkt bzw. den Ursprung" onClick={() => setPat({ kind: 'circular', n: '6', dx: '20', dy: '0', angle: '360' })}>
+          Muster …
+        </button>
+      )}
+      {pat && (
+        <span className="cad-conbar-pat">
+          <select value={pat.kind} onChange={(e) => setPat({ ...pat, kind: e.target.value })}>
+            <option value="circular">Kreis</option>
+            <option value="linear">Reihe</option>
+          </select>
+          <label title="Anzahl (mit dem Original)">
+            ×<NumInput value={pat.n} onChange={(n) => setPat({ ...pat, n })} className="cad-conbar-num" />
+          </label>
+          {pat.kind === 'linear' ? (
+            <>
+              <label title="Schritt in x (mm)">
+                x<NumInput value={pat.dx} onChange={(dx) => setPat({ ...pat, dx })} className="cad-conbar-num" />
+              </label>
+              <label title="Schritt in y (mm)">
+                y<NumInput value={pat.dy} onChange={(dy) => setPat({ ...pat, dy })} className="cad-conbar-num" />
+              </label>
+            </>
+          ) : (
+            <label title="Gesamtwinkel (360° = ganzer Kreis)">
+              ∠<NumInput value={pat.angle} onChange={(angle) => setPat({ ...pat, angle })} className="cad-conbar-num" />°
+            </label>
+          )}
+          <button
+            className="btn small primary"
+            onClick={() => {
+              onPattern({ kind: pat.kind, n: Math.round(num(pat.n)), dx: num(pat.dx) || 0, dy: num(pat.dy) || 0, angle: num(pat.angle) || 360 })
+              setPat(null)
+            }}
+          >
+            OK
+          </button>
+          <button className="btn small" onClick={() => setPat(null)}>
+            ×
+          </button>
+        </span>
       )}
       {canOffset && (
         <span className="cad-conbar-off" title="Gewählte Linien parallel versetzt kopieren (geschlossener Zug: + nach außen, − nach innen)">

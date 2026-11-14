@@ -149,3 +149,17 @@ test('Tangentenbogen: an Linienende tangential, Löser hält die Tangente', asyn
   assert.ok(info.ok)
   assert.ok(Math.abs(P(sk, c)[0] - P(sk, b)[0]) < 1e-6, 'Mitte über dem Linienende')
 })
+
+test('Muster in der Skizze: Lochkreis 6 × um die Mitte, Reihe', async () => {
+  const { patternEnts } = await import('../src/cad/sketchTools.js')
+  const sk = newSketch(plane)
+  const hole = addEnt(sk, { t: 'circle', c: addPoint(sk, [35, 0]), r: 4.5 })
+  const r = patternEnts(sk, [hole.id], { kind: 'circular', n: 6, center: [0, 0], angle: 360 })
+  assert.equal(r.added.length, 5)
+  const cs = r.sketch.ents.filter((e) => e.t === 'circle').map((e) => P(r.sketch, e.c))
+  for (const c of cs) assert.ok(Math.abs(Math.hypot(c[0], c[1]) - 35) < 1e-9)
+  assert.ok(cs.some((c) => Math.abs(c[0] - 17.5) < 1e-9 && Math.abs(c[1] - 35 * Math.sin(Math.PI / 3)) < 1e-9))
+  const l = patternEnts(sk, [hole.id], { kind: 'linear', n: 3, dx: 10, dy: 5 })
+  const c3 = l.sketch.ents.filter((e) => e.t === 'circle').map((e) => P(l.sketch, e.c))
+  assert.deepEqual(c3[2], [55, 10])
+})

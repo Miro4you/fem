@@ -377,6 +377,7 @@ selbst starten.
 | 18e.61 | Teil mit zwei Körpern (z. B. „Neuer Körper“) | Abschnitt „Körper (2)“ mit Name und Volumen; Überfahren markiert den Körper im Bild, Auge blendet ihn aus (nur Ansicht) | [ ] |
 | 18e.62 | Skizze: Linie, dann Tangentenbogen (G) am Linienende beginnen, Ende klicken; Q schaltet Hilfslinie um | Bogen schließt tangential an (Vorschau mit „R … · …°“), nächster Bogen gleich weiter, Esc beendet | [ ] |
 | 18e.63 | Im Verlauf eine (ausgeblendete) Skizze mit der Maus überfahren | Skizze erscheint solange blau im Bild | [ ] |
+| 18e.64 | Skizze: Kreis Ø100 um den Ursprung, Kreis Ø9 bei (35, 0) anklicken › „Muster …“ › Kreis × 6 › OK; Extrudieren | Lochkreis mit 6 Bohrungen (um den Ursprung bzw. einen mitgewählten Punkt); Extrudieren wählt die Scheibe mit Löchern automatisch | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

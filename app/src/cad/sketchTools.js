@@ -288,3 +288,37 @@ export function tangentArc(P0, t, Q) {
   while (a1 <= a0) a1 += 2 * Math.PI
   return { c, r: Math.abs(s), ccw, a0, a1 }
 }
+
+/// Muster in der Skizze: gewählte Elemente als Reihe (dx, dy je Schritt) oder im Kreis (um center, Gesamtwinkel)
+/// kopieren. Kopien sind eigenständig (keine Bedingungen zum Original). → { sketch, added } oder { error }
+export function patternEnts(sk0, entIds, { kind = 'linear', n = 3, dx = 10, dy = 0, center = [0, 0], angle = 360 } = {}) {
+  const sk = structuredClone(sk0)
+  const count = Math.round(Number(n) || 0)
+  if (count < 2) return { error: 'Muster: Anzahl mindestens 2' }
+  const ents = entIds.map((id) => sk.ents.find((e) => e.id === id)).filter(Boolean)
+  if (!ents.length) return { error: 'Muster: erst Elemente wählen' }
+  const full = Math.abs(Math.abs(angle) - 360) < 1e-9
+  const step = kind === 'circular' ? ((angle * Math.PI) / 180) / (full ? count : count - 1) : 0
+  const added = []
+  for (let k = 1; k < count; k++) {
+    const move = (p) => {
+      if (kind !== 'circular') return [p[0] + k * dx, p[1] + k * dy]
+      const a = k * step
+      const x = p[0] - center[0]
+      const y = p[1] - center[1]
+      return [center[0] + x * Math.cos(a) - y * Math.sin(a), center[1] + x * Math.sin(a) + y * Math.cos(a)]
+    }
+    const map = new Map()
+    const img = (id) => {
+      if (!map.has(id)) map.set(id, addPoint(sk, move(P(sk, id))))
+      return map.get(id)
+    }
+    for (const e of ents) {
+      if (e.t === 'line') added.push(addEnt(sk, { t: 'line', a: img(e.a), b: img(e.b), cons: e.cons }).id)
+      else if (e.t === 'circle') added.push(addEnt(sk, { t: 'circle', c: img(e.c), r: e.r, cons: e.cons }).id)
+      else if (e.t === 'arc') added.push(addEnt(sk, { t: 'arc', c: img(e.c), a: img(e.a), b: img(e.b), cons: e.cons }).id)
+      else if (e.t === 'point') added.push(addEnt(sk, { t: 'point', p: img(e.p), cons: e.cons }).id)
+    }
+  }
+  return { sketch: sk, added }
+}

@@ -936,3 +936,6 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-roll { display: flex; align-items: center; gap: 4px; margin: 4px 0; padding: 3px 6px; border-top: 2px solid var(--accent); font-size: 12px; color: var(--accent); }
 .cad-roll span { flex: 1; font-weight: 600; }
 .cad-roll .btn.small { padding: 1px 6px; font-size: 11px; }
+.cad-conbar-pat { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.cad-conbar-pat label { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); }
+.cad-conbar-pat select { height: 26px; font-size: 12px; }
