@@ -556,7 +556,7 @@ function unsure(what, kind) {
   if (CUR.unsure && !CUR.unsure.includes(kind)) CUR.unsure.push(kind)
 }
 
-function edgeOp(model, f, kind) {
+function edgeOp(model, f, kind, warn) {
   const what = kind === 'fillet' ? 'Verrunden' : 'Fase'
   const val = Number(kind === 'fillet' ? f.radius : f.distance) || 0
   if (val <= 0) throw new Problem(kind === 'fillet' ? 'Verrunden: Radius muss größer als 0 sein' : 'Fase: Breite muss größer als 0 sein')
@@ -580,14 +580,71 @@ function edgeOp(model, f, kind) {
     } catch {
       ok = false
     }
+    let res = null
+    if (ok) {
+      const s = cast(mk.Shape())
+      res = { shape: solidsOf(s)[0] ?? s, name: body.name, src: body.src }
+      if (bodyProblem(res)) res = null
+    }
+    mk.delete()
+    // gemeinsam ging es nicht (oder das Ergebnis ist kaputt): Kante für Kante versuchen
+    let failAt = null
+    if (!res) {
+      const seq = edgeOpOneByOne(body.shape, edges, kind, val)
+      if (seq.shape) {
+        res = { shape: seq.shape, name: body.name, src: body.src }
+        if (bodyProblem(res)) res = null
+        else if (edges.length > 1) warn?.push(`${what}: gemeinsam ging es nicht – Kante für Kante ${kind === 'fillet' ? 'verrundet' : 'gefast'}; Übergänge an gemeinsamen Ecken im Bild prüfen`)
+      } else failAt = seq.fail
+    }
+    if (!res) {
+      const msg = `${what}: ${kind === 'fillet' ? `Radius ${val} mm` : `${val} mm`} lässt sich ${failAt ? 'an der rot markierten Kante' : 'hier'} nicht erzeugen – zu groß für die angrenzenden Flächen, oder diese Kante weglassen`
+      const pr = new Problem(msg)
+      if (failAt) pr.edge = { mid: failAt.mid, dir: failAt.dir, kind: failAt.kind, ...(failAt.kind === 'circle' ? { center: failAt.center, radius: failAt.radius } : {}) }
+      throw pr
+    }
+    model.bodies[bi] = res
+  }
+}
+
+// Kanten nacheinander verrunden/fasen; jede Kante im Zwischenstand neu suchen (Gerade: auf derselben Geraden, Kreis: gleiche Mitte/Radius)
+function edgeOpOneByOne(shape, edges, kind, val) {
+  const O = oc()
+  const infos = edges.map(edgeInfo)
+  const size = Math.max(1, dist3(...shape.boundingBox.bounds))
+  const tol = 1e-6 * size
+  // Kanten mit kleinerem Rest zuerst ist nicht sicher besser – Reihenfolge wie gewählt
+  let cur = shape
+  for (const info of infos) {
+    let hit = null
+    for (const e of cur.edges) {
+      const ci = edgeInfo(e)
+      if (ci.kind !== info.kind) continue
+      let ok
+      if (ci.kind === 'circle') ok = dist3(ci.center, info.center) < tol && Math.abs(ci.radius - info.radius) < tol
+      else if (ci.kind === 'line') ok = Math.abs(dot(ci.dir, info.dir)) > 1 - 1e-9 && norm(cross(sub(ci.mid, info.mid), info.dir)) < tol
+      else ok = dist3(ci.mid, info.mid) < tol
+      if (ok && (!hit || dist3(ci.mid, info.mid) < dist3(hit.mid, info.mid))) hit = { e, mid: ci.mid }
+    }
+    if (!hit) continue // schon von einer tangentialen Nachbarkante mitgenommen
+    const mk = kind === 'fillet' ? new O.BRepFilletAPI_MakeFillet(cur.wrapped, O.ChFi3d_FilletShape.ChFi3d_Rational) : new O.BRepFilletAPI_MakeChamfer(cur.wrapped)
+    mk.Add(val, hit.e.wrapped)
+    let ok = false
+    try {
+      mk.Build(new O.Message_ProgressRange())
+      ok = mk.IsDone()
+    } catch {
+      ok = false
+    }
     if (!ok) {
       mk.delete()
-      throw new Problem(kind === 'fillet' ? `Verrunden: Radius ${val} mm lässt sich hier nicht erzeugen – zu groß für die angrenzenden Flächen?` : `Fase: ${val} mm lässt sich hier nicht erzeugen – zu groß für die angrenzenden Flächen?`)
+      return { fail: info }
     }
     const s = cast(mk.Shape())
     mk.delete()
-    model.bodies[bi] = { shape: solidsOf(s)[0] ?? s, name: body.name, src: body.src }
+    cur = solidsOf(s)[0] ?? s
   }
+  return { shape: cur }
 }
 
 // --- Muster, Spiegeln, Fläche verschieben -------------------------------------------------------
@@ -742,16 +799,22 @@ function moveFace(model, f, warn) {
   for (const { face } of picks) {
     if (face.geomType !== 'PLANE') throw new Problem('Fläche verschieben: geht nur für ebene Flächen')
     const n = unit(tuple(face.normalAt()))
-    if (d > 0) tools.push({ mode: 'add', s: basicFaceExtrusion(face.clone(), new Vector(mul(n, d))) })
-    else {
-      const e = 1e-5 * model.diag()
-      tools.push({ mode: 'cut', s: basicFaceExtrusion(face.clone().translate(mul(n, e)), new Vector(mul(n, d - e))) })
-    }
+    const e = 1e-5 * model.diag()
+    // nach außen: Scheibe beginnt ein winziges Stück im Körper (nur Berührung in einer Fläche verschmilzt nicht immer)
+    if (d > 0) tools.push({ mode: 'add', s: basicFaceExtrusion(face.clone().translate(mul(n, -e)), new Vector(mul(n, d + e))) })
+    else tools.push({ mode: 'cut', s: basicFaceExtrusion(face.clone().translate(mul(n, e)), new Vector(mul(n, d - e))) })
   }
+  const before = model.bodies.length
   for (const mode of ['add', 'cut']) {
     const ts = tools.filter((t) => t.mode === mode).map((t) => t.s)
     if (ts.length) combine(model, mode, ts, [])
   }
+  if (model.bodies.length > before)
+    throw new Problem(
+      d > 0
+        ? 'Fläche verschieben: der Ansatz verbindet sich nicht mit dem Körper (es entstünde ein zweiter Körper) – andere Fläche oder Abstand wählen'
+        : 'Fläche verschieben: der Körper zerfiele in mehrere Teile – kleineren Abstand wählen',
+    )
   void warn
 }
 
@@ -1566,6 +1629,26 @@ function surfaceInfo(face, tag, body, center, area) {
 // Körper (z. B. die übrigen Teile einer Baugruppe) behalten so ihr Netz
 
 /// Volumen und Schwerpunkt eines Körpers (gemerkt)
+/// Ist ein Körper geometrisch in Ordnung? (OpenCASCADE-Prüfung, positives Volumen) – sonst Grund als Text
+function bodyProblem(b) {
+  b.memo ??= {}
+  if (b.memo.checked !== undefined) return b.memo.checked
+  let res = null
+  try {
+    const a = new (oc().BRepCheck_Analyzer)(b.shape.wrapped, true, false, false)
+    if (!a.IsValid()) res = 'die Geometrie ist ungültig (Flächen durchdringen sich oder sind offen)'
+    a.delete()
+  } catch {
+    res = null
+  }
+  if (!res) {
+    const v = massOf(b).volume
+    if (!(v > 0)) res = 'ein Körper ist umgestülpt (negatives Volumen)'
+  }
+  b.memo.checked = res
+  return res
+}
+
 function massOf(body) {
   body.memo ??= {}
   if (!body.memo.mass) {
@@ -1680,6 +1763,7 @@ const CACHE_MAX = 40
 
 // Feature, das gerade läuft (neue Körper merken sich, woher sie kommen – zum Umbenennen in der Körperliste)
 const CUR = { src: null, unsure: null }
+const FEATURE_WHAT = { extrude: 'Extrudieren', revolve: 'Drehen', hole: 'Bohrung', fillet: 'Verrunden', chamfer: 'Fase', pattern: 'Muster', mirror: 'Spiegeln', moveface: 'Fläche verschieben', shell: 'Schale', sweep: 'Sweep', loft: 'Loft', removefaces: 'Flächen entfernen', refillet: 'Radius ändern', rehole: 'Bohrung ändern', boolean: 'Boolesch', movebody: 'Körper verschieben', align: 'Ausrichten', import: 'Teil einfügen', rib: 'Rippe', draft: 'Formschräge', stdpart: 'Normteil', split: 'Teilen' }
 
 function runFeature(model, f, sketches, warn, byId) {
   CUR.src = f.id
@@ -1710,7 +1794,7 @@ function runFeature(model, f, sketches, warn, byId) {
   } else if (TOOLS[f.type]) {
     const tools = TOOLS[f.type](model, f, sketches, warn)
     combine(model, modeOf(f), tools, warn, (f.bodyName ?? '').trim() || null)
-  } else if (f.type === 'fillet' || f.type === 'chamfer') edgeOp(model, f, f.type)
+  } else if (f.type === 'fillet' || f.type === 'chamfer') edgeOp(model, f, f.type, warn)
   else if (f.type === 'pattern') repeat(model, f, instances(f), sketches, byId, warn, 'Muster')
   else if (f.type === 'mirror') mirrorFeature(model, f, sketches, byId, warn)
   else if (f.type === 'moveface') moveFace(model, f, warn)
@@ -1900,7 +1984,14 @@ export function build(job) {
     const work = model.clone()
     try {
       CUR.unsure = []
+      const before = new Set(model.bodies.map((b) => b.memo).filter(Boolean))
       runFeature(work, f, sketches, warn, byId)
+      // neu entstandene Körper prüfen: ein kaputter Körper wird nie übernommen
+      for (const b of work.bodies) {
+        if (b.memo && before.has(b.memo)) continue
+        const why = bodyProblem(b)
+        if (why) throw new Problem(`${FEATURE_WHAT[f.type] ?? f.type}: ${why} – Ergebnis verworfen. Kleinere Maße wählen oder einzelne Kanten/Flächen weglassen`)
+      }
       if (CUR.unsure.length)
         warn.push(`${CUR.unsure.join('/')} nicht eindeutig wiedergefunden (davor etwas geändert?) – im Bild prüfen, sonst im Feature neu wählen`)
       CUR.unsure = null
@@ -1915,7 +2006,7 @@ export function build(job) {
       // Text eines eingefügten Teils fehlt im Worker: Aufrufer schickt alles noch einmal
       if (ex instanceof Problem && ex.message === 'BASE_MISSING') throw ex
       const msg = ex instanceof Problem ? ex.message : `${f.type}: Die Geometrie lässt sich so nicht erzeugen (${String(ex?.message ?? ex)})`
-      status.push({ id: f.id, ok: false, error: msg })
+      status.push({ id: f.id, ok: false, error: msg, ...(ex instanceof Problem && ex.edge ? { edge: ex.edge } : {}) })
       failed = true
     }
   }

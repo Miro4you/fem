@@ -625,3 +625,63 @@ test('Verrundung an Kreiskanten (Torus) entfernen: Außenrundung und Hohlkehle',
   const re = build({ features: [...features, { id: 7, type: 'refillet', surfaces: [tori[1].center], radius: 4 }], tess: false })
   assert.match(re.status.at(-1).error ?? '', /Kreiskanten/)
 })
+
+test('Fase an drei Kanten in einer Ecke (Nutgrund + Stirnkante): kein kaputter Körper, notfalls Kante für Kante', () => {
+  clearCache()
+  const prof = [[0, 0], [110, 0], [110, 90], [68, 90], [68, 51], [42, 51], [42, 90], [0, 90]]
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: prof.map((a, i) => ({ t: 'line', a, b: prof[(i + 1) % prof.length] })) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 200, dir: 1 },
+  ]
+  const edges = [
+    { mid: [42, 51, 100], dir: [0, 0, 1], kind: 'line', length: 200 },
+    { mid: [68, 51, 100], dir: [0, 0, 1], kind: 'line', length: 200 },
+    { mid: [55, 51, 200], dir: [1, 0, 0], kind: 'line', length: 26 },
+  ]
+  const r = build({ features: [...base, { id: 3, type: 'chamfer', edges, distance: 4 }], tess: false })
+  allOk(r)
+  const vol0 = 110 * 90 * 200 - 26 * 39 * 200
+  // zwei Innenkanten füllen je 8 mm² × 200 auf, die Stirnkante nimmt 8 mm² × 26 weg; Ecken nur wenig
+  const d = r.volume - vol0
+  assert.ok(d > 2900 && d < 3300, `Volumenänderung ${d}`)
+  assert.equal(r.bodies, 1)
+})
+
+test('Fläche verschieben an der Stirnfläche eines gerundeten Profils: ein Körper, Volumen genau Fläche × Weg', () => {
+  clearCache()
+  const L = (a, b) => ({ t: 'line', a, b })
+  const A = (c, a, b) => ({ t: 'arc', c, a, b })
+  const r = 12
+  const ents = [
+    L([r, 0], [110 - r, 0]), A([110 - r, r], [110 - r, 0], [110, r]),
+    L([110, r], [110, 90 - r]), A([110 - r, 90 - r], [110, 90 - r], [110 - r, 90]),
+    L([110 - r, 90], [68, 90]), L([68, 90], [68, 51]), L([68, 51], [42, 51]), L([42, 51], [42, 90]),
+    L([42, 90], [r, 90]), A([r, 90 - r], [r, 90], [0, 90 - r]),
+    L([0, 90 - r], [0, r]), A([r, r], [0, r], [r, 0]),
+  ]
+  const area = 110 * 90 - 4 * (1 - PI / 4) * r * r - 26 * 39
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 200, dir: 1 },
+  ]
+  for (const d of [20, -20]) {
+    const x = build({ features: [...base, { id: 3, type: 'moveface', faces: [{ center: [55, 40, 200], kind: 'plane', normal: [0, 0, 1] }], distance: d }], tess: false })
+    allOk(x)
+    assert.equal(x.bodies, 1)
+    near(x.volume, area * (200 + d), 1e-9, `Weg ${d}`)
+  }
+})
+
+test('Verrunden zu groß: Fehler nennt die Kante (für die rote Markierung)', () => {
+  clearCache()
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 60, 40) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 5, dir: 1 },
+  ]
+  const edge = { mid: [30, 0, 5], dir: [1, 0, 0], kind: 'line', length: 60 }
+  const r = build({ features: [...base, { id: 3, type: 'fillet', edges: [edge], radius: 20 }], tess: false })
+  const st = r.status.at(-1)
+  assert.equal(st.ok, false)
+  assert.match(st.error, /rot markierten Kante/)
+  assert.ok(Math.abs(st.edge.mid[1]) < 1e-6 && Math.abs(st.edge.mid[2] - 5) < 1e-6, JSON.stringify(st.edge))
+})

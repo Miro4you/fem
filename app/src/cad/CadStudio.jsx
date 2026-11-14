@@ -1137,6 +1137,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       return out
     }
     if (d.edges) out.edges = matchEdges(pickEdges ? before.tess : viewTess, d.edges)
+    // Kante, an der Verrunden/Fase scheitert: rot
+    const bad = preview?.status?.find((x) => x.id === edit.id)?.edge
+    if (bad) out.bad = matchEdges(pickEdges ? before.tess : viewTess, [bad])
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
     if (d.type === 'extrude' && d.upto) out.faces = matchFaces(viewTess, [d.upto])
     if (d.type === 'align') out.faces = matchFaces(viewTess, [d.moving, d.target].filter(Boolean))
@@ -1158,7 +1161,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (d.type === 'mirror' && d.plane?.face) out.faces = matchFaces(viewTess, [d.plane.face])
     if ((d.type === 'refillet' || d.type === 'rehole') && d.surfaces) out.faces = matchFaces(viewTess, d.surfaces.map((c) => ({ center: c })))
     return out
-  }, [edit?.draft, viewTess, cmeasure, pickEdges, preSel])
+  }, [edit?.draft, edit?.id, viewTess, cmeasure, pickEdges, preSel, preview, before?.tess])
   // Körperliste: überfahrener Körper im Bild markiert, ausgeblendete Körper nicht gezeichnet
   const [hotBody, setHotBody] = useState(null)
   const [density, setDensity] = useState(() => {

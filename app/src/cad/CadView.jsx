@@ -34,6 +34,7 @@ import {
   entPoints,
   radiusOf,
   STD_PLANES,
+  dragSolve,
 } from './sketch.js'
 
 const PLANE_COLORS = { XY: 0x3b82f6, XZ: 0x16a34a, YZ: 0xdc2626 }
@@ -434,12 +435,14 @@ export default function CadView({
     s.hi.traverse((o) => (o.geometry?.dispose(), o.material?.dispose()))
     s.hi.clear()
     const edgeSel = selected?.edges ?? new Set()
+    const edgeBad = selected?.bad ?? new Set()
     for (const cu of s.pickCurves ?? s.curves) {
       const on = edgeSel.has(cu.tag)
-      if (!on && hover?.edge !== cu.tag) continue
+      const bad = edgeBad.has(cu.tag)
+      if (!on && !bad && hover?.edge !== cu.tag) continue
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(cu.pts), 3))
-      const m = new THREE.LineBasicMaterial({ color: on ? 0xf59e0b : 0x2563eb, depthTest: false, transparent: true })
+      const m = new THREE.LineBasicMaterial({ color: bad ? 0xdc2626 : on ? 0xf59e0b : 0x2563eb, depthTest: false, transparent: true, linewidth: bad ? 3 : 1 })
       const line = new THREE.Line(g, m)
       line.renderOrder = 15
       s.hi.add(line)
@@ -1086,8 +1089,9 @@ export default function CadView({
           const c = sk.data.pts[drag.circle.c]
           target.radius[drag.circle.id] = Math.hypot(q[0] - c.x, q[1] - c.y)
         }
-        const r = solved(sk.data, { drag: target, analyse: false })
-        if (r.info.ok) sk.onChange(r.sketch, null, true)
+        // in kleinen, geprüften Schritten: nichts klappt um, sonst bleibt das Element am letzten guten Stand
+        const r = dragSolve(sk.data, target)
+        if (r.sketch !== sk.data) sk.onChange(r.sketch, null, true)
         return
       }
       if (sk && sk.tool !== 'select') {

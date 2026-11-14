@@ -400,6 +400,11 @@ selbst starten.
 | 18e.84 | Älteres Projekt (vor heute gespeichert) mit Verrundung öffnen, davor ein Skizzenmaß stark ändern | Liegt die Rundung danach nicht mehr eindeutig: Warnsymbol am Feature „Kante nicht eindeutig wiedergefunden – im Bild prüfen“; in neuen Projekten (18e.82/83) keine Warnung |  [ ] |
 | 18e.85 | Platte 60 × 40 × 10, Skizze auf der Oberseite mit Kreis Ø10, extrudieren 10 (Zapfen); dann Extrudieren 1 auf Tiefe 25 | Zapfen sitzt oben auf der dickeren Platte (Höhe gesamt 35), Volumen 60,785 cm³ |  [ ] |
 | 18e.86 | Platte 100 breit, Zapfen bei x = 90, Spiegeln an der rechten Seitenfläche; dann Plattenbreite auf 150 | Gespiegelter Zapfen wandert mit der Seitenfläche (bei x = 210 statt 110) |  [ ] |
+| 18e.87 | Profil mit Nut extrudieren, Fase 4 mm an beiden Nutgrund-Längskanten **und** der vorderen Nutgrund-Kante | Kein kaputter Körper: Fase wird Kante für Kante gelegt (Hinweis am Feature) oder klar abgelehnt; nie ein Körper mit Spitzen/negativer Masse |  [ ] |
+| 18e.88 | Verrunden mit viel zu großem Radius (z. B. R20 an einer 5-mm-Platte) | Fehlermeldung „… an der rot markierten Kante …“, die Kante ist im Bild rot |  [ ] |
+| 18e.89 | Profil mit R12-Ecken extrudieren, Fläche verschieben an der Stirnfläche +20 und −20 | Immer genau ein Körper, Volumen ändert sich um Fläche × 20 |  [ ] |
+| 18e.90 | Draftpad-Teil mit schmalem Schlitz (z. B. Ring mit Zickzack-Schnitt, Spalt < 0,5 mm) übernehmen | Beide Schlitzseiten kommen an, keine gekreuzten Linien, Kontur geschlossen |  [ ] |
+| 18e.91 | Skizze: Rechteck mit Rundungen, eine Kante weit über die gegenüberliegende hinaus ziehen | Skizze klappt nicht um, Element bleibt vorher stehen; normales Ziehen geht glatt |  [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

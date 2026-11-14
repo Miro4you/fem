@@ -184,6 +184,89 @@ export function solved(sk, opts) {
   return { sketch: info.ok ? s : sk, info }
 }
 
+// Merkmale, die beim Ziehen nicht umklappen dürfen: Linienrichtung, Bogendrehsinn/-spanne, Seiten bei Maßen
+function shapeSigns(sk) {
+  const out = []
+  for (const e of sk.ents) {
+    if (e.t === 'line') {
+      const [ax, ay] = P(sk, e.a)
+      const [bx, by] = P(sk, e.b)
+      out.push(['l', bx - ax, by - ay])
+    } else if (e.t === 'arc') {
+      const [cx, cy] = P(sk, e.c)
+      const [ax, ay] = P(sk, e.a)
+      const [bx, by] = P(sk, e.b)
+      let w = Math.atan2(by - cy, bx - cx) - Math.atan2(ay - cy, ax - cx)
+      while (w <= 0) w += 2 * Math.PI
+      out.push(['a', w])
+    }
+  }
+  for (const c of sk.cons) {
+    if (c.t === 'dx' && sk.pts[c.a] && sk.pts[c.b]) out.push(['s', sk.pts[c.b].x - sk.pts[c.a].x])
+    else if (c.t === 'dy' && sk.pts[c.a] && sk.pts[c.b]) out.push(['s', sk.pts[c.b].y - sk.pts[c.a].y])
+    else if (c.t === 'dpl') {
+      const e = sk.ents.find((x) => x.id === c.e)
+      if (!e || e.t !== 'line' || !sk.pts[c.p]) continue
+      const [ax, ay] = P(sk, e.a)
+      const [bx, by] = P(sk, e.b)
+      const [px, py] = P(sk, c.p)
+      out.push(['s', (bx - ax) * (py - ay) - (by - ay) * (px - ax)])
+    }
+  }
+  return out
+}
+
+function flipped(a, b) {
+  if (a.length !== b.length) return true
+  for (let i = 0; i < a.length; i++) {
+    const [k, x, y] = a[i]
+    const [, u, v] = b[i]
+    if (k === 'l' && x * u + y * v <= 0 && Math.hypot(x, y) > 1e-9 && Math.hypot(u, v) > 1e-9) return true
+    if (k === 'a' && Math.abs(u - x) > Math.PI / 2) return true
+    if (k === 's' && Math.abs(x) > 1e-9 && Math.abs(u) > 1e-9 && Math.sign(x) !== Math.sign(u)) return true
+  }
+  return false
+}
+
+/// Ziehen ohne Zerstören: in kleinen Schritten zum Ziel, jeden Schritt prüfen (nichts klappt um, keine Sprünge
+/// der übrigen Punkte). Geht ein Schritt nicht, bleibt es beim letzten guten Stand (das Element „klebt“).
+/// → { sketch, ok (Ziel erreicht), info }
+export function dragSolve(sk, drag) {
+  const ids = Object.keys(drag.pts ?? {}).filter((id) => sk.pts[id])
+  const xs = Object.values(sk.pts).map((q) => q.x)
+  const ys = Object.values(sk.pts).map((q) => q.y)
+  const L = Math.max(1, Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)))
+  const far = Math.max(0, ...ids.map((id) => Math.hypot(drag.pts[id][0] - sk.pts[id].x, drag.pts[id][1] - sk.pts[id].y)))
+  const n = Math.min(24, Math.max(1, Math.ceil(far / (0.03 * L))))
+  let cur = sk
+  let signs = shapeSigns(sk)
+  let info = null
+  for (let k = 1; k <= n; k++) {
+    const t = k / n
+    const step = { pts: {}, radius: drag.radius ?? {} }
+    for (const id of ids) {
+      const p0 = sk.pts[id]
+      step.pts[id] = [p0.x + (drag.pts[id][0] - p0.x) * t, p0.y + (drag.pts[id][1] - p0.y) * t]
+    }
+    const s = structuredClone(cur)
+    info = solve(s, { drag: step, analyse: false })
+    if (!info.ok) return { sketch: cur, ok: false, info }
+    const sg = shapeSigns(s)
+    if (flipped(signs, sg)) return { sketch: cur, ok: false, info: { ...info, flipped: true } }
+    // Sprung: ein nicht gezogener Punkt bewegt sich viel weiter als der gezogene in diesem Schritt
+    const moveDrag = Math.max(1e-9, ...ids.map((id) => Math.hypot(s.pts[id].x - cur.pts[id].x, s.pts[id].y - cur.pts[id].y)))
+    let jump = 0
+    for (const [id, q] of Object.entries(s.pts)) {
+      if (ids.includes(id) || !cur.pts[id]) continue
+      jump = Math.max(jump, Math.hypot(q.x - cur.pts[id].x, q.y - cur.pts[id].y))
+    }
+    if (ids.length && jump > 10 * moveDrag + 0.05 * L) return { sketch: cur, ok: false, info: { ...info, jumped: true } }
+    cur = s
+    signs = sg
+  }
+  return { sketch: cur, ok: true, info }
+}
+
 /// Wert eines Maßes in der aktuellen Skizze messen
 export function measure(sk, c) {
   const ent = (id) => sk.ents.find((e) => e.id === id)

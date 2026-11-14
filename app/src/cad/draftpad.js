@@ -190,14 +190,16 @@ export function importDraftpad(sk0, doc, opts) {
   const tr = (p) => [(p[0] + off[0]) * k, (p[1] + off[1]) * k]
   prims = prims.map((p) => (p.t === 'line' ? { ...p, a: tr(p.a), b: tr(p.b) } : p.t === 'circle' ? { ...p, c: tr(p.c), r: p.r * k } : { ...p, c: tr(p.c), a: tr(p.a), b: tr(p.b), r: p.r * k }))
 
-  // doppelte Elemente (Skizze und Reinzeichnung übereinander) nur einmal
+  // doppelte Elemente (Skizze und Reinzeichnung übereinander) nur einmal – nur wenn sie wirklich übereinander
+  // liegen (Draftpad rundet auf 0,001 mm); mit der Lückentoleranz verschwand sonst eine Seite schmaler Schlitze
+  const exact = 0.002
   const key = (p) =>
     p.t === 'line'
-      ? [p.a, p.b].map((q) => q.map((v) => Math.round(v / tol)).join(',')).sort().join('|')
-      : `${p.t}:${p.c.map((v) => Math.round(v / tol)).join(',')}:${Math.round(p.r / tol)}` + (p.t === 'arc' ? `:${p.a.map((v) => Math.round(v / tol))}` : '')
+      ? [p.a, p.b].map((q) => q.map((v) => Math.round(v / exact)).join(',')).sort().join('|')
+      : `${p.t}:${p.c.map((v) => Math.round(v / exact)).join(',')}:${Math.round(p.r / exact)}` + (p.t === 'arc' ? `:${p.a.map((v) => Math.round(v / exact))}` : '')
   const seen = new Map()
   for (const p of prims) {
-    if (p.t === 'line' && dist(p.a, p.b) < tol) continue
+    if (p.t === 'line' && dist(p.a, p.b) < exact) continue
     const kk = key(p)
     const old = seen.get(kk)
     if (!old || (old.cons && !p.cons)) seen.set(kk, p)
@@ -218,7 +220,7 @@ export function importDraftpad(sk0, doc, opts) {
       for (let j = -1; j <= 1; j++)
         for (const c of grid.get(`${cx + i},${cy + j}`) ?? []) {
           const d = dist(c.at, q)
-          if (d <= tol && (!best || d < best.d)) best = { c, d }
+          if (d <= exact && (!best || d < best.d)) best = { c, d }
         }
     if (best) {
       if (best.d > 0) merged++
@@ -246,6 +248,38 @@ export function importDraftpad(sk0, doc, opts) {
     }
     else e = ent({ t: 'arc', c: pointFor(p.c, fixed, sid('_c')), a: pointFor(p.a, fixed, sid('_a')), b: pointFor(p.b, fixed, sid('_b')), cons: p.cons || undefined })
     made.push(e)
+  }
+  // Lücken schließen: ein offenes Ende (genau ein Linienstück/Bogen endet dort) dockt an den nächsten Punkt bis tol an –
+  // nie an das andere Ende desselben Elements; zwei Punkte, die beide schon Anschluss haben (z. B. die beiden Seiten
+  // eines schmalen Schlitzes), werden nie zusammengelegt
+  {
+    const ends = new Map() // Punkt → Elemente, die dort enden
+    for (const e of made) if (e.t === 'line' || e.t === 'arc') for (const id of [e.a, e.b]) ends.set(id, [...(ends.get(id) ?? []), e])
+    const openIds = [...ends].filter(([, es]) => es.length === 1).map(([id]) => id)
+    for (const id of openIds) {
+      if (!s.pts[id] || (ends.get(id)?.length ?? 0) !== 1) continue
+      const q = [s.pts[id].x, s.pts[id].y]
+      const own = ends.get(id)[0]
+      let best = null
+      for (const o of Object.keys(s.pts)) {
+        if (o === id || o === own.a || o === own.b) continue
+        const d = dist(q, [s.pts[o].x, s.pts[o].y])
+        if (d <= tol && (!best || d < best.d)) best = { o, d }
+      }
+      if (!best) continue
+      const keep = best.o
+      const drop = id
+      // offenes Partner-Ende: Mitte; sonst bleibt der angeschlossene Punkt, wo er ist
+      if ((ends.get(keep)?.length ?? 0) <= 1) {
+        s.pts[keep].x = (s.pts[keep].x + q[0]) / 2
+        s.pts[keep].y = (s.pts[keep].y + q[1]) / 2
+      }
+      for (const e of [...made, ...s.ents]) for (const k of ['a', 'b', 'c', 'p']) if (e[k] === drop) e[k] = keep
+      delete s.pts[drop]
+      ends.set(keep, [...(ends.get(keep) ?? []), own])
+      ends.delete(drop)
+      merged++
+    }
   }
   // Feste Geometrie: Bögen exakt schließen. Draftpad speichert Koordinaten auf 0,001 mm gerundet,
   // die Bogenenden ergeben sich aus Mitte + Winkel – nach dem Zusammenführen mit Linienenden liegen

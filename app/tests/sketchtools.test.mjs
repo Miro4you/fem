@@ -163,3 +163,32 @@ test('Muster in der Skizze: Lochkreis 6 × um die Mitte, Reihe', async () => {
   const c3 = l.sketch.ents.filter((e) => e.t === 'circle').map((e) => P(l.sketch, e.c))
   assert.deepEqual(c3[2], [55, 10])
 })
+
+test('Ziehen zerstört nichts: Rechteck mit Rundungen klappt beim Überziehen nicht um', async () => {
+  const { dragSolve } = await import('../src/cad/sketch.js')
+  const sk = newSketch(plane)
+  const p = [[0, 0], [50, 0], [50, 30], [0, 30]].map((q, i) => addPoint(sk, q, i === 0))
+  p.forEach((a, i) => addEnt(sk, { t: 'line', a, b: p[(i + 1) % 4] }))
+  addCon(sk, { t: 'h', a: p[0], b: p[1] })
+  addCon(sk, { t: 'h', a: p[2], b: p[3] })
+  addCon(sk, { t: 'v', a: p[1], b: p[2] })
+  addCon(sk, { t: 'v', a: p[3], b: p[0] })
+  let s = sk
+  for (const c of [p[1], p[2], p[3]]) s = filletCorner(s, c, 5).sketch
+  assert.ok(solve(s).ok)
+  // obere Linie: ein Endpunkt der oberen Geraden (Berührpunkt der Rundung rechts oben)
+  const top = s.ents.find((e) => e.t === 'line' && !e.cons && Math.abs(P(s, e.a)[1] - 30) < 1e-6 && Math.abs(P(s, e.b)[1] - 30) < 1e-6)
+  const id = top.a
+  const [x0] = P(s, id)
+  const r = dragSolve(s, { pts: { [id]: [x0, -80] }, radius: {} })
+  // Ziel (unter der Unterkante) ist nicht ohne Umklappen erreichbar: bleibt vorher stehen
+  assert.equal(r.ok, false)
+  const ys = Object.values(r.sketch.pts).map((q) => q.y)
+  const topY = P(r.sketch, id)[1]
+  assert.ok(topY > 0, `obere Kante bleibt über der unteren (${topY})`)
+  // kleine Bewegung geht weiterhin glatt
+  const r2 = dragSolve(s, { pts: { [id]: [x0, 25] }, radius: {} })
+  assert.ok(r2.ok)
+  assert.ok(Math.abs(P(r2.sketch, id)[1] - 25) < 1e-6)
+  void ys
+})
