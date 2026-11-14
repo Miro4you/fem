@@ -200,7 +200,9 @@ und Positionsnummern an der Isometrie.
 sie senkrecht liegen (Ecke, Kreismitte, Bohrpunkt, Linienmitte); vor dem Bauen wird ihre Lage um dessen Verschiebung
 mitgeführt; ändert sich die Tiefe der Extrusion, wandert der Bezug anteilig mit (Deckelkanten ganz). Grenzen: Bezüge
 ohne passenden Skizzenpunkt (z. B. Kanten aus Verrundungen, STEP-Teile, „bis Fläche“) laufen weiter über die
-nächstgelegene passende Kante/Fläche.
+nächstgelegene passende Kante/Fläche – ist die nicht eindeutig (fast gleich nahe Alternative), bekommt das Feature
+die Warnung „… nicht eindeutig wiedergefunden – im Bild prüfen“ statt still zu raten. Kreiskanten werden über
+Mitte, Radius und Achse gesucht (nicht über einen Punkt auf der Kurve, der von der Naht abhängt).
 
 Offen: Bewegung/Gelenke (kinematische Lagebedingungen); „Radius ändern“ an Ring-Rundungen (nach dem Entfernen
 bleibt am Nachbarmantel eine Teilungskante, an der OpenCASCADE falsch verrundet – darum gesperrt mit Meldung);

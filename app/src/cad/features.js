@@ -377,7 +377,14 @@ function follow(r, key, features) {
   return out
 }
 
-const edgeHint = (x, features) => ({ mid: follow(x, 'mid', features), dir: x.dir, kind: x.kind, radius: x.radius, length: x.length })
+const edgeHint = (x, features) => ({
+  mid: follow(x, 'mid', features),
+  dir: x.dir,
+  kind: x.kind,
+  radius: x.radius,
+  length: x.length,
+  ...(x.kind === 'circle' && x.center ? { center: follow(x, 'center', features), axis: x.axis } : {}),
+})
 
 // gewählte Fläche für den Kern: Schwerpunkt und Art (damit sie nach Änderungen davor wiedergefunden wird)
 const faceHint = (x, features) => ({ center: follow(x, 'center', features), kind: x.kind, normal: x.normal, axis: x.axis, radius: x.radius, ...(x.kind === 'cylinder' && x.hole != null ? { hole: x.hole } : {}) })

@@ -397,6 +397,7 @@ selbst starten.
 | 18e.81 | Scheibe Ø100 × 12 mit Nabe Ø60 × 25, beide Kreiskanten verrunden (Nabe R4, außen R3), dann Mehr › Flächen entfernen: beide Rundungen anklicken | Volumen genau wie ohne Rundungen (164,934 cm³); einzeln: Außenrundung wird aufgefüllt, Hohlkehle weggenommen. „Radius ändern“ an einer Ring-Rundung meldet verständlich, dass das noch nicht geht | [ ] |
 | 18e.82 | Rechteck 60 × 40 (Zahl tippen), extrudieren, senkrechte Kante bei (60; 40) mit R5 verrunden; dann Skizze 1 öffnen, Maß 60 per Doppelklick auf 200 ändern | Rundung sitzt danach an der Ecke bei x = 200 (nicht bei x = 0); Volumen 79,946 cm³ |  [ ] |
 | 18e.83 | Platte extrudieren (Tiefe 10), obere Längskante verrunden, dann im Extrudieren die Tiefe auf 25 stellen | Rundung bleibt oben an der Kante (nicht unten) |  [ ] |
+| 18e.84 | Älteres Projekt (vor heute gespeichert) mit Verrundung öffnen, davor ein Skizzenmaß stark ändern | Liegt die Rundung danach nicht mehr eindeutig: Warnsymbol am Feature „Kante nicht eindeutig wiedergefunden – im Bild prüfen“; in neuen Projekten (18e.82/83) keine Warnung |  [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

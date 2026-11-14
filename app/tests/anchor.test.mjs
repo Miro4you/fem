@@ -58,10 +58,12 @@ test('Verrundung an der Bohrung A folgt A, wenn A in der Skizze nach x = 60 wand
   const t = torusAt(r1)
   assert.equal(t.length, 1)
   assert.ok(Math.abs(t[0][0] - 60) < 1e-3, `Verrundung bei x = ${t[0][0]} statt 60`)
-  // ohne Anker (alte Projekte): nächste Bohrung (B bei 40) – zeigt, was vorher passierte
+  assert.ok(!r0.status.some((x) => x.warn) && !r1.status.some((x) => x.warn), 'mit Anker keine Warnung')
+  // ohne Anker (alte Projekte): nächste Bohrung (B bei 40) – jetzt mit Warnung statt still
   const old = [...features, { ...fillet, edges: [{ ...edge }] }]
   const r2 = build({ features: kernelFeatures(old) })
   assert.ok(Math.abs(torusAt(r2)[0][0] - 40) < 1e-3)
+  assert.match(r2.status.at(-1).warn?.join(' ') ?? '', /nicht eindeutig/)
 })
 
 test('Fase an der senkrechten Ecke folgt der Ecke, wenn die Platte breiter wird', () => {

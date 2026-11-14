@@ -509,26 +509,51 @@ function findEdge(model, ref, what) {
   model.bodies.forEach((b, bi) => {
     for (const e of b.shape.edges) {
       const info = edgeInfo(e)
-      cand.push({ d: dist3(info.mid, ref.mid), e, bi, info })
+      // Kreiskanten über Mitte, Radius und Achse (der Punkt auf der Kurve hängt davon ab, wo die Naht liegt)
+      const circ = ref.center && ref.kind === 'circle' && info.kind === 'circle'
+      const d = circ
+        ? dist3(info.center, ref.center) + Math.abs(info.radius - (ref.radius ?? info.radius)) + (ref.axis && Math.abs(dot(info.axis, ref.axis)) < 0.999 ? size : 0)
+        : dist3(info.mid, ref.mid)
+      cand.push({ d, e, bi, info, circ })
     }
   })
   cand.sort((x, y) => x.d - y.d)
   const tol = Math.max(1e-3, 0.05 * size)
   const parallel = (d) => !ref.dir || Math.abs(dot(d, ref.dir)) > 0.9
+  // gleiche Kurve (z. B. an der Naht geteilter Kreis, zerteilte Gerade) zählt nicht als Alternative
+  const sameCurve = (a, b) => {
+    const e = 1e-6 * Math.max(1, size)
+    if (a.kind === 'circle' && b.kind === 'circle') return dist3(a.center, b.center) < e && Math.abs(a.radius - b.radius) < e
+    if (a.kind === 'line' && b.kind === 'line') return Math.abs(dot(a.dir, b.dir)) > 1 - 1e-9 && norm(cross(sub(b.mid, a.mid), a.dir)) < e
+    return false
+  }
+  const pick = (c, ok) => {
+    if (c.d > 1e-6 * Math.max(1, size) && cand.some((x) => x !== c && ok(x) && x.d < 3 * c.d && !sameCurve(x.info, c.info))) unsure(what, 'Kante')
+    return c
+  }
   for (const c of cand) {
     if (c.d > tol) break
-    if (parallel(c.info.dir)) return c
+    if (c.circ || parallel(c.info.dir)) return pick(c, (x) => x.d <= tol && (x.circ || parallel(x.info.dir)))
+  }
+  const like = (c) => {
+    if (c.d > 0.25 * size) return false
+    if (ref.dir && !c.circ && Math.abs(dot(c.info.dir, ref.dir)) < 0.999) return false
+    if (c.info.kind !== ref.kind) return false
+    if (c.info.kind === 'circle' && ref.radius && Math.abs(c.info.radius - ref.radius) > 1e-3 * Math.max(1, ref.radius)) return false
+    if (c.info.kind === 'line' && ref.length && Math.abs(c.info.length - ref.length) > 0.02 * ref.length + 1e-6 * size) return false
+    return true
   }
   if (ref.kind)
     for (const c of cand) {
       if (c.d > 0.25 * size) break
-      if (ref.dir && Math.abs(dot(c.info.dir, ref.dir)) < 0.999) continue
-      if (c.info.kind !== ref.kind) continue
-      if (c.info.kind === 'circle' && ref.radius && Math.abs(c.info.radius - ref.radius) > 1e-3 * Math.max(1, ref.radius)) continue
-      if (c.info.kind === 'line' && ref.length && Math.abs(c.info.length - ref.length) > 0.02 * ref.length + 1e-6 * size) continue
-      return c
+      if (like(c)) return pick(c, like)
     }
   throw new Problem(`${what}: eine gewählte Kante gibt es nicht mehr – im Feature neu wählen`)
+}
+
+// Bezug nur ungefähr wiedergefunden und eine fast gleich nahe Alternative da: als Warnung am Feature melden
+function unsure(what, kind) {
+  if (CUR.unsure && !CUR.unsure.includes(kind)) CUR.unsure.push(kind)
 }
 
 function edgeOp(model, f, kind) {
@@ -680,9 +705,28 @@ function findFace(model, ref, what) {
     }
     return ref.kind === 'other' && k.kind === 'other'
   }
+  // gleiche Fläche in mehreren Stücken (gleiche Ebene bzw. gleicher Zylinder) zählt nicht als Alternative
+  const sameSurf = (a, b) => {
+    const ka = faceKind(a)
+    const kb = faceKind(b)
+    const e = 1e-6 * Math.max(1, size)
+    if (ka.kind === 'plane' && kb.kind === 'plane')
+      return Math.abs(dot(ka.normal, kb.normal)) > 1 - 1e-9 && Math.abs(dot(sub(tuple(b.center), tuple(a.center)), ka.normal)) < e
+    if (ka.kind === 'cylinder' && kb.kind === 'cylinder') {
+      const ia = revInfo(a)
+      const ib = revInfo(b)
+      return !!ia && !!ib && Math.abs(ia.radius - ib.radius) < e && sameAxis(ia, ib, e)
+    }
+    return false
+  }
   for (const c of cand) {
     if (c.d > 0.25 * size) break
-    if (same(c.face)) return c
+    if (same(c.face)) {
+      // Alternative nur mit gleich gerichteter Normale (Ober- und Unterseite sind eindeutig verschieden)
+      const facing = (face) => ref.kind !== 'plane' || !ref.normal || dot(faceKind(face).normal, unit(ref.normal)) > 0.9995
+      if (c.d > 1e-6 * Math.max(1, size) && cand.some((x) => x !== c && x.d < 3 * c.d && x.d <= 0.25 * size && same(x.face) && facing(x.face) && !sameSurf(x.face, c.face))) unsure(what, 'Fläche')
+      return c
+    }
   }
   if (cand[0].d <= near) return cand[0]
   throw new Problem(`${what}: eine gewählte Fläche gibt es nicht mehr – im Feature neu wählen`)
@@ -1635,7 +1679,7 @@ const CACHE = []
 const CACHE_MAX = 40
 
 // Feature, das gerade läuft (neue Körper merken sich, woher sie kommen – zum Umbenennen in der Körperliste)
-const CUR = { src: null }
+const CUR = { src: null, unsure: null }
 
 function runFeature(model, f, sketches, warn, byId) {
   CUR.src = f.id
@@ -1855,7 +1899,11 @@ export function build(job) {
     const warn = []
     const work = model.clone()
     try {
+      CUR.unsure = []
       runFeature(work, f, sketches, warn, byId)
+      if (CUR.unsure.length)
+        warn.push(`${CUR.unsure.join('/')} nicht eindeutig wiedergefunden (davor etwas geändert?) – im Bild prüfen, sonst im Feature neu wählen`)
+      CUR.unsure = null
       model = work
       status.push(warn.length ? { id: f.id, ok: true, warn } : { id: f.id, ok: true })
       CACHE.push({ key: keys[k], model: model.clone(), status: status.map((s) => ({ ...s })), used: performance.now() })
