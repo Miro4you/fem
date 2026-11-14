@@ -157,6 +157,22 @@ Muster kreisförmig um Achse, Formschräge (wenn einfach).
    Werkzeug messen – auch für Onshape-Teile.
 3. **Schnittansicht**: Schnittebene (X/Y/Z oder Fläche), verschiebbar, Schnittfläche schraffiert gefüllt.
 
+## Nachtrunde 14.11.2026 (Bedienung, „weniger klunky“) ✅
+
+- Parallelprojektion in Konstruktion und FEM-Ansicht (keine verzerrte Draufsicht mehr).
+- Eigene Icons (`app/src/cad/icons.jsx`) statt Platzhaltern; Menü „Mehr“ für seltene Features.
+- Verrunden/Fase: Vorschau beim Wählen, alle sichtbaren Kanten wählbar, tangentiale Kantenketten.
+- Draftpad: verknüpfte Skizze aktualisiert sich live (Draftpad startet die Live-Sitzung beim Öffnen/Senden).
+- Skizzierer wie Draftpad: Maß am Zeiger, Rasten, Zahl tippen (`50`, `50@30`, `60x40`), Ziehen, Bedingungsleiste am
+  Zeiger; neue Werkzeuge Ecke verrunden (F), Langloch (O), Vieleck (V), Rechteck aus der Mitte (M); Rahmenauswahl.
+- Auswahl zuerst (Fläche → S skizziert darauf, Kanten → F/C), Tastenkürzel, Enter = OK, Rechtsklick-Menü im Verlauf,
+  „weiter mit Extrudieren“, Übersicht mit **?**.
+- Bohrung: ISO 273 fein/mittel/grob, Gewinde-Kernloch M2–M24, bohrt automatisch auf die Materialseite.
+
+Offen danach: alter Kern (`cad.py`) wird nur noch für Fläche entfernen / Radius-Bohrung ändern an STEP-Teilen gebraucht
+(kein Defeaturing im WASM-Build) – Ablösung bleibt offen; Boolesch zwischen Körpern, Ebene durch drei Punkte,
+Baugruppen (G6).
+
 ## G6. Baugruppen (bis ~50 Teile)
 
 1. Mehrere Teile in einer Konstruktion (heute: mehrere Körper) – Teileliste mit Namen, Material, ein-/ausblenden.

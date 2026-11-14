@@ -347,6 +347,23 @@ selbst starten.
 | 18e.31 | Sweep: Skizze 1 auf XY mit zwei Kreisen (Ø10/Ø8), Skizze 2 auf XZ mit einer Linie nach oben und einem Bogen; Sweep, Profil = Skizze 1, Pfad = Skizze 2 | gebogenes Rohr entsteht | [ ] |
 | 18e.32 | Loft: Skizze 1 Rechteck auf XY, Skizze 2 auf XY mit „Abstand zur Ebene“ 30 und Kreis; Loft, beide Skizzen anhaken | Übergang Rechteck → Kreis über 30 mm | [ ] |
 | 18e.33 | Fase/Verrunden: Kante wählen, blauen Griff an der Kante ziehen; Bohrung (nicht durch alles): Griff am Bohrpunkt ziehen | Wert ändert sich in 1-mm-Schritten, Vorschau folgt | [ ] |
+| 18e.34 | Konstruktion und Modell: Ansicht „Oben“ bzw. Doppelklick auf eine Fläche | genau senkrechter Blick, keine Seitenflächen sichtbar (Parallelprojektion, nicht mehr perspektivisch verzerrt) | [ ] |
+| 18e.35 | Werkzeugleiste der Konstruktion und des Skizzierers ansehen | eigene, einheitliche Symbole (Wirkung blau), alle Werkzeuge in einer Zeile; seltene Werkzeuge unter „Mehr“ | [ ] |
+| 18e.36 | Verrunden: Kante anklicken | Vorschau des Radius sofort; alle sichtbaren Kanten lassen sich anklicken (auch nach der Vorschau) | [ ] |
+| 18e.37 | Verknüpfte Draftpad-Skizze: in Draftpad ändern (ohne „Speichern“) | Projekt-FEM baut nach ≈ 3–5 s selbst neu (Draftpad überträgt live, sobald es aus Projekt-FEM geöffnet oder mit „In Projekt-FEM nachweisen“ geschickt wurde) | [ ] |
+| 18e.38 | Skizze: Linie zeichnen | am Zeiger Länge und Winkel („37 mm · 0°“), waagrecht/senkrecht als Zeichen; Länge rastet auf glatte Werte (⇧ = frei); `50` oder `50@30` tippen + Enter = genaue Linie mit Maß; Ziehen statt Klicken geht auch | [ ] |
+| 18e.39 | Skizze: Rechteck `60x40`, Kreis `10` (Ø) tippen | Maße werden als Skizzenmaße angelegt | [ ] |
+| 18e.40 | Skizze: Element anklicken | Bedingungsleiste erscheint neben dem Zeiger (nicht mehr unten) | [ ] |
+| 18e.41 | Ohne offenes Feature: Deckfläche anklicken, Taste **S** | Skizze startet direkt auf der Fläche, Blick senkrecht, Linienwerkzeug aktiv | [ ] |
+| 18e.42 | Kante anklicken, Taste **F**, Enter | Verrunden mit vorgewählter Kante (bei verrundeten Konturen die ganze tangentiale Kette, Alt+Klick = nur eine), Enter = OK | [ ] |
+| 18e.43 | Nach „Skizze fertig“ | Leiste unten „Skizze n fertig – weiter mit Extrudieren (E) / Drehen (R)“ | [ ] |
+| 18e.44 | Rechtsklick auf ein Feature im Verlauf | Menü: Bearbeiten, Umbenennen (direkt in der Zeile), Nach oben/unten, Unterdrücken, Skizze zeigen/ausblenden, Löschen | [ ] |
+| 18e.45 | Skizze auf Deckfläche, Kreis, Extrudieren „Weg“ | schneidet automatisch ins Material (vorher ins Leere); benutzte Skizzen sind danach ausgeblendet (Auge im Verlauf zeigt sie) | [ ] |
+| 18e.46 | Skizze: Rechteck aus der Mitte (M) `60x40`, Ecke verrunden (F): `8` tippen, Ecken anklicken | Rundungen R8 tangential, Skizze „✓ bestimmt“; Radius direkt nach dem Klick im Feld änderbar | [ ] |
+| 18e.47 | Skizze: Langloch (O): Mitte, `20` Enter, `8` Enter; Vieleck (V): Mitte, `13` Enter (+/− ändert die Eckenzahl) | Langloch 20 × 8 mit Maßen „Mittenabstand“/„Breite“; Sechskant SW 13 („Schlüsselweite“) | [ ] |
+| 18e.48 | Skizze: im Leeren Rahmen aufziehen (links → rechts bzw. rechts → links), Strg+A | ganz umschlossene bzw. berührte Elemente gewählt, Leiste daneben | [ ] |
+| 18e.49 | Bohrung (H): „Gewinde (Kernloch)“, M6; Skizze liegt unter dem Teil | Ø 5, bohrt automatisch ins Material; Durchgangsloch nach ISO 273 fein/mittel/grob | [ ] |
+| 18e.50 | Taste **?** (oder F1, Tastatur-Knopf) | Übersicht aller Tastenkürzel und Mausbefehle | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
