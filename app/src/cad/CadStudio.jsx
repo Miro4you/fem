@@ -175,6 +175,24 @@ const edgeRef = (c) => ({ mid: c.mid, dir: c.dir, kind: c.kind, ...(c.kind === '
 const shiftPlane = (plane, d) => (d ? { ...plane, origin: plane.origin.map((x, i) => x + basis(plane).n[i] * d) } : plane)
 /// Grundebene einer Skizze (ohne Abstand) aus ihrem Bezug
 const basePlaneOf = (sk) => (sk.planeRef?.std ? STD_PLANES[sk.planeRef.std] : sk.planeRef?.face?.normal ? planeFromFace(sk.planeRef.face) : null)
+/// Ebene um ihre waagrechte (u) bzw. senkrechte (v) Achse durch den Ursprung neigen
+function tiltPlane(plane, axis, deg) {
+  const a = (Number(deg) || 0) * (Math.PI / 180)
+  if (!a) return plane
+  const B = basis(plane)
+  const k = axis === 'v' ? B.v : B.u
+  // Rodrigues: Drehung von x um die Achse k
+  const rot = (x) => {
+    const c = Math.cos(a)
+    const s = Math.sin(a)
+    const kx = [k[1] * x[2] - k[2] * x[1], k[2] * x[0] - k[0] * x[2], k[0] * x[1] - k[1] * x[0]]
+    const kd = k[0] * x[0] + k[1] * x[1] + k[2] * x[2]
+    return [0, 1, 2].map((i) => x[i] * c + kx[i] * s + k[i] * kd * (1 - c))
+  }
+  return { origin: plane.origin, normal: rot(B.n), u: rot(B.u) }
+}
+/// Ebene einer Skizze aus Bezug, Neigung und Abstand
+const sketchPlaneOf = (base, sk) => shiftPlane(tiltPlane(base, sk.tiltAxis ?? 'u', num(sk.tilt) || 0), num(sk.offset) || 0)
 
 const faceRef = (f) => ({ center: f.center, kind: f.kind, normal: f.normal, point: f.point, axis: f.axis, origin: f.origin, radius: f.radius, ...(f.kind === "cylinder" && f.hole != null ? { hole: f.hole } : {}) })
 const nameOf = (r) =>
@@ -804,7 +822,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       const ref = h.std ? { std: h.std } : { face: faceRef(h.face) }
       if (d.sketch) {
         // Ebene einer vorhandenen Skizze tauschen: Geometrie bleibt in lokalen Koordinaten (Abstand bleibt)
-        setDraft({ sketch: { ...d.sketch, plane: shiftPlane(plane, num(d.sketch.offset) || 0), planeRef: ref } })
+        setDraft({ sketch: { ...d.sketch, plane: sketchPlaneOf(plane, d.sketch), planeRef: ref } })
       } else setDraft({ sketch: newSketch(plane, ref) })
       setSkInfo({ ok: true, dof: 0, free: new Set(), redundant: 0 })
       setPickFor(null)
@@ -1898,14 +1916,37 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
         <>
           <PickButton active={pickFor === 'plane'} label="Ebene" value={sk ? (sk.planeRef?.std ? `Ebene ${sk.planeRef.std}` : 'Fläche') : 'im Bild wählen'} onClick={() => setPickFor(pickFor === 'plane' ? null : 'plane')} />
           {sk && basePlaneOf(sk) && (
-            <Num
-              label="Abstand zur Ebene (z. B. für Loft)"
-              value={sk.offset ?? '0'}
-              onChange={(offset) => {
-                const v = num(offset)
-                setDraft({ sketch: { ...sk, offset, plane: Number.isFinite(v) ? shiftPlane(basePlaneOf(sk), v) : sk.plane } })
-              }}
-            />
+            <>
+              <Num
+                label="Abstand zur Ebene (z. B. für Loft)"
+                value={sk.offset ?? '0'}
+                onChange={(offset) => {
+                  const v = num(offset)
+                  setDraft({ sketch: { ...sk, offset, plane: Number.isFinite(v) ? sketchPlaneOf(basePlaneOf(sk), { ...sk, offset }) : sk.plane } })
+                }}
+              />
+              <div className="grid2">
+                <Num
+                  label="Neigung"
+                  unit="°"
+                  value={sk.tilt ?? '0'}
+                  onChange={(tilt) => {
+                    const v = num(tilt)
+                    setDraft({ sketch: { ...sk, tilt, plane: Number.isFinite(v) ? sketchPlaneOf(basePlaneOf(sk), { ...sk, tilt }) : sk.plane } })
+                  }}
+                />
+                <label className="field">
+                  <span>um Achse</span>
+                  <select
+                    value={sk.tiltAxis ?? 'u'}
+                    onChange={(e) => setDraft({ sketch: { ...sk, tiltAxis: e.target.value, plane: sketchPlaneOf(basePlaneOf(sk), { ...sk, tiltAxis: e.target.value }) } })}
+                  >
+                    <option value="u">waagrecht (x der Skizze)</option>
+                    <option value="v">senkrecht (y der Skizze)</option>
+                  </select>
+                </label>
+              </div>
+            </>
           )}
           {d.source?.kind === 'draftpad' && (
             <div className="notice small dp-source">

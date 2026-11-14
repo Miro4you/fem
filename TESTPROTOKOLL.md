@@ -373,6 +373,7 @@ selbst starten.
 | 18e.57 | Verlauf: Rechtsklick auf ein früheres Feature › „Bis hier zurückrollen“, dann ein neues Feature anlegen | Bild zeigt den Stand bis zur Marke, spätere Features blass; das neue Feature landet an der Marke; ▲/▼ verschiebt die Marke, „Ans Ende“ baut alles; Übernehmen erst am Ende möglich | [ ] |
 | 18e.58 | Skizze mit „Abstand zur Ebene“ über dem Teil, Extrudieren › „Bis Fläche“, Deckfläche anklicken | Körper reicht genau bis zur Fläche (Richtung automatisch) | [ ] |
 | 18e.59 | Rechtsklick auf ein Feature › „Duplizieren“ | Kopie direkt dahinter („… (Kopie)“), z. B. zum Ändern der Kanten/Skizze | [ ] |
+| 18e.60 | Skizze: „Neigung“ 30°, um Achse „waagrecht“; Kreis, Extrudieren | schräg stehender Zylinder (Skizzenebene um ihre x-Achse gedreht); mit „Abstand zur Ebene“ kombinierbar | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
