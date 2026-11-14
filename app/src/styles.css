@@ -734,8 +734,17 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-side { width: 300px; }
 .cad-stage { display: flex; flex-direction: column; }
 .cad-stage .cad-view { flex: 1; position: relative; }
-.cad-toolbar { position: absolute; top: 10px; left: 0; right: 0; margin: 0 auto; width: max-content; z-index: 5; display: flex; align-items: center; gap: 2px;
-  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 200px); flex-wrap: wrap; justify-content: center; row-gap: 2px; }
+.cad-toolbar { position: absolute; top: 10px; left: 12px; right: 150px; margin: 0 auto; width: max-content; z-index: 5; display: flex; align-items: center; gap: 2px;
+  padding: 4px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); max-width: calc(100% - 162px); flex-wrap: wrap; justify-content: center; row-gap: 2px; }
+/* schmale Fenster: Werkzeugleiste kompakter (Bauteil-Werkzeuge ohne Beschriftung), damit sie nicht unter den Würfel läuft */
+.cad-stage { container-type: inline-size; }
+@container (max-width: 960px) {
+  .cad-stage .cad-toolbar { gap: 1px; padding: 3px; }
+  .cad-toolbar .cad-tool { min-width: 28px; height: 30px; padding: 0 3px; }
+  .cad-toolbar .cad-tool.labeled { height: 36px; min-width: 34px; }
+  .cad-toolbar .cad-tool.labeled span { display: none; }
+  .cad-toolbar .cad-sep { margin: 4px 2px; }
+}
 .cad-tool { display: inline-flex; align-items: center; gap: 5px; height: 32px; min-width: 32px; padding: 0 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; cursor: pointer; color: var(--text); }
 .cad-tool:hover:not(:disabled) { background: var(--hover); }
 .cad-tool.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
