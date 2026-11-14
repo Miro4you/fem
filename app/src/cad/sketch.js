@@ -477,11 +477,11 @@ export function kernelSketch(id, sk) {
   const ents = []
   const pts = []
   for (const e of sk.ents) {
+    if (e.cons) continue // Hilfselemente (auch Hilfspunkte: alte Ecke einer Verrundung, Rechteckmitte) gehen nicht in den Körper
     if (e.t === 'point') {
       pts.push(P(sk, e.p))
       continue
     }
-    if (e.cons) continue
     if (e.t === 'line') ents.push({ t: 'line', a: P(sk, e.a), b: P(sk, e.b) })
     else if (e.t === 'circle') ents.push({ t: 'circle', c: P(sk, e.c), r: e.r })
     else ents.push({ t: 'arc', c: P(sk, e.c), a: P(sk, e.a), b: P(sk, e.b) })

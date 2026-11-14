@@ -895,7 +895,30 @@ const CACHE_MAX = 40
 
 function runFeature(model, f, sketches, warn, byId) {
   const before = new Set(model.bodies)
-  if (TOOLS[f.type]) {
+  if (f.type === 'hole') {
+    // Bohrung: trifft die Standardrichtung (kaum) Material, die Gegenrichtung aber schon, dann dorthin bohren
+    const keep = model.bodies.slice()
+    const vol0 = model.volume()
+    const run = (ff) => {
+      model.bodies = keep.slice()
+      const w = []
+      const tools = toolsHole(model, ff, sketches)
+      combine(model, 'cut', tools, w)
+      const r = (Number(ff.diameter) || 0) / 2
+      // weniger als ~0,05 mm Bohrtiefe je Loch: das ist nur der Überstand an der Skizzenebene
+      const little = tools.length * Math.PI * r * r * Math.max(0.05, 0.01 * 2 * r)
+      return { w, bodies: model.bodies, removed: vol0 - model.volume(), little }
+    }
+    const a = run(f)
+    let use = a
+    if (a.removed < a.little) {
+      const b = run({ ...f, flip: !f.flip })
+      if (b.removed > a.removed + b.little) use = b
+    }
+    model.bodies = use.bodies
+    if (use.removed < use.little) warn.push('Die Bohrung trifft kein Material – Skizzenpunkte und Richtung prüfen')
+    else warn.push(...use.w.filter((w) => !w.startsWith('Es wurde nichts entfernt')))
+  } else if (TOOLS[f.type]) {
     const tools = TOOLS[f.type](model, f, sketches, warn)
     combine(model, modeOf(f), tools, warn, f.mode === 'new' ? (f.bodyName ?? '').trim() || null : null)
   } else if (f.type === 'fillet' || f.type === 'chamfer') edgeOp(model, f, f.type)

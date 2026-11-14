@@ -20,17 +20,29 @@ export const FEATURE_LABEL = {
 }
 
 // Durchgangsbohrungen nach DIN EN 20273 (mittel) und Senkungen für Zylinderkopf (ISO 4762) / Senkkopf (ISO 10642)
+// Durchgangslöcher nach ISO 273 (fein / mittel / grob), Kernloch für Gewinde (Regelgewinde, ISO 2306),
+// Senkungen für Zylinderschrauben (DIN 974-1, ISO 4762) und Senkschrauben (ISO 15065, 90°)
 export const HOLE_SIZES = [
-  { name: 'M3', d: 3.4, cb: 6.5, cbT: 3.3, cs: 6.9 },
-  { name: 'M4', d: 4.5, cb: 8, cbT: 4.4, cs: 9.2 },
-  { name: 'M5', d: 5.5, cb: 10, cbT: 5.4, cs: 11.5 },
-  { name: 'M6', d: 6.6, cb: 11, cbT: 6.4, cs: 13.7 },
-  { name: 'M8', d: 9, cb: 15, cbT: 8.6, cs: 18.3 },
-  { name: 'M10', d: 11, cb: 18, cbT: 10.6, cs: 22.7 },
-  { name: 'M12', d: 13.5, cb: 20, cbT: 12.6, cs: 27.2 },
-  { name: 'M16', d: 17.5, cb: 26, cbT: 16.6, cs: 34.5 },
-  { name: 'M20', d: 22, cb: 33, cbT: 20.6, cs: 41.5 },
+  { name: 'M2', d: 2.4, fine: 2.2, coarse: 2.6, tap: 1.6, cb: 4.4, cbT: 2.2, cs: 4.4 },
+  { name: 'M2,5', d: 2.9, fine: 2.7, coarse: 3.1, tap: 2.05, cb: 5.5, cbT: 2.7, cs: 5.5 },
+  { name: 'M3', d: 3.4, fine: 3.2, coarse: 3.6, tap: 2.5, cb: 6.5, cbT: 3.3, cs: 6.9 },
+  { name: 'M4', d: 4.5, fine: 4.3, coarse: 4.8, tap: 3.3, cb: 8, cbT: 4.4, cs: 9.2 },
+  { name: 'M5', d: 5.5, fine: 5.3, coarse: 5.8, tap: 4.2, cb: 10, cbT: 5.4, cs: 11.5 },
+  { name: 'M6', d: 6.6, fine: 6.4, coarse: 7, tap: 5, cb: 11, cbT: 6.4, cs: 13.7 },
+  { name: 'M8', d: 9, fine: 8.4, coarse: 10, tap: 6.8, cb: 15, cbT: 8.6, cs: 18.3 },
+  { name: 'M10', d: 11, fine: 10.5, coarse: 12, tap: 8.5, cb: 18, cbT: 10.6, cs: 22.7 },
+  { name: 'M12', d: 13.5, fine: 13, coarse: 14.5, tap: 10.2, cb: 20, cbT: 12.6, cs: 27.2 },
+  { name: 'M16', d: 17.5, fine: 17, coarse: 18.5, tap: 14, cb: 26, cbT: 16.6, cs: 34.5 },
+  { name: 'M20', d: 22, fine: 21, coarse: 24, tap: 17.5, cb: 33, cbT: 20.6, cs: 41.5 },
+  { name: 'M24', d: 26, fine: 25, coarse: 28, tap: 21, cb: 40, cbT: 24.6, cs: 0 },
 ]
+
+/// Bohrungsdurchmesser zur Norm-Größe: Durchgang (fein/mittel/grob) oder Gewinde-Kernloch
+export function holeDiameter(h, kind = 'clear', fit = 'medium') {
+  if (!h) return null
+  if (kind === 'tap') return h.tap
+  return fit === 'fine' ? h.fine : fit === 'coarse' ? h.coarse : h.d
+}
 
 /// Zahl aus einem Eingabefeld; auch einfache Rechnungen wie `10+5`, `2*12`, `(40-8)/2` (Komma oder Punkt)
 export const num = (v) => {

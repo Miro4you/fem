@@ -224,3 +224,19 @@ test('Sweep: Rohr (Kreisring entlang Pfad mit Bogen) und Loft (Pyramidenstumpf)'
   allOk(r)
   near(r.volume, (30 / 3) * (400 + 100 + 200), 1e-6)
 })
+
+test('Bohrung aus einer Skizze unter dem Teil: bohrt automatisch ins Material', () => {
+  clearCache()
+  const p = [[-30, -20], [30, -20], [30, 20], [-30, 20]]
+  const ents = p.map((a, i) => ({ t: 'line', a, b: p[(i + 1) % 4] }))
+  for (const flip of [false, true]) {
+    const features = [
+      { id: 1, type: 'sketch', plane: xy, ents, pts: [[15, 5], [-15, 5]] },
+      { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1 },
+      { id: 3, type: 'hole', sketch: 1, diameter: 5, through: true, flip, sink: { kind: 'none' } },
+    ]
+    const r = build({ features })
+    allOk(r)
+    near(r.volume, 24000 - 2 * PI * 6.25 * 10, 1e-6, `Richtung ${flip}`)
+  }
+})

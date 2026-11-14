@@ -25,12 +25,14 @@ import {
   RefreshCw,
   ExternalLink,
   Unlink,
+  Keyboard,
 } from 'lucide-react'
 import CadView, { fmtN } from './CadView.jsx'
 import * as api from '../api.js'
 import {
   FEATURE_LABEL,
   HOLE_SIZES,
+  holeDiameter,
   defaults,
   featureId,
   featureName,
@@ -174,6 +176,69 @@ const faceRef = (f) => ({ center: f.center, kind: f.kind, normal: f.normal, poin
 const nameOf = (r) =>
   r?.std ? `Ebene ${r.std}` : r?.axis ? `${r.axis}-Achse` : r?.edge ? (r.edge.kind === 'circle' ? 'Kreiskante' : 'Kante') : r?.face ? (r.face.kind === 'cylinder' ? 'Zylinderfläche' : 'Fläche') : '–'
 
+/// tangential anschließende Kanten (Kette über gemeinsame Endpunkte mit gleicher Richtung), wie in Onshape
+function tangentChain(tess, start) {
+  const curves = tess?.curves ?? []
+  if (!curves.length || start.closed) return [start]
+  const tol = 1e-3 // mm – Kanten an einer gemeinsamen Ecke haben dieselben Endpunkte
+  const ends = (c) => {
+    const p = c.pts
+    const n = p.length / 3
+    if (n < 2) return null
+    const P = (i) => [p[3 * i], p[3 * i + 1], p[3 * i + 2]]
+    const dir = (a, b) => {
+      const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+      const l = Math.hypot(...d) || 1
+      return d.map((x) => x / l)
+    }
+    // Richtungen zeigen jeweils aus der Kante heraus; bei Kreisen exakt (Polylinie ist zu grob)
+    const out = [
+      { p: P(0), t: dir(P(1), P(0)), exact: c.kind === 'line' },
+      { p: P(n - 1), t: dir(P(n - 2), P(n - 1)), exact: c.kind === 'line' },
+    ]
+    if (c.kind === 'circle' && c.center && c.axis)
+      for (const e of out) {
+        const r = [e.p[0] - c.center[0], e.p[1] - c.center[1], e.p[2] - c.center[2]]
+        const a = c.axis
+        const t = [a[1] * r[2] - a[2] * r[1], a[2] * r[0] - a[0] * r[2], a[0] * r[1] - a[1] * r[0]]
+        const l = Math.hypot(...t)
+        if (l < 1e-12) continue
+        const k = (t[0] * e.t[0] + t[1] * e.t[1] + t[2] * e.t[2] >= 0 ? 1 : -1) / l
+        e.t = t.map((x) => x * k)
+        e.exact = true
+      }
+    return out
+  }
+  const info = new Map(curves.map((c) => [c.tag, ends(c)]))
+  const same = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < tol
+  const out = [start]
+  const seen = new Set([start.tag])
+  const queue = [start]
+  while (queue.length && out.length < 200) {
+    const c = queue.shift()
+    const ec = info.get(c.tag)
+    if (!ec) continue
+    for (const e of ec)
+      for (const d of curves) {
+        if (seen.has(d.tag) || d.closed) continue
+        const ed = info.get(d.tag)
+        if (!ed) continue
+        for (const f of ed) {
+          // am gemeinsamen Punkt: beide Richtungen zeigen auseinander → glatter Übergang
+          if (!same(e.p, f.p)) continue
+          const dot = e.t[0] * f.t[0] + e.t[1] * f.t[1] + e.t[2] * f.t[2]
+          if (dot < (e.exact && f.exact ? -0.9998 : -0.985)) {
+            seen.add(d.tag)
+            out.push(d)
+            queue.push(d)
+          }
+          break
+        }
+      }
+  }
+  return out
+}
+
 function coaxialFaces(tess, face) {
   const a = face.axis
   return tess.surfaces.filter((s) => {
@@ -205,6 +270,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const [preSel, setPreSel] = useState({ faces: [], edges: [] }) // Auswahl vor dem Feature (Fläche → Skizze, Kanten → Verrunden …)
   const [nextHint, setNextHint] = useState(null) // nach „Skizze fertig“: gleich extrudieren/drehen
   const [ctxMenu, setCtxMenu] = useState(null) // Rechtsklick im Verlauf { f, x, y }
+  const [showKeys, setShowKeys] = useState(false) // Übersicht der Tastenkürzel (Taste ?)
   const [renaming, setRenaming] = useState(null) // Feature-Id, deren Name gerade geändert wird
   const [history, setHistory] = useState({ undo: [], redo: [] })
   const skHist = useRef({ undo: [], redo: [] })
@@ -572,6 +638,12 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         else redo()
         return
       }
+      if (e.key === '?' || e.key === 'F1') {
+        e.preventDefault()
+        setShowKeys((v) => !v)
+        return
+      }
+      if (showKeys && e.key === 'Escape') return setShowKeys(false)
       if (!sketchEdit) {
         if (e.key === 'Escape') {
           if (ctxMenu) return setCtxMenu(null)
@@ -662,7 +734,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       setSelSketch(null)
       if (h.edge) {
         const has = preSel.edges.some((r) => matchEdges(viewTess, [r]).has(h.edge.tag))
-        setPreSel({ faces: [], edges: has ? preSel.edges.filter((r) => !matchEdges(viewTess, [r]).has(h.edge.tag)) : [...preSel.edges, edgeRef(h.edge)] })
+        const chain = ev?.altKey ? [h.edge] : tangentChain(viewTess, h.edge)
+        const known = matchEdges(viewTess, preSel.edges)
+        setPreSel({ faces: [], edges: has ? preSel.edges.filter((r) => !matchEdges(viewTess, [r]).has(h.edge.tag)) : [...preSel.edges, ...chain.filter((c) => !known.has(c.tag)).map(edgeRef)] })
       } else {
         const has = preSel.faces.some((r) => matchFaces(viewTess, [r]).has(h.face.tag))
         setPreSel({ edges: [], faces: has ? preSel.faces.filter((r) => !matchFaces(viewTess, [r]).has(h.face.tag)) : [...preSel.faces, faceRef(h.face)] })
@@ -692,10 +766,16 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       return
     }
     if (pickFor === 'edges' && h.edge) {
-      const ref = edgeRef(h.edge)
-      // Kanten werden am Stand vor dem Feature gewählt
+      // Kanten werden am Stand vor dem Feature gewählt; tangential anschließende Kanten kommen mit (Alt = nur diese)
+      const chain = d.tangent === false || ev?.altKey ? [h.edge] : tangentChain(shownTessBefore, h.edge)
       const has = d.edges.some((r) => matchEdges(shownTessBefore, [r]).has(h.edge.tag))
-      setDraft({ edges: has ? d.edges.filter((r) => !matchEdges(shownTessBefore, [r]).has(h.edge.tag)) : [...d.edges, ref] })
+      if (has) {
+        const gone = new Set(chain.map((c) => c.tag))
+        setDraft({ edges: d.edges.filter((r) => ![...matchEdges(shownTessBefore, [r])].some((t) => gone.has(t))) })
+      } else {
+        const known = matchEdges(shownTessBefore, d.edges)
+        setDraft({ edges: [...d.edges, ...chain.filter((c) => !known.has(c.tag)).map(edgeRef)] })
+      }
       return
     }
     if (pickFor === 'faces' && h.face) {
@@ -858,7 +938,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     // Bohrung: Tiefe am ersten Bohrpunkt, in das Material hinein
     if (d.type === 'hole' && !d.through && !pickFor) {
       const skF = features.find((f) => f.id === d.sketch && f.type === 'sketch')
-      const p0 = skF && skF.sketch.ents.find((e) => e.t === 'point')
+      const p0 = skF && skF.sketch.ents.find((e) => e.t === 'point' && !e.cons)
       const pt = p0 ? skF.sketch.pts[p0.p] : skF && Object.values(skF.sketch.pts)[0]
       const depth = num(d.depth)
       if (!pt || !Number.isFinite(depth)) return null
@@ -1438,6 +1518,9 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               <button className="cad-tool" title="Wiederholen (Strg+Y)" disabled={!!edit || !history.redo.length} onClick={redo}>
                 <Redo2 size={17} />
               </button>
+              <button className="cad-tool" title="Tastenkürzel und Maus (?)" onClick={() => setShowKeys(true)}>
+                <Keyboard size={17} />
+              </button>
             </>
           )}
           {building && <Loader2 size={16} className="spin cad-busy" />}
@@ -1454,6 +1537,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             />
           )}
         </div>
+        {showKeys && <KeysHelp sketch={!!sketchEdit} onClose={() => setShowKeys(false)} />}
         {ctxMenu && (
           <FeatureMenu
             menu={ctxMenu}
@@ -1808,25 +1892,57 @@ function FeatureDialog({ edit, tool, features, setDraft, onOk, onOkNext, regionT
         <>
           {sketchSel}
           <p className="hint">Gebohrt wird an jedem Punkt der Skizze (Werkzeug „Punkt“) und an Kreismitten, senkrecht zur Skizzenebene.</p>
-          <label className="field">
-            <span>Größe</span>
-            <select
-              value={d.size}
-              onChange={(e) => {
-                const h = HOLE_SIZES.find((x) => x.name === e.target.value)
-                if (!h) return setDraft({ size: '' })
-                const sink = d.sink.kind === 'cyl' ? { ...d.sink, d: String(h.cb), depth: String(h.cbT) } : d.sink.kind === 'cone' ? { ...d.sink, d: String(h.cs) } : d.sink
-                setDraft({ size: h.name, diameter: String(h.d), sink })
-              }}
-            >
-              <option value="">frei</option>
-              {HOLE_SIZES.map((h) => (
-                <option key={h.name} value={h.name}>
-                  {h.name} Durchgang (Ø{fmtN(h.d)})
-                </option>
-              ))}
-            </select>
-          </label>
+          <Seg
+            value={d.holeKind ?? 'clear'}
+            onChange={(holeKind) => {
+              const h = HOLE_SIZES.find((x) => x.name === d.size)
+              const sink = holeKind === 'tap' ? { ...d.sink, kind: 'none' } : d.sink
+              setDraft({ holeKind, sink, ...(h ? { diameter: String(holeDiameter(h, holeKind, d.fit)) } : {}) })
+            }}
+            options={[
+              ['clear', 'Durchgangsloch'],
+              ['tap', 'Gewinde (Kernloch)'],
+            ]}
+          />
+          <div className="grid2">
+            <label className="field">
+              <span>Größe</span>
+              <select
+                value={d.size}
+                onChange={(e) => {
+                  const h = HOLE_SIZES.find((x) => x.name === e.target.value)
+                  if (!h) return setDraft({ size: '' })
+                  const sink = d.sink.kind === 'cyl' ? { ...d.sink, d: String(h.cb), depth: String(h.cbT) } : d.sink.kind === 'cone' ? { ...d.sink, d: String(h.cs) } : d.sink
+                  setDraft({ size: h.name, diameter: String(holeDiameter(h, d.holeKind, d.fit)), sink })
+                }}
+              >
+                <option value="">frei</option>
+                {HOLE_SIZES.map((h) => (
+                  <option key={h.name} value={h.name}>
+                    {h.name} (Ø{fmtN(holeDiameter(h, d.holeKind, d.fit))})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {(d.holeKind ?? 'clear') === 'clear' ? (
+              <label className="field">
+                <span>Reihe (ISO 273)</span>
+                <select
+                  value={d.fit ?? 'medium'}
+                  onChange={(e) => {
+                    const h = HOLE_SIZES.find((x) => x.name === d.size)
+                    setDraft({ fit: e.target.value, ...(h ? { diameter: String(holeDiameter(h, 'clear', e.target.value)) } : {}) })
+                  }}
+                >
+                  <option value="fine">fein</option>
+                  <option value="medium">mittel</option>
+                  <option value="coarse">grob</option>
+                </select>
+              </label>
+            ) : (
+              <p className="hint small">Gerechnet wird mit dem Kernloch – das Gewinde selbst ist nicht modelliert.</p>
+            )}
+          </div>
           <Num label="Durchmesser" value={d.diameter} onChange={(diameter) => setDraft({ diameter, size: '' })} />
           <label className="check">
             <input type="checkbox" checked={d.through} onChange={(e) => setDraft({ through: e.target.checked })} /> Durchgehend
@@ -1881,6 +1997,9 @@ function FeatureDialog({ edit, tool, features, setDraft, onOk, onOkNext, regionT
           ) : (
             <Num label="Fase (Breite je Seite)" value={d.distance} onChange={(distance) => setDraft({ distance })} />
           )}
+          <label className="check" title="Beim Anklicken einer Kante kommen glatt anschließende Kanten mit (z. B. die ganze Kontur einer verrundeten Platte). Alt + Klick = nur diese Kante.">
+            <input type="checkbox" checked={d.tangent !== false} onChange={(e) => setDraft({ tangent: e.target.checked ? undefined : false })} /> Tangentiale Kanten mitnehmen
+          </label>
           {d.edges.length > 0 && (
             <button className="btn small" onClick={() => setDraft({ edges: [] })}>
               Auswahl leeren
@@ -2144,6 +2263,60 @@ function MoreMenu({ disabled, onPick }) {
 }
 
 // Schwebende Leiste im Bild: passende Bedingungen zur Auswahl (wie die Bedingungsleiste in Onshape)
+// Übersicht: Tastenkürzel und Maus (Taste ? oder F1)
+function KeysHelp({ sketch, onClose }) {
+  const part = Object.entries(PART_KEYS).map(([k, t]) => [k.toUpperCase(), t === 'draftpad' ? 'Draftpad' : FEATURE_LABEL[t] ?? t])
+  const sk = SKETCH_TOOLS.map(([, title, , k]) => [k, title.split(' (')[0].split(':')[0]])
+  const general = [
+    ['Enter', 'Feature bestätigen (OK)'],
+    ['Esc', 'Werkzeug/Auswahl beenden, Feature abbrechen'],
+    ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
+    ['Entf', 'Auswahl löschen (Skizze)'],
+    ['Strg+A', 'alles wählen (Skizze)'],
+    ['Zahl tippen', 'beim Zeichnen: genaues Maß (50, 50@30, 60x40)'],
+    ['?  /  F1', 'diese Übersicht'],
+  ]
+  const mouse = [
+    ['Linke Taste ziehen', 'drehen (in der Skizze: Rahmen aufziehen)'],
+    ['Rechte/mittlere Taste ziehen', 'verschieben'],
+    ['Mausrad', 'zoomen zum Zeiger'],
+    ['Doppelklick auf Fläche', 'senkrecht darauf schauen'],
+    ['Rechtsklick im Verlauf', 'Bearbeiten, Umbenennen, Verschieben …'],
+    ['Alt + Klick auf Kante', 'nur diese Kante (ohne tangentiale Nachbarn)'],
+  ]
+  const Table = ({ title, rows }) => (
+    <div className="keys-col">
+      <b>{title}</b>
+      {rows.map(([k, t]) => (
+        <div key={k + t} className="keys-row">
+          <kbd>{k}</kbd>
+          <span>{t}</span>
+        </div>
+      ))}
+    </div>
+  )
+  return (
+    <div className="keys-help" onClick={onClose}>
+      <div className="keys-card" onClick={(e) => e.stopPropagation()}>
+        <div className="keys-head">
+          <b>Tastenkürzel und Maus</b>
+          <button className="icon-btn" title="Schließen (Esc)" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="keys-grid">
+          <Table title={sketch ? 'Skizze (aktiv)' : 'Skizze'} rows={sk} />
+          <Table title={sketch ? 'Bauteil' : 'Bauteil (aktiv)'} rows={part} />
+          <div>
+            <Table title="Allgemein" rows={general} />
+            <Table title="Maus" rows={mouse} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete, onOffset, pos }) {
   const opts = applicableCons(sk, sel)
   const n = sel.pts.length + sel.ents.length
