@@ -595,3 +595,33 @@ test('Mehrere Körper: STL und Zeichnung lassen den Cache heil (makeCompound lö
   assert.equal(d.bodies, 2)
   near(d.volume, a.volume, 1e-9)
 })
+
+test('Verrundung an Kreiskanten (Torus) entfernen: Außenrundung und Hohlkehle', () => {
+  clearCache()
+  const top = { origin: [0, 0, 12], normal: [0, 0, 1], u: [1, 0, 0] }
+  const features = [
+    { id: 1, type: 'sketch', plane: xy, ents: [{ t: 'circle', c: [0, 0], r: 50 }] },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 12, dir: 1 },
+    { id: 3, type: 'sketch', plane: top, ents: [{ t: 'circle', c: [0, 0], r: 30 }] },
+    { id: 4, type: 'extrude', sketch: 3, mode: 'add', depth: 25, dir: 1 },
+    { id: 5, type: 'fillet', edges: [{ mid: [-30, 0, 12] }], radius: 4 },
+    { id: 6, type: 'fillet', edges: [{ mid: [-50, 0, 12] }], radius: 3 },
+  ]
+  const r = build({ features })
+  allOk(r)
+  const tori = r.tess.surfaces.filter((s) => s.kind === 'other')
+  assert.equal(tori.length, 2)
+  const sharp = PI * 2500 * 12 + PI * 900 * 25
+  const both = build({ features: [...features, { id: 7, type: 'removefaces', surfaces: tori.map((s) => s.center) }], tess: false })
+  allOk(both)
+  near(both.volume, sharp, 1e-9, 'beide Rundungen weg')
+  // einzeln: Summe der Änderungen ergibt wieder das Original
+  const a = build({ features: [...features, { id: 7, type: 'removefaces', surfaces: [tori[0].center] }], tess: false })
+  const b = build({ features: [...features, { id: 7, type: 'removefaces', surfaces: [tori[1].center] }], tess: false })
+  allOk(a)
+  allOk(b)
+  near(a.volume - sharp + (b.volume - sharp), r.volume - sharp, 1e-6, 'einzeln')
+  // Radius ändern an der Ring-Rundung: noch gesperrt, mit klarer Meldung statt falschem Ergebnis
+  const re = build({ features: [...features, { id: 7, type: 'refillet', surfaces: [tori[1].center], radius: 4 }], tess: false })
+  assert.match(re.status.at(-1).error ?? '', /Kreiskanten/)
+})

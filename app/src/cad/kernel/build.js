@@ -821,6 +821,72 @@ function makeFaceFromWire(wire) {
   return f
 }
 
+/// Ring-Rundung (Torusfläche an einer Kreiskante, z. B. Übergang Nabe–Flansch): Profil-Dreieck aus scharfer Ecke und
+/// den beiden Berührkreisen um die Achse gedreht. convex: Außenrundung (auffüllen), sonst Hohlkehle (abziehen).
+function torusWedge(face) {
+  const circles = face.edges.filter((e) => e.geomType === 'CIRCLE').map(edgeInfo)
+  let pair = null
+  for (let i = 0; i < circles.length && !pair; i++)
+    for (let j = i + 1; j < circles.length && !pair; j++) {
+      const a = circles[i]
+      const b = circles[j]
+      if (Math.abs(dot(a.axis, b.axis)) < 0.9999) continue
+      if (norm(cross(sub(b.center, a.center), a.axis)) > 1e-6 * Math.max(1, a.radius)) continue
+      if (Math.abs(a.radius - b.radius) < 1e-9 && dist3(a.center, b.center) < 1e-9) continue
+      pair = [a, b]
+    }
+  if (!pair) return null
+  const [a, b] = pair
+  // Achse „positiv“ ausrichten (wie Zylinder aus Extrusionen), sonst führt „vereinfachen“ die Flächen nicht zusammen
+  let axis = unit(a.axis)
+  const big = axis.reduce((m, v, i) => (Math.abs(v) > Math.abs(axis[m]) ? i : m), 0)
+  if (axis[big] < 0) axis = mul(axis, -1)
+  const p0 = a.center
+  const prof = (q) => {
+    const s = dot(sub(q, p0), axis)
+    return [norm(sub(sub(q, p0), mul(axis, s))), s]
+  }
+  const t1 = [a.radius, 0]
+  const t2 = [b.radius, dot(sub(b.center, p0), axis)]
+  const m3 = tuple(face.pointOnSurface(0.5, 0.5))
+  const m = prof(m3)
+  // Kreis durch t1, t2, m (Profilbogen der Rundung)
+  const d = 2 * (t1[0] * (t2[1] - m[1]) + t2[0] * (m[1] - t1[1]) + m[0] * (t1[1] - t2[1]))
+  if (Math.abs(d) < 1e-12) return null
+  const sq = (q) => q[0] * q[0] + q[1] * q[1]
+  const C = [
+    (sq(t1) * (t2[1] - m[1]) + sq(t2) * (m[1] - t1[1]) + sq(m) * (t1[1] - t2[1])) / d,
+    (sq(t1) * (m[0] - t2[0]) + sq(t2) * (t1[0] - m[0]) + sq(m) * (t2[0] - t1[0])) / d,
+  ]
+  // Tangenten in t1 und t2 schneiden sich in der scharfen Ecke
+  const d1 = [-(t1[1] - C[1]), t1[0] - C[0]]
+  const d2 = [-(t2[1] - C[1]), t2[0] - C[0]]
+  const det = d1[0] * -d2[1] - d1[1] * -d2[0]
+  if (Math.abs(det) < 1e-12) return null
+  const rx = t2[0] - t1[0]
+  const ry = t2[1] - t1[1]
+  const lam = (rx * -d2[1] - ry * -d2[0]) / det
+  const K = [t1[0] + lam * d1[0], t1[1] + lam * d1[1]]
+  // auf die Werte der Berührkreise schnappen (sonst wird die Seite zum Kegel statt Zylinder/Ebene und bleibt geteilt)
+  const snap = 1e-7 * Math.max(1, Math.abs(K[0]), Math.abs(K[1]))
+  for (const t of [t1, t2])
+    for (const k of [0, 1]) if (Math.abs(K[k] - t[k]) < snap) K[k] = t[k]
+  if (!(K[0] > 1e-9)) return null
+  // Außen- oder Hohlrundung: Flächennormale zeigt vom Profilmittelpunkt weg = Außenrundung
+  const n = tuple(face.normalAt(m3))
+  const radial = unit(sub(sub(m3, p0), mul(axis, dot(sub(m3, p0), axis))))
+  const nr = [dot(n, radial), dot(n, axis)]
+  const convex = nr[0] * (m[0] - C[0]) + nr[1] * (m[1] - C[1]) > 0
+  // Naht des Drehkörpers wie bei Kreisen aus Skizzen (Richtung +x bzw. +y), damit „vereinfachen“ die Flächen wieder zusammenführt
+  const ref = Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]
+  const e = unit(sub(ref, mul(axis, dot(ref, axis))))
+  const P = ([r, z]) => add(add(p0, mul(e, r)), mul(axis, z))
+  const tri = makePolygon([P(K), P(t1), P(t2)])
+  const solid = solidsOf(revolution(tri, p0, axis, 360))[0]
+  // scharfe Kreiskante danach (für „Radius ändern“)
+  return solid ? { solid, convex, sharp: { circle: true, center: add(p0, mul(axis, K[1])), axis, radius: K[0] } } : null
+}
+
 /// Keil einer Fase (ebene Fläche zwischen zwei ebenen Nachbarflächen) bis zur scharfen Kante
 function chamferWedge(shape, face) {
   const lines = face.edges.filter((e) => e.geomType === 'LINE')
@@ -895,6 +961,32 @@ function removeFacesOf(shape, faces, what, size) {
       return res.faces.reduce((best, x) => (!best || dist3(tuple(x.center), c) < dist3(tuple(best.center), c) ? x : best), null)
     })
     return removeFacesOf(res, again, what, size)
+  }
+  // Ring-Rundungen (Torus) an Kreiskanten: Profil bis zur scharfen Ecke ergänzen bzw. abziehen
+  const tori = faces.filter((f) => f.geomType === 'TORUS')
+  if (tori.length) {
+    let out = shape
+    const sharpT = []
+    for (const f of tori) {
+      const w = torusWedge(f)
+      if (!w) throw new Problem(`${what}: diese Rundung an einer Kreiskante lässt sich nicht zur scharfen Kante ergänzen`)
+      out = w.convex ? out.fuse(w.solid) : out.cut(w.solid)
+      sharpT.push(w.sharp)
+    }
+    let res = solidsOf(out)[0] ?? out
+    try {
+      res = res.simplify()
+    } catch {
+      // ungeteilt lassen
+    }
+    const rest = faces.filter((f) => f.geomType !== 'TORUS')
+    if (!rest.length) return { shape: solidsOf(res)[0] ?? res, sharp: sharpT }
+    const again = rest.map((f) => {
+      const c = tuple(f.center)
+      return res.faces.reduce((best, x) => (!best || dist3(tuple(x.center), c) < dist3(tuple(best.center), c) ? x : best), null)
+    })
+    const more = removeFacesOf(res, again, what, size)
+    return { shape: more.shape, sharp: [...sharpT, ...more.sharp] }
   }
   const infos = faces.map((face) => ({ face, info: revInfo(face) }))
   const bad = infos.find((x) => !x.info)
@@ -984,6 +1076,9 @@ function refillet(model, f, warn) {
   const per = new Map()
   for (const w of sharp) {
     const body = model.bodies[w.bi]
+    // Ring-Rundung: nach dem Entfernen bleibt am Nachbarmantel eine Teilungskante genau am neuen Rundungsrand –
+    // OpenCASCADE verrundet dort falsch. Darum vorerst gesperrt (Entfernen allein ist exakt).
+    if (w.circle) throw new Problem('Radius ändern: geht bei Rundungen an Kreiskanten (Ring) noch nicht – bitte die Verrundung im Verlauf ändern; „Flächen entfernen“ nimmt sie ganz weg')
     let best = null
     for (const e of body.shape.edges) {
       if (e.geomType !== 'LINE') continue

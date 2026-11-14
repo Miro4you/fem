@@ -193,8 +193,12 @@ A4/A3 und Schriftfeld (Benennung, Masse mit Werkstoff, Datum, ISO 2768-m); Vorsc
 durch die Mitte (schraffiert), Drucken als PDF; Baugruppen mit Stückliste (Pos., Menge, Benennung, Werkstoff, Masse)
 und Positionsnummern an der Isometrie.
 
-Offen: Bewegung/Gelenke (kinematische Lagebedingungen), Torusflächen (Ecken zweier Rundungen) beim
-Flächen-Entfernen; in der Zeichnung Einzelmaße (außer Bohrungen), frei gelegte Schnitte, Gewindedarstellung.
+**Ring-Rundungen** (Torus an Kreiskanten, z. B. Übergang Nabe–Flansch, Außenkante einer Scheibe) lassen sich mit
+„Flächen entfernen“ exakt zurück zur scharfen Kante nehmen (Außenrundung auffüllen, Hohlkehle abziehen).
+
+Offen: Bewegung/Gelenke (kinematische Lagebedingungen); „Radius ändern“ an Ring-Rundungen (nach dem Entfernen
+bleibt am Nachbarmantel eine Teilungskante, an der OpenCASCADE falsch verrundet – darum gesperrt mit Meldung);
+Kugelecken (drei Rundungen) beim Flächen-Entfernen; in der Zeichnung Einzelmaße (außer Bohrungen), frei gelegte Schnitte, Gewindedarstellung.
 
 ## G6. Baugruppen (bis ~50 Teile)
 
