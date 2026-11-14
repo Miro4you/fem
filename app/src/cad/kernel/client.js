@@ -42,11 +42,17 @@ export function kernelReady() {
 // Ausgangsteile (STEP) für den Worker: Text einmal vom Server holen und einmal schicken, danach nur den Schlüssel
 const baseText = new Map() // Pfad → Promise<Text>
 const sentBase = new Set()
+const sentFiles = new Set()
+function stripFiles(job) {
+  // eingefügte STEP-Teile: Text nur beim ersten Mal mitschicken
+  if (!job.features?.some((f) => f.type === 'import')) return job
+  return { ...job, features: job.features.map((f) => (f.type === 'import' && sentFiles.has(f.key) ? { ...f, text: undefined } : f)) }
+}
 async function withBase(args) {
-  if (!args.base) return { ...args, base: undefined }
+  if (!args.base) return stripFiles({ ...args, base: undefined })
   if (!baseText.has(args.base)) baseText.set(args.base, api.stepText(args.base).catch((e) => (baseText.delete(args.base), Promise.reject(e))))
   const text = await baseText.get(args.base)
-  const job = { ...args, base: undefined, base_key: args.base }
+  const job = stripFiles({ ...args, base: undefined, base_key: args.base })
   if (!sentBase.has(args.base)) job.base_text = text
   return job
 }
@@ -57,13 +63,17 @@ export async function kernelBuild(args) {
   try {
     const r = await kernelBuildRaw(job)
     if (job.base_key) sentBase.add(job.base_key)
+    for (const f of job.features ?? []) if (f.type === 'import' && f.text) sentFiles.add(f.key)
     return r
   } catch (e) {
-    // Worker kennt das Ausgangsteil nicht (mehr): mit Text noch einmal
-    if (job.base_key && String(e?.message).includes('BASE_MISSING')) {
-      sentBase.delete(job.base_key)
-      const r = await kernelBuildRaw({ ...job, base_text: await baseText.get(args.base) })
-      sentBase.add(job.base_key)
+    // Worker kennt das Ausgangsteil oder ein eingefügtes Teil nicht (mehr): alles mit Text noch einmal
+    if (String(e?.message).includes('BASE_MISSING')) {
+      sentBase.clear()
+      sentFiles.clear()
+      const full = { ...job, features: args.features, ...(job.base_key ? { base_text: await baseText.get(args.base) } : {}) }
+      const r = await kernelBuildRaw(full)
+      if (job.base_key) sentBase.add(job.base_key)
+      for (const f of args.features ?? []) if (f.type === 'import') sentFiles.add(f.key)
       return r
     }
     throw e

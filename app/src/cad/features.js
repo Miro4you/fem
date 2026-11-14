@@ -15,6 +15,7 @@ export const FEATURE_LABEL = {
   shell: 'Schale',
   boolean: 'Boolesch',
   movebody: 'Körper verschieben',
+  import: 'Teil einfügen',
   sweep: 'Sweep',
   loft: 'Loft',
   refillet: 'Radius ändern',
@@ -230,6 +231,8 @@ export function problemOf(f, features) {
       return (f.sketches ?? []).length >= 2 ? null : 'mindestens zwei Skizzen wählen'
     case 'shell':
       return !f.faces.length ? 'Flächen wählen, die offen bleiben (z. B. Deckel)' : num(f.thickness) > 0 ? null : 'Wandstärke angeben'
+    case 'import':
+      return f.text ? null : 'STEP-Datei fehlt'
     case 'movebody':
       if (!f.body) return 'Körper im Bild anklicken'
       return num(f.dx) || num(f.dy) || num(f.dz) || num(f.angle) ? null : 'Weg (x, y, z) oder Winkel angeben'
@@ -316,6 +319,8 @@ export function kernelFeature(f, features) {
       return { id: f.id, type: 'loft', sketches: f.sketches, ruled: !!f.ruled, mode: f.mode, bodyName: f.bodyName || undefined, subtract: f.subtract !== false }
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map(faceHint), thickness: num(f.thickness) }
+    case 'import':
+      return { id: f.id, type: 'import', key: f.key, name: f.name, text: f.text }
     case 'movebody':
       return { id: f.id, type: 'movebody', body: f.body ? faceHint(f.body) : null, d: [num(f.dx) || 0, num(f.dy) || 0, num(f.dz) || 0], axis: f.axis, angle: num(f.angle) || 0, copy: !!f.copy }
     case 'boolean':

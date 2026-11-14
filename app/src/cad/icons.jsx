@@ -137,6 +137,18 @@ export const IcMoveBody = (p) => {
   )
 }
 
+export const IcImportPart = (p) => {
+  const c = cube(0, 3, 0.75)
+  return (
+    <Svg {...p}>
+      <path d={c.top} className={F} />
+      <path d={c.left} />
+      <path d={c.right} />
+      <path d="M18 2.5v7M15.5 7 18 9.5 20.5 7" className={A} />
+    </Svg>
+  )
+}
+
 export const IcSweep = (p) => (
   <Svg {...p}>
     <ellipse cx="5.5" cy="17.5" rx="2.5" ry="3" className={F} />

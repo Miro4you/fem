@@ -376,3 +376,21 @@ test('Körper verschieben/drehen (auch als Kopie), Namen bleiben am Körper', ()
   assert.equal(m.bodies, 1)
   assert.ok(Math.abs(m.bodies_info[0].center[0] - 120) < 1e-6)
 })
+
+test('Teil einfügen (STEP) als weiterer Körper, Text nur einmal nötig', async () => {
+  clearCache()
+  const { readFileSync } = await import('node:fs')
+  const text = readFileSync(new URL('../../examples/geometrie/lochplatte.step', import.meta.url), 'utf8')
+  const base = [
+    { id: 1, type: 'sketch', plane: xy, ents: rect(0, 0, 40, 20) },
+    { id: 2, type: 'extrude', sketch: 1, mode: 'add', depth: 10, dir: 1 },
+  ]
+  const r = build({ features: [...base, { id: 3, type: 'import', key: 'lp1', name: 'Lochplatte', text }] })
+  allOk(r)
+  assert.equal(r.bodies, 2)
+  assert.equal(r.bodies_info[1].name, 'Lochplatte')
+  // zweiter Aufbau ohne Text (Worker kennt ihn schon), mit Verschieben dahinter
+  const r2 = build({ features: [...base, { id: 3, type: 'import', key: 'lp1', name: 'Lochplatte' }, { id: 4, type: 'movebody', body: { center: r.tess.surfaces.find((x) => x.body === 1).center }, d: [200, 0, 0], axis: 'z', angle: 0 }] })
+  allOk(r2)
+  near(r2.volume, r.volume, 1e-9, 'gleiches Volumen')
+})

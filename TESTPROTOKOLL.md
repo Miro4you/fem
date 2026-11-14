@@ -379,6 +379,7 @@ selbst starten.
 | 18e.63 | Im Verlauf eine (ausgeblendete) Skizze mit der Maus überfahren | Skizze erscheint solange blau im Bild | [ ] |
 | 18e.64 | Skizze: Kreis Ø100 um den Ursprung, Kreis Ø9 bei (35, 0) anklicken › „Muster …“ › Kreis × 6 › OK; Extrudieren | Lochkreis mit 6 Bohrungen (um den Ursprung bzw. einen mitgewählten Punkt); Extrudieren wählt die Scheibe mit Löchern automatisch | [ ] |
 | 18e.65 | Mehr › Körper verschieben: Körper anklicken, z = 25, Drehen um Z 45°, „Als Kopie“ | Kopie 25 mm höher und um 45° gedreht, Name „… (Kopie)“; ohne Kopie wird der Körper selbst bewegt | [ ] |
+| 18e.66 | Mehr › Teil einfügen: STEP-Datei wählen (z. B. `examples/geometrie/flansch.step`) | Körper der Datei kommen als weitere Körper dazu (Namen aus der Datei bzw. Dateiname), Feature im Verlauf; mit „Körper verschieben“ anordnen; wird mit dem Projekt gespeichert | [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

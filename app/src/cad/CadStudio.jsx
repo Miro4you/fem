@@ -69,6 +69,7 @@ const FEATURE_ICON = {
   shell: I.IcShell,
   boolean: I.IcBoolean,
   movebody: I.IcMoveBody,
+  import: I.IcImportPart,
   sweep: I.IcSweep,
   loft: I.IcLoft,
   refillet: I.IcFillet,
@@ -136,6 +137,7 @@ const MORE_TOOLS = [
   ['removefaces', 'Flächen entfernen (z. B. Bohrung oder Radius weg)'],
   ['boolean', 'Boolesch: Körper vereinigen, voneinander abziehen oder Schnittmenge'],
   ['movebody', 'Körper verschieben oder drehen (auch als Kopie) – z. B. Teile zueinander anordnen'],
+  ['import', 'Teil einfügen: STEP-Datei als weiteren Körper holen (danach mit „Körper verschieben“ anordnen)'],
 ]
 
 const emptySel = { pts: [], ents: [], cons: [] }
@@ -436,8 +438,24 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       setPickFor('plane')
     }
   }
+  const partFileRef = useRef(null)
+  const insertPart = async (file) => {
+    if (!file) return
+    const text = await file.text()
+    if (!text.trimStart().startsWith('ISO-10303-21')) return note('Das ist keine STEP-Datei')
+    const id = featureId(features)
+    const name = file.name.replace(/\.(step|stp)$/i, '')
+    const f = { id, type: 'import', name, key: `${Date.now().toString(36)}-${text.length}`, text }
+    commitFeatures([...features.slice(0, rollIdx), f, ...features.slice(rollIdx)])
+    if (rollTo != null) setRollTo(rollIdx + 1)
+    note(`„${name}“ eingefügt – mit Mehr › Körper verschieben anordnen`)
+  }
   const startNew = (type) => {
     if (edit) return note('Erst das offene Feature bestätigen oder abbrechen')
+    if (type === 'import') {
+      partFileRef.current?.click()
+      return
+    }
     setNextHint(null)
     const id = featureId(features)
     const draft = { id, type, name: featureName(features, type), ...defaults(type) }
@@ -1772,6 +1790,16 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           )}
           {building && <Loader2 size={16} className="spin cad-busy" />}
           <input ref={fileRef} type="file" accept=".json,.draftpad" style={{ display: 'none' }} onChange={onDraftpadFile} />
+          <input
+            ref={partFileRef}
+            type="file"
+            accept=".step,.stp"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              insertPart(e.target.files?.[0])
+              e.target.value = ''
+            }}
+          />
           {dpLib && (
             <DraftpadLibrary
               onClose={() => setDpLib(false)}

@@ -1315,6 +1315,7 @@ function runFeature(model, f, sketches, warn, byId) {
   else if (f.type === 'removefaces') removeFaces(model, f, warn)
   else if (f.type === 'boolean') booleanOp(model, f, warn)
   else if (f.type === 'movebody') moveBody(model, f, warn)
+  else if (f.type === 'import') importPart(model, f)
   else if (f.type === 'refillet') refillet(model, f, warn)
   else if (f.type === 'rehole') rehole(model, f, warn)
   else throw new Problem(`„${f.type}“ kann der neue Kern noch nicht`)
@@ -1371,6 +1372,16 @@ function stepNames(text, n) {
   return Array(n).fill(null)
 }
 
+const FILES = new Map() // eingefügte STEP-Dateien: Schlüssel → Text (einmal geschickt)
+
+/// eingefügtes Teil (STEP) als weitere Körper
+function importPart(model, f) {
+  if (f.text) FILES.set(f.key, f.text)
+  const m = importBase('imp:' + f.key, FILES.get(f.key))
+  const many = m.bodies.length > 1
+  m.bodies.forEach((b, i) => model.bodies.push({ shape: b.shape.clone(), name: b.name ?? (f.name ? (many ? `${f.name} ${i + 1}` : f.name) : null), src: CUR.src }))
+}
+
 function importBase(key, text) {
   let m = BASE_CACHE.get(key)
   if (m) return m
@@ -1410,7 +1421,9 @@ export function build(job) {
   const baseKey = job.base_key ?? null
   const baseModel = baseKey ? importBase(baseKey, job.base_text) : null
   const prefix = baseKey ? `base:${baseKey}|` : ''
-  const keys = features.map((_, k) => prefix + JSON.stringify(features.slice(0, k + 1)))
+  // Schlüssel ohne die Texte eingefügter Teile (die kommen nur beim ersten Mal mit)
+  const plain = features.map((f) => (f.type === 'import' ? { ...f, text: undefined } : f))
+  const keys = plain.map((_, k) => prefix + JSON.stringify(plain.slice(0, k + 1)))
   // längster gespeicherter Anfang
   let start = 0
   let model = baseModel ? baseModel.clone() : new Model()
@@ -1451,6 +1464,8 @@ export function build(job) {
         CACHE.length = CACHE_MAX
       }
     } catch (ex) {
+      // Text eines eingefügten Teils fehlt im Worker: Aufrufer schickt alles noch einmal
+      if (ex instanceof Problem && ex.message === 'BASE_MISSING') throw ex
       const msg = ex instanceof Problem ? ex.message : `${f.type}: Die Geometrie lässt sich so nicht erzeugen (${String(ex?.message ?? ex)})`
       status.push({ id: f.id, ok: false, error: msg })
       failed = true
