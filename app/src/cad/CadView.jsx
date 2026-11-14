@@ -569,21 +569,27 @@ export default function CadView({
       }
       const color = strong ? 0x2563eb : 0x64748b
       const opacity = strong ? 0.9 : 0.55
-      if (solid.length) {
+      // sichtbarer Teil normal, vom Körper verdeckter Teil nur blass (wie verdeckte Kanten)
+      const addLines = (arr, dashedLine) => {
+        if (!arr.length) return
         const g = new THREE.BufferGeometry()
-        g.setAttribute('position', new THREE.Float32BufferAttribute(solid, 3))
-        const l = new THREE.LineSegments(g, front(new THREE.LineBasicMaterial({ color, opacity })))
-        l.renderOrder = 11
-        s.bgGroup.add(l)
+        g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3))
+        for (const hidden of [false, true]) {
+          const o = (hidden ? (strong ? 0.35 : 0.12) : opacity) * (dashedLine ? 0.8 : 1)
+          const m = dashedLine
+            ? new THREE.LineDashedMaterial({ color, opacity: o, transparent: true, dashSize: s.size / 80, gapSize: s.size / 120 })
+            : new THREE.LineBasicMaterial({ color, opacity: o, transparent: true })
+          if (hidden) {
+            m.depthTest = false
+          } else m.depthFunc = THREE.LessEqualDepth
+          const l = new THREE.LineSegments(g, m)
+          if (dashedLine) l.computeLineDistances()
+          l.renderOrder = hidden ? 10 : 11
+          s.bgGroup.add(l)
+        }
       }
-      if (dashed.length) {
-        const g = new THREE.BufferGeometry()
-        g.setAttribute('position', new THREE.Float32BufferAttribute(dashed, 3))
-        const l = new THREE.LineSegments(g, front(new THREE.LineDashedMaterial({ color, opacity: opacity * 0.8, dashSize: s.size / 80, gapSize: s.size / 120 })))
-        l.computeLineDistances()
-        l.renderOrder = 11
-        s.bgGroup.add(l)
-      }
+      addLines(solid, false)
+      addLines(dashed, true)
     }
     s.dirty = true
   }, [sketches, hoverBg, hoverBgEnt])
@@ -901,9 +907,17 @@ export default function CadView({
       const list = cb.current.sketches
       if (!list?.length || !cb.current.onSketchPick) return null
       let best = null
+      // vom Körper verdeckte Skizzenlinien sind nicht anklickbar (sonst fängt eine Linie hinter der Fläche den Klick)
+      const s = ctx.current
+      const r = s.setRay(ev.clientX, ev.clientY)
+      const body = s.surf ? r.intersectObject(s.surf, false)[0] : null
       for (const k of list) {
         const q = onPlane(ev, k.plane)
         if (!q) continue
+        if (body) {
+          const p = new THREE.Vector3(...to3d(k.plane, q))
+          if (p.sub(r.ray.origin).dot(r.ray.direction) > body.distance + 1e-3 * s.size) continue
+        }
         const tol = 7 * mmPerPx(k.plane)
         for (const e of k.data.ents) {
           if (e.t === 'point') continue
@@ -1009,10 +1023,10 @@ export default function CadView({
         return
       }
       const want = cb.current.pick
-      if (!want) {
+      if (!want || want.pre) {
         const h = bgHit(ev)
         const nh = h ? { bg: h.id, ent: h.ent, bgEnt: true } : null
-        return setHover((o) => (JSON.stringify(o) === JSON.stringify(nh) ? o : nh))
+        if (h || !want) return setHover((o) => (JSON.stringify(o) === JSON.stringify(nh) ? o : nh))
       }
       const h = pick3d(ev, want)
       const nh = h?.face ? { face: h.face.tag } : h?.edge ? { edge: h.edge.tag } : h?.std ? { std: h.std } : null
@@ -1154,10 +1168,11 @@ export default function CadView({
       if (!down || Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 4 || down.button !== 0) return
       if (sk) return sketchClick(ev, sk)
       const want = cb.current.pick
-      if (!want) {
-        const h = bgHit(ev)
-        cb.current.onSketchPick?.(h?.id ?? null, false, h?.ent ?? null)
-        return
+      if (!want || want.pre) {
+        // Skizzen im Bild haben Vorrang (anklicken = im Verlauf markieren, Doppelklick = bearbeiten)
+        const hb = bgHit(ev)
+        cb.current.onSketchPick?.(hb?.id ?? null, false, hb?.ent ?? null)
+        if (hb || !want) return
       }
       const h = pick3d(ev, want)
       cb.current.onPick?.(h, ev)
@@ -1393,7 +1408,7 @@ export default function CadView({
         return
       }
       // Doppelklick auf eine Hintergrund-Skizze: bearbeiten
-      if (!cb.current.pick) {
+      if (!cb.current.pick || cb.current.pick.pre) {
         const h = bgHit(ev)
         if (h) return cb.current.onSketchPick?.(h.id, true, h.ent)
       }

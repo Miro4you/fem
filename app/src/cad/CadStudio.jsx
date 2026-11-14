@@ -94,6 +94,9 @@ const PART_TOOLS = [
   ['mirror', 'An einer Ebene spiegeln'],
   ['shell', 'Schale: Körper aushöhlen, gewählte Flächen bleiben offen'],
 ]
+// Tastenkürzel außerhalb des Skizzierers
+const PART_KEYS = { s: 'sketch', e: 'extrude', r: 'revolve', h: 'hole', f: 'fillet', c: 'chamfer', p: 'pattern', m: 'mirror', a: 'shell', d: 'draftpad' }
+const PART_KEY_OF = Object.fromEntries(Object.entries(PART_KEYS).map(([k, v]) => [v, k.toUpperCase()]))
 // seltener gebraucht: im Menü „Mehr“
 const MORE_TOOLS = [
   ['sweep', 'Sweep: Profil-Skizze entlang einer Pfad-Skizze (z. B. Rohr, Bügel)'],
@@ -177,6 +180,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const [selSketch, setSelSketch] = useState(null) // im Bild angeklickte Skizze (im Verlauf markiert)
   const [showGlyphs, setShowGlyphs] = useState(null) // Bedingungszeichen: null = automatisch (bis 40)
   const [parts, setParts] = useState(null) // Teile aus Schraffuren: { sketchId, rows, subtract, hover }
+  const [preSel, setPreSel] = useState({ faces: [], edges: [] }) // Auswahl vor dem Feature (Fläche → Skizze, Kanten → Verrunden …)
+  const [nextHint, setNextHint] = useState(null) // nach „Skizze fertig“: gleich extrudieren/drehen
+  const [ctxMenu, setCtxMenu] = useState(null) // Rechtsklick im Verlauf { f, x, y }
+  const [renaming, setRenaming] = useState(null) // Feature-Id, deren Name gerade geändert wird
   const [history, setHistory] = useState({ undo: [], redo: [] })
   const skHist = useRef({ undo: [], redo: [] })
   const viewRef = useRef(null)
@@ -272,8 +279,28 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   const startNew = (type) => {
     if (edit) return note('Erst das offene Feature bestätigen oder abbrechen')
+    setNextHint(null)
     const id = featureId(features)
     const draft = { id, type, name: featureName(features, type), ...defaults(type) }
+    // vorher im Bild gewählt: übernehmen (Fläche → Skizzenebene, Kanten → Verrunden/Fase, Flächen → Schale …)
+    const pre = preSel
+    setPreSel({ faces: [], edges: [] })
+    if (type === 'sketch' && pre.faces.length === 1 && pre.faces[0].kind === 'plane') {
+      const face = pre.faces[0]
+      const plane = planeFromFace(face)
+      draft.sketch = newSketch(plane, { face: faceRef(face) })
+      setEdit({ id, draft, isNew: true, index: features.length })
+      setSel(emptySel)
+      setSkInfo({ ok: true, dof: 0, free: new Set(), redundant: 0 })
+      skHist.current = { undo: [], redo: [] }
+      setPickFor(null)
+      setTool('line')
+      setTimeout(() => viewRef.current?.lookAt(plane), 0)
+      return
+    }
+    if ((type === 'fillet' || type === 'chamfer') && pre.edges.length) draft.edges = pre.edges
+    if (['shell', 'removefaces'].includes(type) && pre.faces.length) draft.faces = pre.faces
+    if (type === 'moveface' && pre.faces.length) draft.faces = pre.faces.filter((f) => f.kind === 'plane')
     const lastSketch = [...features].reverse().find((f) => f.type === 'sketch' && !f.suppressed)
     if (['extrude', 'revolve', 'hole'].includes(type) && lastSketch) draft.sketch = lastSketch.id
     // Skizze schon von einem anderen Feature benutzt: nichts vorwählen, Flächen im Bild anklicken
@@ -292,6 +319,18 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       setPickFor('plane')
       draft.sketch = null
     } else setPickFor({ fillet: 'edges', chamfer: 'edges', removefaces: 'faces', moveface: 'faces', shell: 'faces' }[type] ?? null)
+  }
+
+  // Feature mit einer bestimmten Skizze anlegen (Kontextmenü, „weiter mit“)
+  const startNewWith = (type, sketchId) => {
+    startNew(type)
+    setEdit((e) => {
+      if (!e || e.draft.type !== type) return e
+      const sk = features.find((f) => f.id === sketchId)?.sketch
+      const used = features.some((f) => (f.type === 'extrude' || f.type === 'revolve') && f.sketch === sketchId && !f.suppressed)
+      const axis = type === 'revolve' ? ((sk?.ents.find((x) => x.t === 'line' && x.axis) ?? sk?.ents.find((x) => x.t === 'line' && x.cons))?.id ?? null) : e.draft.axis
+      return { ...e, draft: { ...e.draft, sketch: sketchId, regions: used ? [] : null, axis } }
+    })
   }
 
   const openEdit = (f) => {
@@ -323,6 +362,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (d.type === 'sketch') setTimeout(() => viewRef.current?.fit(), 0)
     // Skizze mit Schraffuren (Draftpad), noch nicht benutzt: Teile vorschlagen
     if (d.type === 'sketch' && d.sketch?.fills?.length && !list.some((f) => f.sketch === d.id && f.type !== 'sketch')) openParts(d)
+    else if (d.type === 'sketch' && edit.isNew && d.sketch?.ents?.some((e) => !e.cons && e.t !== 'point')) setNextHint({ sketchId: d.id, name: d.name })
     if (next) {
       // gleich das nächste Feature mit derselben Skizze, nichts gewählt
       const id = featureId(list)
@@ -356,6 +396,30 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     setPickFor(null)
     setSel(emptySel)
     setSkInfo(null)
+  }
+
+  // Feature im Verlauf verschieben (nur, wenn es nicht vor etwas rutscht, das es braucht)
+  const uses = (a, b) => a.sketch === b.id || a.path === b.id || (Array.isArray(a.sketches) && a.sketches.includes(b.id)) || (Array.isArray(a.features) && a.features.includes(b.id))
+  // Skizzen, die ein Feature benutzt, sind standardmäßig ausgeblendet (Auge im Verlauf zeigt sie wieder)
+  const sketchHidden = (f) => f.hidden === true || (f.hidden !== false && features.some((g) => g.type !== 'sketch' && !g.suppressed && uses(g, f)))
+  const toggleSketchShown = (f) => setCad({ ...cad, features: features.map((g) => (g.id === f.id ? { ...g, hidden: !sketchHidden(f) } : g)) })
+  const moveFeature = (f, dir) => {
+    const i = features.findIndex((g) => g.id === f.id)
+    const j = i + dir
+    if (j < 0 || j >= features.length) return
+    const g = features[j]
+    if (dir < 0 && uses(f, g)) return note(`„${f.name}“ braucht „${g.name}“ – kann nicht davor`)
+    if (dir > 0 && uses(g, f)) return note(`„${g.name}“ braucht „${f.name}“ – kann nicht dahinter`)
+    const list = [...features]
+    list[i] = g
+    list[j] = f
+    commitFeatures(list)
+  }
+  const renameFeature = (f, name) => {
+    const n = name.trim()
+    setRenaming(null)
+    if (!n || n === f.name) return
+    commitFeatures(features.map((g) => (g.id === f.id ? { ...g, name: n } : g)))
   }
 
   const removeFeature = (f) => {
@@ -485,9 +549,30 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         return
       }
       if (!sketchEdit) {
-        if (e.key === 'Escape' && edit) {
-          if (pickFor) setPickFor(null)
-          else cancel()
+        if (e.key === 'Escape') {
+          if (ctxMenu) return setCtxMenu(null)
+          if (edit) {
+            if (pickFor) setPickFor(null)
+            else cancel()
+          } else {
+            setPreSel({ faces: [], edges: [] })
+            setNextHint(null)
+            if (cmeasure.on) setCmeasure({ on: false, picks: [] })
+          }
+          return
+        }
+        if (e.key === 'Enter' && edit && !e.shiftKey) {
+          e.preventDefault()
+          accept()
+          return
+        }
+        if (!edit && !ctrl && !e.altKey && !e.shiftKey) {
+          const k = PART_KEYS[e.key.toLowerCase()]
+          if (k === 'draftpad') return setDpLib(true)
+          if (k) {
+            e.preventDefault()
+            startNew(k)
+          }
         }
         return
       }
@@ -517,6 +602,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const pickWant = useMemo(() => {
     if (sketchEdit) return null
     if (cmeasure.on) return { faces: true, edges: true }
+    // ohne offenes Feature: Flächen/Kanten vorwählen (Skizzen im Bild bleiben anklickbar)
+    if (!edit && !parts) return { faces: true, edges: true, pre: true }
     switch (pickFor) {
       case 'plane':
         return { std: true, planar: true }
@@ -536,9 +623,22 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       default:
         return null
     }
-  }, [pickFor, sketchEdit, edit?.draft.type, cmeasure.on])
+  }, [pickFor, sketchEdit, edit?.draft.type, cmeasure.on, !!edit, !!parts])
 
   const onPick = (h, ev) => {
+    if (!edit && !cmeasure.on) {
+      // Vorauswahl: anklicken = dazu/weg, ins Leere = alles weg
+      if (!h || (!h.face && !h.edge)) return setPreSel({ faces: [], edges: [] })
+      setSelSketch(null)
+      if (h.edge) {
+        const has = preSel.edges.some((r) => matchEdges(viewTess, [r]).has(h.edge.tag))
+        setPreSel({ faces: [], edges: has ? preSel.edges.filter((r) => !matchEdges(viewTess, [r]).has(h.edge.tag)) : [...preSel.edges, edgeRef(h.edge)] })
+      } else {
+        const has = preSel.faces.some((r) => matchFaces(viewTess, [r]).has(h.face.tag))
+        setPreSel({ edges: [], faces: has ? preSel.faces.filter((r) => !matchFaces(viewTess, [r]).has(h.face.tag)) : [...preSel.faces, faceRef(h.face)] })
+      }
+      return
+    }
     if (cmeasure.on) {
       if (!h?.point) return
       const pick = { point: h.point, surf: h.face ?? null, edge: h.edge ?? null }
@@ -649,14 +749,18 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
       }
       return out
     }
-    if (!d) return out
+    if (!d) {
+      out.edges = matchEdges(viewTess, preSel.edges)
+      out.faces = matchFaces(viewTess, preSel.faces)
+      return out
+    }
     if (d.edges) out.edges = matchEdges(pickEdges ? before.tess : viewTess, d.edges)
     if (d.faces) out.faces = matchFaces(viewTess, d.faces)
     if (d.type === 'mirror' && d.plane?.std) out.std.add(d.plane.std)
     if (d.type === 'mirror' && d.plane?.face) out.faces = matchFaces(viewTess, [d.plane.face])
     if ((d.type === 'refillet' || d.type === 'rehole') && d.surfaces) out.faces = matchFaces(viewTess, d.surfaces.map((c) => ({ center: c })))
     return out
-  }, [edit?.draft, viewTess, cmeasure, pickEdges])
+  }, [edit?.draft, viewTess, cmeasure, pickEdges, preSel])
 
   // Bereiche zum Anklicken (Extrudieren/Drehen) – direkt aus der Skizze, je Skizze einmal geholt
   const regionDraft = edit && (edit.draft.type === 'extrude' || edit.draft.type === 'revolve') ? edit.draft : null
@@ -837,7 +941,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     if (!showSketches) return []
     const used = edit?.draft?.sketch
     return features
-      .filter((f) => f.type === 'sketch' && !f.suppressed && !f.hidden && f.id !== sketchEdit?.id && f.sketch?.ents?.length)
+      .filter((f) => f.type === 'sketch' && !f.suppressed && f.id !== sketchEdit?.id && f.sketch?.ents?.length && (!sketchHidden(f) || used === f.id || selSketch === f.id))
       .map((f) => ({ id: f.id, plane: f.sketch.plane, data: f.sketch, active: used === f.id || selSketch === f.id, highlightEnts: pickFor === 'skaxis' && used === f.id }))
   }, [features, showSketches, edit?.draft?.sketch, sketchEdit?.id, selSketch, pickFor])
   const onSketchPick = (id, open, ent) => {
@@ -1078,12 +1182,30 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     key={f.id}
                     className={'cad-feat' + (f.suppressed ? ' off' : '') + (st && !st.ok && !st.skipped ? ' bad' : '') + (st?.skipped ? ' skipped' : '') + (selSketch === f.id ? ' on' : '')}
                     onDoubleClick={() => openEdit(f)}
-                    title={st?.error ?? st?.warn?.join(' · ') ?? prob ?? 'Doppelklick zum Bearbeiten'}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setCtxMenu({ f, x: e.clientX, y: e.clientY })
+                    }}
+                    title={st?.error ?? st?.warn?.join(' · ') ?? prob ?? 'Klick: bearbeiten · Rechtsklick: weitere Befehle'}
                   >
-                    <Icon size={14} />
-                    <button className="cad-feat-name" onClick={() => openEdit(f)}>
-                      {f.name}
-                    </button>
+                    <Icon size={16} />
+                    {renaming === f.id ? (
+                      <input
+                        className="cad-feat-rename"
+                        autoFocus
+                        defaultValue={f.name}
+                        onFocus={(e) => e.target.select()}
+                        onBlur={(e) => renameFeature(f, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') renameFeature(f, e.target.value)
+                          if (e.key === 'Escape') setRenaming(null)
+                        }}
+                      />
+                    ) : (
+                      <button className="cad-feat-name" onClick={() => openEdit(f)}>
+                        {f.name}
+                      </button>
+                    )}
                     {(st?.error || prob) && !f.suppressed && <TriangleAlert size={13} className="bad-icon" />}
                     {st?.warn && <Info size={13} className="warn-icon" />}
                     <span className="spacer" />
@@ -1104,11 +1226,11 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
                     )}
                     {f.type === 'sketch' && !f.suppressed && (
                       <button
-                        className={'icon-btn' + (f.hidden ? ' keep' : '')}
-                        title={f.hidden ? 'Skizze im Bild zeigen' : 'Skizze im Bild ausblenden (wirkt weiter)'}
-                        onClick={() => setCad({ ...cad, features: features.map((g, k) => (k === i ? { ...g, hidden: !g.hidden || undefined } : g)) })}
+                        className={'icon-btn' + (sketchHidden(f) ? ' keep' : '')}
+                        title={sketchHidden(f) ? 'Skizze im Bild zeigen' : 'Skizze im Bild ausblenden (wirkt weiter)'}
+                        onClick={() => toggleSketchShown(f)}
                       >
-                        {f.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
+                        {sketchHidden(f) ? <EyeOff size={13} /> : <Eye size={13} />}
                       </button>
                     )}
                     <button className={'icon-btn' + (f.suppressed ? ' keep' : '')} title={f.suppressed ? 'Wieder einschalten' : 'Unterdrücken (vorübergehend aus, wirkt nicht mehr)'} onClick={() => commitFeatures(features.map((g, k) => (k === i ? { ...g, suppressed: !g.suppressed } : g)))}>
@@ -1255,7 +1377,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               {PART_TOOLS.map(([k, title]) => {
                 const Icon = FEATURE_ICON[k]
                 return (
-                  <button key={k} className="cad-tool labeled" title={title} disabled={!!edit} onClick={() => startNew(k)}>
+                  <button key={k} className="cad-tool labeled" title={PART_KEY_OF[k] ? `${title} (${PART_KEY_OF[k]})` : title} disabled={!!edit} onClick={() => startNew(k)}>
                     <Icon size={22} />
                     <span>{SHORT[k] ?? FEATURE_LABEL[k]}</span>
                   </button>
@@ -1301,6 +1423,43 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             />
           )}
         </div>
+        {ctxMenu && (
+          <FeatureMenu
+            menu={ctxMenu}
+            onClose={() => setCtxMenu(null)}
+            items={[
+              ['Bearbeiten', () => openEdit(ctxMenu.f)],
+              ['Umbenennen', () => setRenaming(ctxMenu.f.id)],
+              ['Nach oben', () => moveFeature(ctxMenu.f, -1)],
+              ['Nach unten', () => moveFeature(ctxMenu.f, 1)],
+              [ctxMenu.f.suppressed ? 'Wieder einschalten' : 'Unterdrücken', () => commitFeatures(features.map((g) => (g.id === ctxMenu.f.id ? { ...g, suppressed: !g.suppressed } : g)))],
+              ...(ctxMenu.f.type === 'sketch'
+                ? [
+                    [sketchHidden(ctxMenu.f) ? 'Skizze zeigen' : 'Skizze ausblenden', () => toggleSketchShown(ctxMenu.f)],
+                    ['Extrudieren', () => startNewWith('extrude', ctxMenu.f.id)],
+                    ['Drehen', () => startNewWith('revolve', ctxMenu.f.id)],
+                  ]
+                : []),
+              ['Löschen', () => removeFeature(ctxMenu.f), 'danger'],
+            ]}
+          />
+        )}
+        {nextHint && !edit && (
+          <div className="cad-next">
+            <span>
+              <b>{nextHint.name}</b> fertig – weiter mit
+            </span>
+            <button className="btn small primary" onClick={() => startNewWith('extrude', nextHint.sketchId)}>
+              <I.IcExtrude size={16} /> Extrudieren <kbd>E</kbd>
+            </button>
+            <button className="btn small" onClick={() => startNewWith('revolve', nextHint.sketchId)}>
+              <I.IcRevolve size={16} /> Drehen <kbd>R</kbd>
+            </button>
+            <button className="icon-btn" aria-label="Schließen" onClick={() => setNextHint(null)}>
+              <X size={14} />
+            </button>
+          </div>
+        )}
         {sketchEdit && (sel.pts.length > 0 || sel.ents.length > 0 || sel.cons.length > 0) && (
           <ConBar pos={conPos} sk={sketchEdit.sketch} sel={sel} onOffset={applyOffset} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
         )}
@@ -1439,7 +1598,12 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
     <>
       <Seg
         value={d.mode}
-        onChange={(mode) => setDraft({ mode })}
+        onChange={(mode) => {
+          // Skizze auf einer Bauteilfläche: „Weg“ schneidet ins Material, „Dazu“ baut nach außen
+          const onFace = !!sketches.find((s) => s.id === d.sketch)?.sketch?.planeRef?.face
+          if (d.type === 'extrude' && onFace && !d.symmetric && (mode === 'cut') !== (d.mode === 'cut')) setDraft({ mode, flip: mode === 'cut' })
+          else setDraft({ mode })
+        }}
         options={[
           ['add', 'Dazu'],
           ['cut', 'Weg'],
@@ -1481,7 +1645,16 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
   const sk = d.type === 'sketch' ? d.sketch : null
 
   return (
-    <section className="section cad-dialog">
+    <section
+      className="section cad-dialog"
+      onKeyDown={(e) => {
+        // Enter in einem Feld bestätigt das Feature (wie OK); nicht im Skizzierer
+        if (e.key === 'Enter' && !e.shiftKey && d.type !== 'sketch' && e.target instanceof HTMLInputElement) {
+          e.preventDefault()
+          setTimeout(() => onOk(), 0)
+        }
+      }}
+    >
       <h2>
         <Icon size={15} />
         <input className="cad-name" value={d.name} onChange={(e) => setDraft({ name: e.target.value })} />
@@ -1855,6 +2028,34 @@ function DirPick({ label, value, flip, active, onPick, onAxis, onFlip }) {
         )}
       </div>
     </label>
+  )
+}
+
+// Rechtsklick-Menü im Verlauf
+function FeatureMenu({ menu, items, onClose }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const close = (e) => !ref.current?.contains(e.target) && onClose()
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [onClose])
+  return (
+    <div ref={ref} className="cad-ctx" style={{ left: menu.x, top: menu.y }} role="menu">
+      <div className="cad-ctx-title">{menu.f.name}</div>
+      {items.map(([label, fn, kind]) => (
+        <button
+          key={label}
+          role="menuitem"
+          className={kind === 'danger' ? 'danger' : ''}
+          onClick={() => {
+            onClose()
+            fn()
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
   )
 }
 
