@@ -187,8 +187,9 @@ Tastenkürzel.
 
 1. **Skizze** (S): Hauptebene oder ebene Fläche anklicken – oder erst eine Fläche anklicken, dann S. Ebene mit
    „Abstand zur Ebene“ verschieben und um ihre Achsen **neigen**. Werkzeuge: Linie (L), Rechteck (R), Rechteck aus der
-   Mitte (M), Kreis (C), Bogen (A), Langloch (O), Vieleck (V, +/− Ecken), Ecke verrunden (F), Spiegeln (I), Punkt (P),
-   Maß (D), Verlängern (E), Trimmen (T), Kante übernehmen (U). Wie in Draftpad stehen Länge und Winkel am Zeiger und
+   Mitte (M), Kreis (C), Bogen (A), Tangentenbogen (G), Langloch (O), Vieleck (V, +/− Ecken), Ecke verrunden (F),
+   Spiegeln (I), Punkt (P), Maß (D), Verlängern (E), Trimmen (T), Kante übernehmen (U); Q = Hilfslinie,
+   Strg+C/Strg+V kopiert Elemente (auch in eine andere Skizze), „Muster …“ an der Auswahl legt Reihen oder Lochkreise an. Wie in Draftpad stehen Länge und Winkel am Zeiger und
    rasten auf glatte Werte (⇧ = frei); einfach die Zahl tippen: `50`, `50@30`, `60x40`, Ø – daraus werden Maße.
    Elemente anklicken (oder Rahmen aufziehen: → ganz drin, ← berührt) zeigt die passenden **Bedingungen** gleich
    daneben (waagrecht, senkrecht, parallel, rechtwinklig, gleich, tangential, deckungsgleich, Punkt auf, Mittelpunkt,
@@ -200,12 +201,14 @@ Tastenkürzel.
    (fein/mittel/grob) oder Gewinde-Kernloch M2–M24, Tiefe mit Spitze oder durchgehend, Senkungen; bohrt immer ins
    Material.
 4. **Verrunden / Fase** (F/C): Kanten anklicken (tangentiale Kette kommt mit, Alt = nur eine), Vorschau sofort.
-   **Muster**, **Spiegeln**, **Schale**, im Menü „Mehr“: Sweep, Loft, Fläche verschieben, **Flächen entfernen**
-   (Bohrung, Senkung, gerade Verrundung), **Boolesch** (vereinigen, abziehen, Schnittmenge). Beim importierten Teil
-   **Radius/Bohrung ändern**.
+   **Muster**, **Spiegeln**, **Schale**; im Menü „Mehr“: *Formen* – Rippe, Sweep, Loft; *Ändern* – Fläche verschieben,
+   **Flächen entfernen** (Bohrung, Senkung, gerade Verrundung, Fase), **Formschräge**; *Körper und Baugruppe* –
+   **Boolesch**, **Körper verschieben/drehen** (auch als Kopie), **Teil einfügen** (STEP), **Ausrichten** (Fläche auf
+   Fläche, Bolzen in Bohrung). Beim importierten Teil **Radius/Bohrung ändern**. Die **Körperliste** zeigt alle Körper
+   (getönt), Doppelklick benennt um, das Auge blendet aus; überschneiden sich Körper, warnt das Übernehmen.
 5. **Verlauf** links: Doppelklick = bearbeiten, Rechtsklick = Umbenennen, Duplizieren, Nach oben/unten, Unterdrücken,
    **Bis hier zurückrollen** (neue Features kommen an die Marke), Löschen. Fehler stehen rot am Feature.
-6. **Messen** und **Schnittansicht** rechts oben im Bild; **„In die Rechnung übernehmen“** baut das Teil als STEP,
+6. **Messen**, **Schnittansicht** und **Darstellung** (mit/ohne Kanten, durchsichtig, Drahtgitter) rechts oben im Bild; **„In die Rechnung übernehmen“** baut das Teil als STEP,
    vernetzt es und stellt Lager, Lasten und Nähte auf die neuen Flächen um. **„Als STEP speichern“** exportiert es.
 
 **Aus Draftpad:** Startseite „Aus Draftpad“ oder Knopf „Draftpad“ in der Konstruktion öffnet die

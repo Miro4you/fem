@@ -179,7 +179,13 @@ Ebenfalls 14.11. vormittags: Bohrung direkt auf Fläche (H → Fläche → Punkt
 Spiegeln im Skizzierer (Symmetrie bleibt), Zurückrollen im Verlauf (Features mittendrin einfügen), Extrudieren bis
 Fläche, Duplizieren, Skizzenebene neigen, Werkzeugleiste für 1280-px-Bildschirme.
 
-Offen: Ebene durch drei Punkte, Torusflächen (Ecken zweier Rundungen) beim Flächen-Entfernen, Baugruppen (G6).
+Weiter am 14.11.: Rippe, Formschräge, Tangentenbogen, Muster und Kopieren/Einfügen im Skizzierer, Körperliste
+(umbenennen, ausblenden, getönt), Körper verschieben/drehen, Teil einfügen (STEP), Ausrichten (Fläche/Fläche,
+Achse/Achse), Warnung bei Überschneidungen, Darstellungsmodi. Damit ist G6 in einer ersten Stufe da (Teile einfügen,
+anordnen, benennen); Lagebedingungen bleiben einmalig (keine dauerhaften Mates, keine Bewegung).
+
+Offen: dauerhafte Lagebedingungen, Normteile (Schraube/Mutter als Körper), Ebene durch drei Punkte, Torusflächen
+(Ecken zweier Rundungen) beim Flächen-Entfernen.
 
 ## G6. Baugruppen (bis ~50 Teile)
 
