@@ -142,3 +142,24 @@ test('Zum Bearbeiten öffnen: nachgezogene Bezüge ergeben für den Kern dasselb
   assert.ok(Math.abs(re[2].edges[0].center[0] - 60) < 1e-9 && Math.abs(re[2].edges[0].center[2] - 25) < 1e-9, JSON.stringify(re[2].edges[0].center))
   assert.ok(Math.abs(re[3].sketch.plane.origin[2] - 25) < 1e-9, 'Skizze auf neuer Höhe')
 })
+
+test('Spiegeln an einer Seitenfläche: Spiegelebene wandert mit, wenn die Platte breiter wird', () => {
+  clearCache()
+  const { sk, features, p } = model()
+  const s2 = newSketch(xy)
+  addEnt(s2, { t: 'circle', c: addPoint(s2, [90, 20]), r: 3 })
+  const boss = { id: 4, type: 'extrude', name: 'Zapfen', sketch: 3, regions: null, useFills: true, mode: 'add', depth: '20', flip: false, symmetric: false, through: false }
+  const side = { center: [100, 20, 5], kind: 'plane', normal: [1, 0, 0] }
+  const mir = anchorRefs({ id: 5, type: 'mirror', name: 'Spiegeln 1', features: [4], plane: { face: side } }, [...features, { id: 3, type: 'sketch', sketch: s2 }, boss])
+  assert.ok(mir.plane.face.anchor, 'Ebene verankert')
+  const all = [...features, { id: 3, type: 'sketch', name: 'Skizze 2', sketch: s2 }, boss, mir]
+  const r0 = build({ features: kernelFeatures(all) })
+  assert.ok(r0.status.every((s) => s.ok), JSON.stringify(r0.status))
+  assert.ok(Math.abs(r0.tess.bbox[1][0] - 113) < 0.05, `vorher ${r0.tess.bbox[1][0]}`)
+  sk.pts[p[1]].x = 150
+  sk.pts[p[2]].x = 150
+  const r = build({ features: kernelFeatures(all) })
+  assert.ok(r.status.every((s) => s.ok), JSON.stringify(r.status))
+  // Spiegelebene jetzt bei x = 150: Zapfen-Kopie bei x = 210 (± 3)
+  assert.ok(Math.abs(r.tess.bbox[1][0] - 213) < 0.05, `nachher ${r.tess.bbox[1][0]} statt 213`)
+})

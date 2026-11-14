@@ -201,7 +201,8 @@ sie senkrecht liegen (Ecke, Kreismitte, Bohrpunkt, Linienmitte); vor dem Bauen w
 mitgeführt; ändert sich die Tiefe der Extrusion, wandert der Bezug anteilig mit (Deckelkanten ganz). Ebene
 Deckelflächen und **Skizzen auf Flächen** folgen ebenso (Platte dicker → Skizze auf der Oberseite und alles, was daraus
 entsteht, wandert mit). Beim Öffnen zum Bearbeiten werden Bezüge und Skizzenebene auf die aktuelle Lage nachgezogen
-(Markierungen im Bild stimmen, der Kern bekommt dasselbe). Grenzen: Bezüge
+(Markierungen im Bild stimmen, der Kern bekommt dasselbe). Ebenen und Achsen aus Flächen/Kanten (Spiegelebene, Teilen,
+neutrale Ebene der Formschräge, Achse/Richtung von Mustern) folgen genauso. Grenzen: Bezüge
 ohne passenden Skizzenpunkt (z. B. Kanten aus Verrundungen, STEP-Teile, „bis Fläche“) laufen weiter über die
 nächstgelegene passende Kante/Fläche – ist die nicht eindeutig (fast gleich nahe Alternative), bekommt das Feature
 die Warnung „… nicht eindeutig wiedergefunden – im Bild prüfen“ statt still zu raten. Kreiskanten werden über

@@ -392,6 +392,13 @@ function rebaseRef(r, features) {
   return out
 }
 
+// Ebene/Achse aus einer Fläche oder Kante (Spiegeln, Teilen, Formschräge, Kreismuster): an die aktuelle Lage
+function nowRef(ref, features) {
+  if (!ref || typeof ref !== 'object' || (!ref.face && !ref.edge)) return ref
+  return { ...ref, ...(ref.face ? { face: rebaseRef(ref.face, features) } : {}), ...(ref.edge ? { edge: rebaseRef(ref.edge, features) } : {}) }
+}
+const NESTED = ['plane', 'axis', 'dir', 'dir2']
+
 /// Feature zum Bearbeiten öffnen: Bezüge und Skizzenebene (auf Fläche) an die aktuelle Lage
 export function rebaseFeature(f, features) {
   if (f.type === 'sketch') {
@@ -403,6 +410,7 @@ export function rebaseFeature(f, features) {
   const out = { ...f }
   for (const k of ['edges', 'faces', 'targets', 'tools']) if (Array.isArray(f[k])) out[k] = f[k].map((r) => rebaseRef(r, features))
   for (const k of ['upto', 'at', 'moving', 'target', 'body']) if (f[k] && typeof f[k] === 'object' && !Array.isArray(f[k])) out[k] = rebaseRef(f[k], features)
+  for (const k of NESTED) if (f[k]) out[k] = nowRef(f[k], features)
   return out
 }
 
@@ -428,6 +436,9 @@ export function anchorRefs(f, before) {
   const out = { ...f }
   for (const k of ['edges', 'faces', 'targets', 'tools']) if (Array.isArray(f[k])) out[k] = f[k].map(one)
   for (const k of ['upto', 'at', 'moving', 'target', 'body']) if (f[k] && typeof f[k] === 'object' && !Array.isArray(f[k])) out[k] = one(f[k])
+  // Ebene/Achse/Richtung aus einer Fläche oder Kante
+  for (const k of ['plane', 'axis', 'dir', 'dir2'])
+    if (f[k] && typeof f[k] === 'object' && (f[k].face || f[k].edge)) out[k] = { ...f[k], ...(f[k].face ? { face: one(f[k].face) } : {}), ...(f[k].edge ? { edge: one(f[k].edge) } : {}) }
   return out
 }
 
@@ -512,13 +523,13 @@ export function kernelFeature(f, features) {
           out.spacing2 = num(f.spacing2)
         }
       } else {
-        out.axis = axisOf(f.axis)
+        out.axis = axisOf(nowRef(f.axis, features))
         out.angle = num(f.angle)
       }
       return out
     }
     case 'mirror':
-      return { id: f.id, type: 'mirror', features: f.features, plane: planeOf(f.plane) }
+      return { id: f.id, type: 'mirror', features: f.features, plane: planeOf(nowRef(f.plane, features)) }
     case 'removefaces':
       return { id: f.id, type: 'removefaces', faces: f.faces.map((x) => faceHint(x, features)) }
     case 'moveface':
@@ -530,11 +541,11 @@ export function kernelFeature(f, features) {
     case 'shell':
       return { id: f.id, type: 'shell', faces: f.faces.map((x) => faceHint(x, features)), thickness: num(f.thickness) }
     case 'split':
-      return { id: f.id, type: 'split', plane: planeOf(f.plane), keep: f.keep }
+      return { id: f.id, type: 'split', plane: planeOf(nowRef(f.plane, features)), keep: f.keep }
     case 'stdpart':
       return { id: f.id, type: 'stdpart', kind: f.kind, size: f.size, length: num(f.length), name: f.bodyName, at: f.at ? faceHint(f.at, features) : null, otherSide: !!f.otherSide }
     case 'draft':
-      return { id: f.id, type: 'draft', faces: f.faces.map((x) => faceHint(x, features)), plane: planeOf(f.plane), angle: num(f.angle), flip: !!f.flip }
+      return { id: f.id, type: 'draft', faces: f.faces.map((x) => faceHint(x, features)), plane: planeOf(nowRef(f.plane, features)), angle: num(f.angle), flip: !!f.flip }
     case 'rib':
       return { id: f.id, type: 'rib', sketch: f.sketch, thickness: num(f.thickness) }
     case 'align':
