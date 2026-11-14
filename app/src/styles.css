@@ -857,3 +857,21 @@ select.chip { padding-right: 26px; max-width: 120px; }
 
 .cad-conbar-off { display: inline-flex; align-items: center; gap: 4px; }
 .cad-conbar-num { width: 52px; height: 26px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+
+/* Skizzieren: Anzeige am Zeiger (Maß, erkannte Bedingungen), Fangpunkt, Eintippen */
+.sk-cursor { position: absolute; z-index: 7; display: flex; align-items: center; gap: 4px; pointer-events: none; white-space: nowrap; }
+.sk-pill { background: rgba(17, 19, 23, 0.86); color: #fff; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.sk-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 5px; background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 700; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.sk-badge.co, .sk-badge.cen, .sk-badge.mid, .sk-badge.on, .sk-badge.ref { background: #f59e0b; color: #111; }
+.sk-type-hint { font-size: 11px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+.sk-snap { position: absolute; z-index: 6; width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 2px solid #f59e0b; background: rgba(245, 158, 11, 0.25); pointer-events: none; }
+.sk-snap.cen { border-radius: 50%; }
+.sk-snap.mid { border: none; background: none; width: 0; height: 0; margin: -7px 0 0 -7px; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid #f59e0b; }
+.sk-snap.on { transform: rotate(45deg); border-radius: 2px; }
+.sk-typing { position: absolute; z-index: 8; display: flex; flex-direction: column; gap: 2px; }
+.sk-typing input { width: 130px; height: 28px; padding: 0 8px; border: 2px solid var(--accent); border-radius: 7px; font: inherit; font-weight: 600; background: var(--panel); color: var(--text); }
+.sk-typing small { font-size: 11px; color: var(--muted); background: var(--panel); border-radius: 4px; padding: 0 4px; align-self: flex-start; }
+
+.cad-conbar.at { bottom: auto; transform: none; max-width: 520px; }

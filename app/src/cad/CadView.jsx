@@ -5,6 +5,7 @@ import { CadControls, createViewCamera, setCameraAspect, worldPerPx, fitCamera }
 import { ViewCube, Triad, VIEWS } from '../components/Viewport.jsx'
 import { IcHome, IcFit, IcCut } from '../ui/icons.jsx'
 import NumInput from './NumInput.jsx'
+import { lengthStep, snapFrom, snapRect, snapRadius, measureText, parseTyped, TYPE_HINT } from './sketchInput.js'
 import { Ruler } from 'lucide-react'
 import { num } from './features.js'
 import {
@@ -64,6 +65,10 @@ function insideLoops(q, loops) {
   return n % 2 === 1
 }
 
+// Zeichen am Zeiger beim Skizzieren: erkannte Bedingungen und Fangart
+const BADGE = { co: '•', cen: '⊙', mid: '½', on: '◦', ref: '⌖', h: '—', v: '|' }
+const BADGE_TITLE = { co: 'auf Punkt (deckungsgleich)', cen: 'Mittelpunkt', mid: 'Mitte einer Linie', on: 'auf Linie/Kreis', ref: 'Punkt des Bauteils', h: 'waagrecht', v: 'senkrecht' }
+
 export default function CadView({
   tess,
   nav,
@@ -95,6 +100,7 @@ export default function CadView({
   const [labels3d, setLabels3d] = useState([])
   const tmp = useRef(null) // laufende Zeichenaktion
   const [section, setSection] = useState({ on: false, axis: 0, pos: 50, flip: false }) // Schnittansicht
+  const [typing, setTyping] = useState(null) // eingetippter Wert beim Zeichnen { text, x, y, tool }
   const [handleScr, setHandleScr] = useState(null) // Ziehgriff auf dem Bild { o:[x,y], t:[x,y] }
   const handleRef = useRef(handle)
   handleRef.current = handle
@@ -871,6 +877,7 @@ export default function CadView({
     const canvas = s.renderer.domElement
     let down = null
     let drag = null
+    let dragDraw = null // Zeichnen durch Ziehen
 
     const sketchHit = (ev, sk, plane) => {
       const q = onPlane(ev, plane)
@@ -947,6 +954,9 @@ export default function CadView({
       down = { x: ev.clientX, y: ev.clientY, button: ev.button }
       const sk = cb.current.sketch
       if (!sk || ev.button !== 0 || ev.shiftKey && sk.tool !== 'select') return
+      // Zeichnen durch Ziehen (wie in Draftpad): Linie, Rechteck, Kreis mit gedrückter Taste aufziehen
+      const tt = tmp.current
+      if (['line', 'rect', 'circle'].includes(sk.tool) && !(tt?.tool === sk.tool && tt.pts.length)) dragDraw = { x: ev.clientX, y: ev.clientY, started: false }
       const plane = sk.plane
       const data = sk.data
       if (sk.tool === 'select') {
@@ -965,6 +975,11 @@ export default function CadView({
     const onMove = (ev) => {
       const sk = cb.current.sketch
       const s = ctx.current
+      if (dragDraw && sk && !dragDraw.started && (ev.buttons & 1) && Math.hypot(ev.clientX - dragDraw.x, ev.clientY - dragDraw.y) > 6) {
+        // erster Punkt dort, wo gedrückt wurde
+        dragDraw.started = true
+        sketchClick({ clientX: dragDraw.x, clientY: dragDraw.y, shiftKey: ev.shiftKey }, sk)
+      }
       if (drag && sk) {
         const q = onPlane(ev, sk.plane)
         if (!q) return
@@ -1005,27 +1020,67 @@ export default function CadView({
       s.dirty = true
     }
 
+    // Punkt beim Zeichnen bestimmen (Vorschau und Klick gleich): Fang an Punkten/Linien, sonst Winkel in
+    // 5°-Schritten (waagrecht/senkrecht wird Bedingung) und Längen auf glatte Werte; Umschalt = frei
+    function resolveDraw(ev, sk, t, q) {
+      const data = sk.data
+      const per = mmPerPx(sk.plane)
+      const hit = sk.tool === 'dim' ? null : snap(data, q, 9 * per, refsOf(sk.plane))
+      const free = !!ev.shiftKey
+      const step = lengthStep(per)
+      const last = t.pts[t.pts.length - 1]
+      let at = hit ? hit.at : q
+      let hv = null
+      if (!hit && last) {
+        if (sk.tool === 'line') ({ at, hv } = snapFrom(last.at, q, { step, free }))
+        else if (sk.tool === 'rect' && t.pts.length === 1) at = snapRect(last.at, q, { step, free })
+        else if ((sk.tool === 'circle' || sk.tool === 'arc') && t.pts.length === 1) at = snapRadius(t.pts[0].at, q, { step, free })
+      } else if (hit && last && sk.tool === 'line') hv = hvHint(last.at, hit.at)
+      else if (!hit && !last && !free && ['line', 'rect', 'circle', 'arc', 'point'].includes(sk.tool)) {
+        // erster Punkt auf glatte Koordinaten
+        at = [Math.round(q[0] / step) * step, Math.round(q[1] / step) * step]
+      }
+      return { at, hit, hv }
+    }
+
+    // Anzeige am Zeiger: Maß, erkannte Bedingungen, Fangart
+    function cursorHint(ev, sk, t, res) {
+      const r = host.current.getBoundingClientRect()
+      const x = ev.clientX - r.left
+      const y = ev.clientY - r.top
+      const badges = []
+      const h = res.hit
+      if (h?.pt) {
+        const isCenter = sk.data.ents.some((e) => (e.t === 'circle' || e.t === 'arc') && e.c === h.pt)
+        badges.push(isCenter ? 'cen' : 'co')
+      } else if (h?.mid) badges.push('mid')
+      else if (h?.ent) badges.push('on')
+      else if (h?.ref) badges.push('ref')
+      if (res.hv) badges.push(res.hv)
+      const pts = [...t.pts.map((p) => p.at), res.at]
+      const text = measureText(sk.tool, pts)
+      let snapScr = null
+      if (h) {
+        const p = new THREE.Vector3(...to3d(sk.plane, h.at)).project(ctx.current.camera)
+        snapScr = { x: ((p.x + 1) / 2) * r.width, y: ((1 - p.y) / 2) * r.height, kind: badges[0] }
+      }
+      return { x, y, badges, text, snapScr, canType: !!TYPE_HINT[sk.tool] && t.pts.length > 0 }
+    }
+
     function updatePreview(ev, sk) {
       const q = onPlane(ev, sk.plane)
       if (!q) return
       const data = sk.data
-      const tol = 9 * mmPerPx(sk.plane)
       const t = tmp.current ?? { tool: sk.tool, pts: [] }
       if (t.tool !== sk.tool) {
         tmp.current = null
         return
       }
-      let hit = sk.tool === 'dim' ? null : snap(data, q, tol, refsOf(sk.plane))
-      let at = hit ? hit.at : q
-      // waagrecht/senkrecht einrasten
-      const last = t.pts[t.pts.length - 1]
-      if (!hit && last && (sk.tool === 'line')) {
-        const hv = hvHint(last.at, q)
-        if (hv === 'h') at = [q[0], last.at[1]]
-        if (hv === 'v') at = [last.at[0], q[1]]
-      }
-      t.cur = { at, hit }
-      t.snapAt = hit ? hit.at : null
+      const res = resolveDraw(ev, sk, t, q)
+      const { at, hit } = res
+      t.cur = { at, hit, hv: res.hv }
+      t.snapAt = null
+      t.hint = ['line', 'rect', 'circle', 'arc', 'point'].includes(sk.tool) ? cursorHint(ev, sk, t, res) : null
       t.preview = previewOf(sk.tool, t, data)
       t.cut = null
       if (sk.tool === 'trim') {
@@ -1075,6 +1130,16 @@ export default function CadView({
 
     const onUp = (ev) => {
       const sk = cb.current.sketch
+      if (dragDraw) {
+        const dd = dragDraw
+        dragDraw = null
+        if (dd.started && sk) {
+          // losgelassen: zweiter Punkt; eine gezogene Linie ist fertig (kein Linienzug)
+          sketchClick(ev, sk)
+          if (sk.tool === 'line') finishTool()
+          return
+        }
+      }
       if (drag) {
         const was = drag
         drag = null
@@ -1098,10 +1163,10 @@ export default function CadView({
       cb.current.onPick?.(h, ev)
     }
 
-    function sketchClick(ev, sk) {
+    function sketchClick(ev, sk, forced = null) {
       const data = sk.data
       const plane = sk.plane
-      const q = onPlane(ev, plane)
+      const q = forced ? forced.at : onPlane(ev, plane)
       if (!q) return
       if (sk.tool === 'select') {
         const h = sketchHit(ev, data, plane)
@@ -1113,6 +1178,9 @@ export default function CadView({
         const has = cur[key].includes(id)
         const next = add ? { ...cur, [key]: has ? cur[key].filter((x) => x !== id) : [...cur[key], id] } : { pts: [], ents: [], cons: [], [key]: [id] }
         sk.onSel(next)
+        // Bedingungsleiste neben der Auswahl
+        const r = host.current.getBoundingClientRect()
+        sk.onSelAt?.([ev.clientX - r.left, ev.clientY - r.top])
         return
       }
       if (sk.tool === 'extend') {
@@ -1210,15 +1278,9 @@ export default function CadView({
         setEdit({ id: c.id, x: ev.clientX - el.left, y: ev.clientY - el.top, value: fmtN(c.v), fresh: true })
         return
       }
-      const hit = snap(data, q, tol, refsOf(plane))
-      let at = hit ? hit.at : q
-      const last = t.pts[t.pts.length - 1]
-      if (!hit && last && sk.tool === 'line') {
-        const hv = hvHint(last.at, q)
-        if (hv === 'h') at = [q[0], last.at[1]]
-        if (hv === 'v') at = [last.at[0], q[1]]
-      }
-      t.pts.push({ at, hit })
+      const res = forced ?? resolveDraw(ev, sk, t, q)
+      const { at, hit } = res
+      t.pts.push({ at, hit, hv: res.hv })
       tmp.current = t
       const s2 = structuredClone(data)
       if (sk.tool === 'point') {
@@ -1237,8 +1299,21 @@ export default function CadView({
         const a = p0.id ?? pointAt(s2, p0.at, p0.hit)
         const b = pointAt(s2, p1.at, p1.hit)
         const e = addEnt(s2, { t: 'line', a, b, cons: sk.construction || undefined })
-        const hv = hvHint(p0.at, p1.at)
+        const hv = p1.hv ?? hvHint(p0.at, p1.at)
         if (hv) addCon(s2, { t: hv, a, b })
+        // eingetippte Länge wird Maß
+        if (res.dims?.dist) {
+          // Maßbeschriftung etwas neben der Linie, auf der anderen Seite als die Bedingungszeichen (die sitzen oben rechts)
+          const L = Math.hypot(p1.at[0] - p0.at[0], p1.at[1] - p0.at[1]) || 1
+          const off = 16 * mmPerPx(plane)
+          let nx = -(p1.at[1] - p0.at[1]) / L
+          let ny = (p1.at[0] - p0.at[0]) / L
+          if (ny > 0 || (Math.abs(ny) < 1e-9 && nx > 0)) {
+            nx = -nx
+            ny = -ny
+          }
+          addCon(s2, { t: 'dist', a, b, v: res.dims.dist, at: [(p0.at[0] + p1.at[0]) / 2 + nx * off, (p0.at[1] + p1.at[1]) / 2 + ny * off] })
+        }
         if (commit(s2)) {
           p1.id = b
           // Linienzug geschlossen (Anfangspunkt getroffen): fertig
@@ -1272,6 +1347,8 @@ export default function CadView({
         addCon(s2, { t: 'v', a: b, b: c })
         addCon(s2, { t: 'h', a: c, b: d })
         addCon(s2, { t: 'v', a: d, b: a })
+        if (res.dims?.w) addCon(s2, { t: 'dx', a, b, v: res.dims.w })
+        if (res.dims?.h) addCon(s2, { t: 'dy', a: b, b: c, v: res.dims.h })
         commit(s2)
         return finishTool()
       }
@@ -1285,6 +1362,7 @@ export default function CadView({
         const c = pointAt(s2, C.at, C.hit)
         const e = addEnt(s2, { t: 'circle', c, r, cons: sk.construction || undefined })
         if (R.hit?.pt) addCon(s2, { t: 'on', p: R.hit.pt, e: e.id })
+        if (res.dims?.dia) addCon(s2, { t: 'dia', e: e.id, v: res.dims.dia, at: [C.at[0] + r * 0.7, C.at[1] + r * 0.7] })
         commit(s2)
         return finishTool()
       }
@@ -1332,13 +1410,71 @@ export default function CadView({
           ev.stopPropagation()
           finishTool()
         }
+        return
       }
+      // Zahl tippen beim Zeichnen: genaues Maß (Linie: Länge, Rechteck: B x H, Kreis: Ø, Bogen: R)
+      const tt = tmp.current
+      if (/^[0-9.,]$/.test(ev.key) && !ev.ctrlKey && !ev.metaKey && !ev.altKey && tt?.tool === sk.tool && tt.pts.length && TYPE_HINT[sk.tool]) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        setTyping({ text: ev.key, tool: sk.tool, x: tt.hint?.x ?? 100, y: tt.hint?.y ?? 100 })
+      }
+    }
+
+    // eingetippten Wert anwenden (aus dem Eingabefeld am Zeiger)
+    ctx.current.placeTyped = (text) => {
+      const sk = cb.current.sketch
+      const t = tmp.current
+      if (!sk || !t?.pts.length) return false
+      const v = parseTyped(sk.tool, text)
+      if (!v) {
+        sk.onMessage?.(`Bitte ${TYPE_HINT[sk.tool] ?? 'eine Zahl'} eingeben`)
+        return false
+      }
+      const last = t.pts[t.pts.length - 1].at
+      const cur = t.cur?.at ?? [last[0] + 1, last[1]]
+      const ev0 = { clientX: 0, clientY: 0, shiftKey: false }
+      if (sk.tool === 'line') {
+        let d = [cur[0] - last[0], cur[1] - last[1]]
+        if (v.angle != null) d = [Math.cos((v.angle * Math.PI) / 180), Math.sin((v.angle * Math.PI) / 180)]
+        const L = Math.hypot(d[0], d[1]) || 1
+        d = Math.hypot(d[0], d[1]) > 1e-9 ? [d[0] / L, d[1] / L] : [1, 0]
+        const at = [last[0] + d[0] * v.length, last[1] + d[1] * v.length]
+        const hv = Math.abs(d[1]) < 1e-9 ? 'h' : Math.abs(d[0]) < 1e-9 ? 'v' : null
+        sketchClick(ev0, sk, { at, hit: null, hv, dims: { dist: v.length } })
+        return true
+      }
+      if (sk.tool === 'rect') {
+        const sx = Math.sign(cur[0] - last[0]) || 1
+        const sy = Math.sign(cur[1] - last[1]) || 1
+        const h = v.h ?? (Math.abs(cur[1] - last[1]) > 1e-9 ? Math.abs(cur[1] - last[1]) : v.w)
+        sketchClick(ev0, sk, { at: [last[0] + sx * v.w, last[1] + sy * h], hit: null, dims: { w: v.w, h: v.h ?? null } })
+        return true
+      }
+      if (sk.tool === 'circle') {
+        sketchClick(ev0, sk, { at: [last[0] + v.value / 2, last[1]], hit: null, dims: { dia: v.value } })
+        return true
+      }
+      if (sk.tool === 'arc' && t.pts.length === 1) {
+        let d = [cur[0] - last[0], cur[1] - last[1]]
+        const L = Math.hypot(d[0], d[1])
+        d = L > 1e-9 ? [d[0] / L, d[1] / L] : [1, 0]
+        sketchClick(ev0, sk, { at: [last[0] + d[0] * v.value, last[1] + d[1] * v.value], hit: null })
+        return true
+      }
+      return false
     }
     canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('pointermove', onMove)
     canvas.addEventListener('pointerup', onUp)
     canvas.addEventListener('dblclick', onDbl)
-    canvas.addEventListener('pointerleave', () => setHover(null))
+    canvas.addEventListener('pointerleave', () => {
+      setHover(null)
+      if (tmp.current?.hint) {
+        tmp.current.hint = null
+        setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
+      }
+    })
     window.addEventListener('keydown', onKey, true)
     return () => {
       canvas.removeEventListener('pointerdown', onDown)
@@ -1424,6 +1560,48 @@ export default function CadView({
             {l.text}
           </span>
         ))}
+      {sketch && tmp.current?.hint && !typing && (() => {
+        const h = tmp.current.hint
+        return (
+          <>
+            {h.snapScr && <span className={'sk-snap ' + (h.snapScr.kind ?? '')} style={{ left: h.snapScr.x, top: h.snapScr.y }} />}
+            <div className="sk-cursor" style={{ left: h.x + 16, top: h.y + 14 }}>
+              {h.badges.map((b) => (
+                <span key={b} className={'sk-badge ' + b} title={BADGE_TITLE[b]}>
+                  {BADGE[b]}
+                </span>
+              ))}
+              {h.text && <span className="sk-pill">{h.text}</span>}
+              {h.canType && <span className="sk-type-hint">Zahl tippen = Maß</span>}
+            </div>
+          </>
+        )
+      })()}
+      {sketch && typing && (
+        <form
+          className="sk-typing"
+          style={{ left: typing.x + 16, top: typing.y + 14 }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (ctx.current.placeTyped?.(typing.text)) setTyping(null)
+          }}
+        >
+          <input
+            autoFocus
+            value={typing.text}
+            placeholder={TYPE_HINT[typing.tool]}
+            onChange={(e) => setTyping({ ...typing, text: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setTyping(null)
+              }
+            }}
+            onBlur={() => setTyping(null)}
+          />
+          <small>{TYPE_HINT[typing.tool]}</small>
+        </form>
+      )}
       {section.on && !sketch && tess?.triangles?.length > 0 && (
         <div className="cad-section">
           <span className="tb-label">Schnitt</span>

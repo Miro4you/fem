@@ -1,6 +1,6 @@
 // Konstruktion: kleines CAD mit Skizzen, Features und Verlauf (wie Onshape: Ebene wählen, skizzieren, bemaßen,
 // extrudieren …). Gebaut wird mit OpenCASCADE im Rechenkern; das Ergebnis geht als STEP in die Rechnung.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Pencil,
   Square,
@@ -532,6 +532,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
   const shownTess = (edit ? preview?.tess : built?.tess) ?? (edit ? built?.tess : null)
   // Messen: Flächen/Kanten anklicken (zwei für Abstände)
   const [cmeasure, setCmeasure] = useState({ on: false, picks: [] })
+  const [conPos, setConPos] = useState(null) // Bedingungsleiste: neben der letzten Auswahl im Bild
   const pickWant = useMemo(() => {
     if (sketchEdit) return null
     if (cmeasure.on) return { faces: true, edges: true }
@@ -890,6 +891,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         info: skInfo,
         onChange: onSketchChange,
         onSel: setSel,
+        onSelAt: setConPos,
         onMessage: note,
         showGlyphs,
       }
@@ -1318,7 +1320,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
           )}
         </div>
         {sketchEdit && (sel.pts.length > 0 || sel.ents.length > 0 || sel.cons.length > 0) && (
-          <ConBar sk={sketchEdit.sketch} sel={sel} onOffset={applyOffset} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
+          <ConBar pos={conPos} sk={sketchEdit.sketch} sel={sel} onOffset={applyOffset} onCon={applyCon} onFix={toggleFix} onConstruction={toggleConstruction} construction={construction} onDelete={deleteSelection} />
         )}
         {(msg || pickFor || regionHint) && (
           <div className="cad-hint">
@@ -1547,9 +1549,10 @@ function FeatureDialog({ edit, features, setDraft, onOk, onOkNext, regionTools, 
               <SketchConstraints sk={sk} sel={sel} onCon={onCon} onFix={onFix} onConstruction={onConstruction} construction={construction} onDelete={onDelete} />
               <SketchDims sk={sk} sel={sel} setSel={setSel} onDim={onDim} onDimName={onDimName} />
               <p className="hint">
-                Zeichnen mit der linken Maustaste, ⇧ + links verschiebt die Ansicht. Punkte rasten an Punkten, Linienmitten und Bauteilecken ein;
-                fast waagrechte/senkrechte Linien werden waagrecht/senkrecht. Bemaßen: Werkzeug „Maß“ (D), Elemente anklicken, Maß ablegen, Wert
-                eintippen. Doppelklick auf ein Maß ändert es.
+                Klicken oder ziehen zum Zeichnen; Länge und Winkel stehen am Zeiger und rasten auf glatte Werte (⇧ = frei). Beim Zeichnen einfach
+                die Zahl tippen und Enter: Linie <b>50</b> (oder <b>50@30</b> für 30°), Rechteck <b>60x40</b>, Kreis <b>Ø</b> – daraus werden Maße.
+                Bemaßen (D): ein Element oder zwei anklicken, ablegen, Wert eintippen; Doppelklick auf ein Maß ändert es. Elemente anklicken zeigt
+                die passenden Bedingungen gleich daneben.
               </p>
               {sketchInfo && !sketchInfo.ok && <p className="hint bad">Die Skizze lässt sich so nicht lösen – letzte Änderung zurücknehmen (Strg+Z).</p>}
             </>
@@ -1874,13 +1877,25 @@ function DirPick({ label, value, flip, active, onPick, onAxis, onFlip }) {
 }
 
 // Schwebende Leiste im Bild: passende Bedingungen zur Auswahl (wie die Bedingungsleiste in Onshape)
-function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete, onOffset }) {
+function ConBar({ sk, sel, onCon, onFix, onConstruction, construction, onDelete, onOffset, pos }) {
   const opts = applicableCons(sk, sel)
   const n = sel.pts.length + sel.ents.length
   const [off, setOff] = useState('2')
   const canOffset = sel.ents.some((id) => ['line', 'arc', 'circle'].includes(sk.ents.find((e) => e.id === id)?.t))
+  const ref = useRef(null)
+  // neben dem Zeiger, aber im Bild halten
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !pos) return
+    const W = el.parentElement?.clientWidth ?? 1000
+    const H = el.parentElement?.clientHeight ?? 800
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    el.style.left = `${Math.max(8, Math.min(pos[0] + 18, W - w - 8))}px`
+    el.style.top = `${pos[1] + 22 + h > H - 8 ? Math.max(8, pos[1] - h - 14) : pos[1] + 22}px`
+  })
   return (
-    <div className="cad-conbar" onPointerDown={(e) => e.stopPropagation()}>
+    <div ref={ref} className={'cad-conbar' + (pos ? ' at' : '')} onPointerDown={(e) => e.stopPropagation()}>
       <span className="muted">{n ? `${n} gewählt` : `${sel.cons.length} Bedingung${sel.cons.length === 1 ? '' : 'en'}`}</span>
       {opts.map((o) => (
         <button key={o.t + o.label} className="btn small" title={o.label} onClick={() => onCon(o)}>
