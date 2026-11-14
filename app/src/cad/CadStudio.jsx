@@ -52,7 +52,7 @@ import {
 } from './features.js'
 import { offsetEnts } from './sketch.js'
 import { patternEnts, copyEntsInto, entsCenter } from './sketchTools.js'
-import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, CON_GLYPH, isDim, measure, kernelSketch, polyline, basis, to3d } from './sketch.js'
+import { STD_PLANES, newSketch, applicableCons, removeItems, solved, CON_LABEL, CON_GLYPH, isDim, measure, kernelSketch, polyline, basis, to3d, sameCon, dedupeCons } from './sketch.js'
 import { readDraftpad, defaultLayers, importDraftpad, fillLoops, notesOf } from './draftpad.js'
 import { suggestParts, partFeatures } from './parts.js'
 import DraftpadLibrary from '../ui/DraftpadLibrary.jsx'
@@ -568,7 +568,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
     setSelSketch(null)
     const index = features.findIndex((g) => g.id === f.id)
     // Bezüge an die aktuelle Lage (Skizze/Tiefe davor geändert): Markierungen im Bild stimmen, Kern bekommt dasselbe
-    setEdit({ id: f.id, draft: rebaseFeature(structuredClone(f), features), isNew: false, index })
+    // doppelte Bedingungen aus älteren Skizzen beim Öffnen entfernen
+    const draft = rebaseFeature(structuredClone(f), features)
+    if (draft.type === 'sketch' && draft.sketch?.cons) draft.sketch = dedupeCons(draft.sketch)
+    setEdit({ id: f.id, draft, isNew: false, index })
     setSel(emptySel)
     setTool('select')
     setPickFor(null)
@@ -746,7 +749,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
 
   const applyCon = (opt) => {
     const s2 = structuredClone(sketchEdit.sketch)
-    for (const con of opt.multi ?? [opt.con]) s2.cons.push({ id: `c${s2.next++}`, ...con })
+    const wanted = opt.multi ?? [opt.con]
+    const fresh = wanted.filter((con) => !sameCon(s2, con))
+    if (!fresh.length) return note(`${opt.label ?? 'Diese Bedingung'}: ist schon gesetzt`)
+    for (const con of fresh) s2.cons.push({ id: `c${s2.next++}`, ...con })
     const before = skInfo?.redundant ?? 0
     const r = solved(s2)
     if (!r.info.ok) return note('Diese Bedingung widerspricht den vorhandenen')

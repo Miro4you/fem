@@ -22,6 +22,7 @@ export const CON_LABEL = {
   tan: 'Tangential',
   mid: 'Mittelpunkt',
   sym: 'Symmetrisch',
+  col: 'Kollinear',
   dist: 'Abstand',
   dx: 'Abstand waagrecht',
   dy: 'Abstand senkrecht',
@@ -32,7 +33,7 @@ export const CON_LABEL = {
 }
 
 // kurze Zeichen an den Elementen
-export const CON_GLYPH = { h: '—', v: '|', co: '•', on: '◦', par: '∥', perp: '⊥', eq: '=', tan: 'T', mid: '½', sym: '⇋' }
+export const CON_GLYPH = { h: '—', v: '|', co: '•', on: '◦', par: '∥', perp: '⊥', eq: '=', tan: 'T', mid: '½', sym: '⇋', col: '≡' }
 
 export const newSketch = (plane, planeRef) => ({ plane, planeRef, pts: {}, ents: [], cons: [], next: 1 })
 
@@ -92,7 +93,37 @@ export function addEnt(sk, ent) {
   return e
 }
 
+// gleiche Bedingung (Art + beteiligte Punkte/Elemente, Reihenfolge egal)
+const REF_KEYS = ['a', 'b', 'p', 'q', 'e', 'e1', 'e2', 'c']
+export function conKey(c) {
+  return `${c.t}:${REF_KEYS.filter((k) => c[k] != null).map((k) => String(c[k])).sort().join(',')}`
+}
+/// schon vorhandene gleiche Bedingung (oder null)
+export function sameCon(sk, con) {
+  const k = conKey(con)
+  return sk.cons.find((c) => conKey(c) === k) ?? null
+}
+
+/// Skizze ohne doppelte Bedingungen (die erste bleibt)
+export function dedupeCons(sk) {
+  const seen = new Set()
+  const cons = sk.cons.filter((c) => {
+    const k = conKey(c)
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+  return cons.length === sk.cons.length ? sk : { ...sk, cons }
+}
+
 export function addCon(sk, con) {
+  // dieselbe Bedingung nicht doppelt (bei Maßen: Wert übernehmen)
+  const old = sameCon(sk, con)
+  if (old) {
+    if (con.v != null) old.v = con.v
+    if (con.at) old.at = con.at
+    return old
+  }
   const c = { id: nid(sk, 'c'), ...con }
   sk.cons.push(c)
   return c
@@ -344,6 +375,38 @@ export function applicableCons(sk, sel) {
     add('par', { e1: lines[0].id, e2: lines[1].id })
     add('perp', { e1: lines[0].id, e2: lines[1].id })
     add('eq', { e1: lines[0].id, e2: lines[1].id })
+    add('col', { e1: lines[0].id, e2: lines[1].id })
+  }
+  // Symmetrisch: zwei Linien + Achse (die dritte Linie, zu der die beiden am ehesten spiegelbildlich liegen)
+  if (lines.length === 3 && ents.length === 3 && !sel.pts.length) {
+    const Pp = (id) => [sk.pts[id].x, sk.pts[id].y]
+    const mirror = (q, l) => {
+      const [ax, ay] = Pp(l.a)
+      const [bx, by] = Pp(l.b)
+      const dx = bx - ax
+      const dy = by - ay
+      const L2 = dx * dx + dy * dy || 1
+      const t = ((q[0] - ax) * dx + (q[1] - ay) * dy) / L2
+      return [2 * (ax + t * dx) - q[0], 2 * (ay + t * dy) - q[1]]
+    }
+    const d = (u, w) => Math.hypot(u[0] - w[0], u[1] - w[1])
+    let best = null
+    for (let k = 0; k < 3; k++) {
+      const ax = lines[k]
+      const [l1, l2] = lines.filter((_, i) => i !== k)
+      const m1 = [mirror(Pp(l1.a), ax), mirror(Pp(l1.b), ax)]
+      const same = d(m1[0], Pp(l2.a)) + d(m1[1], Pp(l2.b))
+      const cross = d(m1[0], Pp(l2.b)) + d(m1[1], Pp(l2.a))
+      const err = Math.min(same, cross)
+      if (!best || err < best.err) best = { err, ax, pairs: same <= cross ? [[l1.a, l2.a], [l1.b, l2.b]] : [[l1.a, l2.b], [l1.b, l2.a]] }
+    }
+    // gemeinsame Endpunkte auf der Achse: nur einmal
+    const pairs = best.pairs.filter(([p, q]) => p !== q)
+    out.push({ t: 'sym', label: CON_LABEL.sym, multi: pairs.map(([p, q]) => ({ t: 'sym', p, q, e: best.ax.id })) })
+  }
+  // Symmetrisch: zwei Kreise/Bögen + Linie → Mitten spiegelbildlich, Radien gleich
+  if (rounds.length === 2 && lines.length === 1 && ents.length === 3 && !sel.pts.length) {
+    out.push({ t: 'sym', label: CON_LABEL.sym, multi: [{ t: 'sym', p: rounds[0].c, q: rounds[1].c, e: lines[0].id }, { t: 'eq', e1: rounds[0].id, e2: rounds[1].id }] })
   }
   if (rounds.length === 2 && ents.length === 2) {
     add('eq', { e1: rounds[0].id, e2: rounds[1].id })

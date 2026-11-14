@@ -406,6 +406,9 @@ selbst starten.
 | 18e.90 | Draftpad-Teil mit schmalem Schlitz (z. B. Ring mit Zickzack-Schnitt, Spalt < 0,5 mm) übernehmen | Beide Schlitzseiten kommen an, keine gekreuzten Linien, Kontur geschlossen |  [ ] |
 | 18e.91 | Skizze: Rechteck mit Rundungen, eine Kante weit über die gegenüberliegende hinaus ziehen | Skizze klappt nicht um, Element bleibt vorher stehen; normales Ziehen geht glatt |  [ ] |
 | 18e.92 | Teil mit schmalem Schlitz (z. B. Block 60 × 20 × 10 mit 0,2-mm-Schlitz von oben, 15 tief) öffnen; Lager links, Kraft auf die rechte Oberseite nach links; Verbindungen › „Kontakt von Hand“: Seite A = linke Schlitzfläche, Seite B = rechte; rechnen | Bei kleiner Kraft bleibt der Schlitz offen (Ergebnis wie ohne Kontakt); bei großer Kraft legt sich der Finger an: im Ergebnis „Fugen (Kontakt)“ → „… (Kontakt im Teil)“ mit aufliegendem Anteil und Druckkraft, Verformung deutlich kleiner als ohne Kontakt, keine Durchdringung |  [ ] |
+| 18e.93 | Skizze: Linie wählen, dreimal „Waagrecht“ | Nur eine Bedingung; danach Hinweis „ist schon gesetzt“. Ältere Skizzen mit Doppelten werden beim Öffnen bereinigt |  [ ] |
+| 18e.94 | Zwei Linien wählen → „Kollinear“ | Beide liegen auf einer Geraden (Zeichen ≡) |  [ ] |
+| 18e.95 | Zwei Linien + Mittellinie wählen → „Symmetrisch“; ebenso zwei Kreise + Linie | Linien spiegelbildlich zur Mittellinie (Achse wird automatisch erkannt); Kreise: Mitten spiegelbildlich, Radien gleich |  [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

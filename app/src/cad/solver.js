@@ -237,6 +237,14 @@ function build(sk) {
       const a = P(e.a)
       const b = P(e.b)
       for (const k of [0, 1]) eq(c, [p, a, b], (v) => (a.get(v)[k] + b.get(v)[k]) / 2 - p.get(v)[k])
+    } else if (t === 'col') {
+      // beide Endpunkte der zweiten Linie auf der Geraden der ersten
+      const e1 = ent.get(c.e1)
+      const e2 = ent.get(c.e2)
+      if (e1?.t !== 'line' || e2?.t !== 'line') continue
+      const a = P(e1.a)
+      const b = P(e1.b)
+      for (const q of [P(e2.a), P(e2.b)]) if (q) eq(c, [q, a, b], signedDist(q, a, b))
     } else if (t === 'sym') {
       // p und q spiegelbildlich zur Linie e
       const p = P(c.p)
