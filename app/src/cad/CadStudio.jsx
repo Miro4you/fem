@@ -2128,10 +2128,10 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         {/* Bestätigen/Abbrechen auch im Bild, oben rechts unter dem Würfel (wie in SolidWorks) */}
         {edit && (
           <div className="cad-okfloat">
-            <button className="ok" title={edit.draft.type === 'sketch' ? 'Skizze fertig' : 'OK'} onClick={() => accept(false)}>
+            <button className="ok" aria-label="Haken: übernehmen" title={edit.draft.type === 'sketch' ? 'Skizze fertig' : 'OK'} onClick={() => accept(false)}>
               <Check size={20} />
             </button>
-            <button className="cancel" title="Abbrechen (Esc)" onClick={cancel}>
+            <button className="cancel" aria-label="Kreuz: verwerfen" title="Abbrechen (Esc)" onClick={cancel}>
               <X size={18} />
             </button>
           </div>

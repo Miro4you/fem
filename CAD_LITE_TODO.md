@@ -231,3 +231,11 @@ intern über den neuen Kern. Prüfen mit `examples/draftpad/*`.
 Reihenfolge: **G0 → G1 → G2 → G3 → G5 → G4 → G6**, G7 läuft bei G1 mit. Nach jedem Paket im Browser testen,
 `TESTPROTOKOLL.md`/README aktualisieren, committen, pushen. G2 und G3 bringen Felix am meisten Bedienfreude,
 G5 (Messen in der FEM-Ansicht) ist klein und kann vorgezogen werden, sobald G0 steht.
+
+## Rückmeldungen 14.11. abends (erledigt)
+
+Kaputte Körper werden nach jedem Feature erkannt und verworfen (Fase/Verrundung notfalls Kante für Kante, scheiternde
+Kante rot); Fläche verschieben verschmilzt sicher; Draftpad-Übernahme hält schmale Schlitze; Ziehen in der Skizze klappt
+nichts mehr um und rastet mit Bedingung ein; keine doppelten Bedingungen; Kollinear; Symmetrisch auch für Linien und
+Kreise; geschlossene Flächen eingefärbt, offene Enden rot; Maße mit Pfeilen, außen abgelegt; gleiche Maße
+zusammengefasst; „Skizze fertig“ oben und als Haken im Bild; Verbindung „Kontakt von Hand“ (auch im selben Teil, mit Spalt).
