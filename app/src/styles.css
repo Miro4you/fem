@@ -963,3 +963,4 @@ select.chip { padding-right: 26px; max-width: 120px; }
 .cad-okfloat button:hover { filter: brightness(1.08); }
 .cad-ok.top { margin: 2px 0 8px; }
 .cad-stage { position: relative; }
+.cad-dim-count { flex: none; min-width: 30px; height: 26px; margin-right: 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); font-size: 12px; font-weight: 600; color: var(--accent, #2563eb); cursor: pointer; }

@@ -49,6 +49,7 @@ import {
   anchorSketchPlane,
   sketchPlaneNow,
   rebaseFeature,
+  dimGroups,
 } from './features.js'
 import { offsetEnts } from './sketch.js'
 import { patternEnts, copyEntsInto, entsCenter } from './sketchTools.js'
@@ -1900,8 +1901,7 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
             onDelete={deleteSelection}
             onDim={(id, v) => {
               const s2 = structuredClone(sketchEdit.sketch)
-              const c = s2.cons.find((x) => x.id === id)
-              c.v = v
+              for (const c of s2.cons) if ((Array.isArray(id) ? id : [id]).includes(c.id)) c.v = v
               const r = solved(s2)
               if (!r.info.ok) return note('Dieser Wert lässt sich nicht einhalten')
               changeSketch(r.sketch, r.info, false)
@@ -1910,6 +1910,12 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
               const s2 = structuredClone(sketchEdit.sketch)
               s2.cons.find((x) => x.id === id).name = name || undefined
               changeSketch(s2, skInfo, false)
+            }}
+            onDimSplit={(ids) => {
+              const s2 = structuredClone(sketchEdit.sketch)
+              for (const c of s2.cons) if (ids.includes(c.id)) c.solo = true
+              changeSketch(s2, skInfo, false)
+              note('Maße getrennt – jedes lässt sich jetzt einzeln ändern')
             }}
             building={building}
           />
@@ -2224,7 +2230,7 @@ function PickButton({ active, label, value, onClick }) {
   )
 }
 
-function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkNext, regionTools, linkTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, building }) {
+function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkNext, regionTools, linkTools, onCancel, pickFor, setPickFor, status, sketchInfo, sel, setSel, onCon, onFix, onConstruction, construction, onDelete, onDim, onDimName, onDimSplit, building }) {
   const d = edit.draft
   const before = features.slice(0, edit.index)
   const sketches = before.filter((f) => f.type === 'sketch' && !f.suppressed)
@@ -2396,7 +2402,7 @@ function FeatureDialog({ edit, tool, holePoints, features, setDraft, onOk, onOkN
           {sk && (
             <>
               <SketchConstraints sk={sk} sel={sel} onCon={onCon} onFix={onFix} onConstruction={onConstruction} construction={construction} onDelete={onDelete} />
-              <SketchDims sk={sk} sel={sel} setSel={setSel} onDim={onDim} onDimName={onDimName} />
+              <SketchDims sk={sk} sel={sel} setSel={setSel} onDim={onDim} onDimName={onDimName} onDimSplit={onDimSplit} />
               {SKETCH_HELP[tool] && (
                 <p className="hint tool-hint">
                   <b>{SKETCH_TOOLS.find(([k]) => k === tool)?.[1].split(' (')[0].split(':')[0]}:</b> {SKETCH_HELP[tool]}
@@ -3281,19 +3287,38 @@ function SketchConstraints({ sk, sel, onCon, onFix, onConstruction, construction
   )
 }
 
-function SketchDims({ sk, sel, setSel, onDim, onDimName }) {
+function SketchDims({ sk, sel, setSel, onDim, onDimName, onDimSplit }) {
   const dims = sk.cons.filter(isDim)
+  // gleiche Maße (Art, Wert, Name) in einer Zeile – z. B. „4× Radius 12“
+  const groups = dimGroups(dims.map((c) => ({ ...c, v: c.v ?? measure(sk, c) })))
   const others = sk.cons.filter((c) => !isDim(c))
   if (!dims.length && !others.length) return null
   return (
     <div className="cad-dims">
       {dims.length > 0 && <span className="field-label">Maße (Name für Parameterstudien)</span>}
-      {dims.map((c) => (
-        <div key={c.id} className={'cad-dim-row' + (sel.cons.includes(c.id) ? ' on' : '')} onClick={() => setSel({ pts: [], ents: [], cons: [c.id] })}>
-          <input className="cad-dim-name" placeholder={c.label ?? CON_LABEL[c.t]} value={c.name ?? ''} onChange={(e) => onDimName(c.id, e.target.value)} />
-          <DimValue c={c} sk={sk} onDim={onDim} />
-        </div>
-      ))}
+      {groups.map((g) => {
+        const c = sk.cons.find((x) => x.id === g.ids[0])
+        const many = g.ids.length > 1
+        const on = g.ids.some((id) => sel.cons.includes(id))
+        return (
+          <div key={g.ids.join('+')} className={'cad-dim-row' + (on ? ' on' : '')} onClick={() => setSel({ pts: [], ents: [], cons: g.ids })}>
+            {many && (
+              <button
+                className="cad-dim-count"
+                title="Gleiche Maße – ein Wert für alle. Klick: trennen (jedes Maß einzeln)"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDimSplit(g.ids)
+                }}
+              >
+                {g.ids.length}×
+              </button>
+            )}
+            <input className="cad-dim-name" placeholder={c.label ?? CON_LABEL[c.t]} value={c.name ?? ''} onChange={(e) => g.ids.forEach((id) => onDimName(id, e.target.value))} />
+            <DimValue c={c} sk={sk} onDim={(id, v) => onDim(many ? g.ids : id, v)} />
+          </div>
+        )
+      })}
       {others.length > 0 && (
         <p className="hint">
           {others.length} Bedingung{others.length === 1 ? '' : 'en'}: {[...new Set(others.map((c) => CON_LABEL[c.t]))].join(', ')}. Anklicken der Zeichen im Bild wählt sie

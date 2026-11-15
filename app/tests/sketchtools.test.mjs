@@ -240,3 +240,19 @@ test('Bedingungen: keine Doppelten, Kollinear, Symmetrisch für zwei Linien + Ac
   assert.ok(Math.abs(s3.ents.find((e) => e.id === k1.id).r - s3.ents.find((e) => e.id === k2.id).r) < 1e-9)
   void measure
 })
+
+test('Maße zusammenfassen: gleiche Art, Wert und Name → eine Gruppe; getrennte (solo) bleiben einzeln', async () => {
+  const { dimGroups, cadParams } = await import('../src/cad/features.js')
+  const cons = [
+    { id: 'c1', t: 'rad', v: 12 },
+    { id: 'c2', t: 'rad', v: 12 },
+    { id: 'c3', t: 'rad', v: 12, solo: true },
+    { id: 'c4', t: 'rad', v: 5 },
+    { id: 'c5', t: 'dx', v: 12 },
+  ]
+  const g = dimGroups(cons)
+  assert.deepEqual(g.map((x) => x.ids), [['c1', 'c2'], ['c3'], ['c4'], ['c5']])
+  const ps = cadParams([{ id: 7, type: 'sketch', name: 'Skizze 1', sketch: { cons } }])
+  assert.equal(ps[0].key, 'cad:7:con:c1+c2')
+  assert.match(ps[0].label, /2 × Radius/)
+})

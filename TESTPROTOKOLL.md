@@ -413,6 +413,7 @@ selbst starten.
 | 18e.97 | Skizze: geschlossenes Rechteck mit Kreis darin, daneben offener Linienzug | Rechteckfläche leicht blau, Kreis bleibt frei; die beiden offenen Enden des Linienzugs rot markiert |  [ ] |
 | 18e.98 | Skizze: Rechteck „60x40“ tippen, Kreis Ø10; Abstand Punkt–Linie zwischen zwei parallelen Kanten bemaßen und das Maß ziehen | Maße außerhalb der Kontur mit Maßhilfslinien und Pfeilen; Punkt–Linie-Maß hat immer eine sichtbare Maßlinie, die beim Ziehen parallel mitwandert |  [ ] |
 | 18e.99 | Skizze: zwei getrennte Linien, Endpunkt der einen auf den Endpunkt (bzw. auf die andere Linie / deren Mitte) ziehen | Beim Ziehen orangener Fangpunkt; beim Loslassen Bedingung „Deckungsgleich“ (bzw. „Punkt auf“ / „Mittelpunkt“); mit Alt kein Einrasten |  [ ] |
+| 18e.100 | Skizze mit vier R12-Rundungen bzw. zwei Kreisen Ø10 | Maßliste zeigt „4×“ bzw. „2×“ in einer Zeile; neuer Wert gilt für alle; Klick auf „2×“ trennt; in der Parameterstudie ein Parameter „2 × Durchmesser“ |  [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 

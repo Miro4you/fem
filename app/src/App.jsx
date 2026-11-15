@@ -1237,7 +1237,8 @@ export default function App() {
           const [, fid, field, cid] = param.split(':')
           const feats = cad.features.map((f) => {
             if (String(f.id) !== fid) return f
-            if (field === 'con') return { ...f, sketch: { ...f.sketch, cons: f.sketch.cons.map((c) => (c.id === cid ? { ...c, v } : c)) } }
+            // zusammengefasste Maße: „c1+c2+c3“
+            if (field === 'con') return { ...f, sketch: { ...f.sketch, cons: f.sketch.cons.map((c) => (cid.split('+').includes(c.id) ? { ...c, v } : c)) } }
             return { ...f, [field]: String(v) }
           })
           // Skizze mit dem neuen Maß lösen

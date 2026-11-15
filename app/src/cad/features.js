@@ -573,6 +573,20 @@ export function kernelFeatures(features, upto = features.length) {
     .map((f) => kernelFeature(f, features))
 }
 
+const CON_NAMES = { dist: 'Abstand', dx: 'Abstand waagrecht', dy: 'Abstand senkrecht', dpl: 'Abstand Punkt–Linie', rad: 'Radius', dia: 'Durchmesser', ang: 'Winkel' }
+
+/// Maße gruppieren: gleiche Art, gleicher Wert, gleicher Name (leer zählt gleich) → { t, v, name, ids }
+export function dimGroups(cons) {
+  const out = []
+  for (const c of cons) {
+    const k = `${c.t}|${Math.round(Number(c.v) * 1e6)}|${c.name ?? ''}|${c.solo ? c.id : ''}`
+    const g = out.find((x) => x.k === k)
+    if (g) g.ids.push(c.id)
+    else out.push({ k, t: c.t, v: c.v, name: c.name, ids: [c.id] })
+  }
+  return out
+}
+
 /// Zahlenwerte der Features und Skizzenmaße (für Parameterstudien): [{ key, label, value, set(features, v) }]
 export function cadParams(features) {
   const out = []
@@ -582,8 +596,14 @@ export function cadParams(features) {
     if (field && !(f.type === 'extrude' && f.through)) out.push({ key: `cad:${f.id}:${field[0]}`, label: `${f.name}: ${field[1]}`, unit: f.type === 'revolve' ? '°' : 'mm', value: num(f[field[0]]) })
     if (f.type === 'pattern') out.push({ key: `cad:${f.id}:count`, label: `${f.name}: Anzahl`, unit: '', value: num(f.count) })
     if (f.type === 'sketch')
-      for (const c of f.sketch.cons)
-        if (c.v != null) out.push({ key: `cad:${f.id}:con:${c.id}`, label: `${f.name}: ${c.name ?? c.id}`, unit: c.t === 'ang' ? '°' : 'mm', value: c.v })
+      // gleiche Maße (Art, Wert, Name) als ein Parameter – z. B. vier Radien R12
+      for (const g of dimGroups(f.sketch.cons.filter((c) => c.v != null)))
+        out.push({
+          key: `cad:${f.id}:con:${g.ids.join('+')}`,
+          label: `${f.name}: ${g.ids.length > 1 ? `${g.ids.length} × ` : ''}${g.name ?? CON_NAMES[g.t] ?? g.ids[0]}`,
+          unit: g.t === 'ang' ? '°' : 'mm',
+          value: g.v,
+        })
   }
   return out
 }
