@@ -110,6 +110,7 @@ export default function CadView({
   // Beschriftungen im Raum (Achsen X/Y/Z, Hauptebenen)
   const [labels3d, setLabels3d] = useState([])
   const tmp = useRef(null) // laufende Zeichenaktion
+  const dragSnap = useRef(null) // Fangpunkt beim Ziehen (wird beim Loslassen Bedingung)
   const [section, setSection] = useState({ on: false, axis: 0, pos: 50, flip: false }) // Schnittansicht
   const [typing, setTyping] = useState(null) // eingetippter Wert beim Zeichnen { text, x, y, tool }
   const [boxRect, setBoxRect] = useState(null) // Auswahlrahmen { x, y, w, h, cross }
@@ -790,8 +791,9 @@ export default function CadView({
       l.renderOrder = 28
       s.previewGroup.add(l)
     }
-    if (skPlane && t?.snapAt) {
-      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...to3d(skPlane, t.snapAt))])
+    const snapAt = t?.snapAt ?? dragSnap.current
+    if (skPlane && snapAt) {
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...to3d(skPlane, snapAt))])
       const p = new THREE.Points(g, front(new THREE.PointsMaterial({ size: 11, sizeAttenuation: false, color: 0xf59e0b })))
       p.renderOrder = 27
       s.previewGroup.add(p)
@@ -1140,6 +1142,18 @@ export default function CadView({
         // in kleinen, geprüften Schritten: nichts klappt um, sonst bleibt das Element am letzten guten Stand
         const r = dragSolve(sk.data, target)
         if (r.sketch !== sk.data) sk.onChange(r.sketch, null, true)
+        // einzelner Punkt: Einrasten an Punkt, Linienmitte oder Element anzeigen (beim Loslassen wird es Bedingung; Alt = frei)
+        if (drag.pts.length === 1 && !drag.circle) {
+          const id = drag.pts[0][0]
+          const cur = r.sketch.pts[id]
+          const hit = !ev.altKey && cur ? snap(r.sketch, [cur.x, cur.y], 8 * mmPerPx(sk.plane), [], new Set([id])) : null
+          drag.snap = hit && (hit.pt || hit.ent || hit.mid) ? hit : null
+          const at = drag.snap?.at ?? null
+          if (JSON.stringify(dragSnap.current) !== JSON.stringify(at)) {
+            dragSnap.current = at
+            setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
+          }
+        }
         return
       }
       if (sk && sk.tool !== 'select') {
@@ -1373,7 +1387,21 @@ export default function CadView({
         ctx.current.controls.enabled = true
         if (canvas.hasPointerCapture(ev.pointerId)) canvas.releasePointerCapture(ev.pointerId)
         if (was.moved) {
-          const r = solved(sk.data)
+          let data = sk.data
+          // eingerastet: Bedingung setzen (nur wenn die Skizze danach lösbar bleibt)
+          if (was.snap && was.pts.length === 1) {
+            const id = was.pts[0][0]
+            const con = was.snap.pt ? { t: 'co', a: id, b: was.snap.pt } : was.snap.mid ? { t: 'mid', p: id, e: was.snap.mid } : { t: 'on', p: id, e: was.snap.ent }
+            const s2 = structuredClone(data)
+            addCon(s2, con)
+            const t = solved(s2)
+            if (t.info.ok) data = t.sketch
+          }
+          if (dragSnap.current) {
+            dragSnap.current = null
+            setOverlay((o) => ({ ...o, tick: (o.tick ?? 0) + 1 }))
+          }
+          const r = solved(data)
           sk.onChange(r.sketch, r.info)
           return
         }

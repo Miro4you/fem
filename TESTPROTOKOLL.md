@@ -412,6 +412,7 @@ selbst starten.
 | 18e.96 | Skizze: „Skizze fertig“ und der blaue Haken rechts im Bild | Beide schließen die Skizze; „Skizze fertig“ steht oben im Dialog, ✕ bricht ab |  [ ] |
 | 18e.97 | Skizze: geschlossenes Rechteck mit Kreis darin, daneben offener Linienzug | Rechteckfläche leicht blau, Kreis bleibt frei; die beiden offenen Enden des Linienzugs rot markiert |  [ ] |
 | 18e.98 | Skizze: Rechteck „60x40“ tippen, Kreis Ø10; Abstand Punkt–Linie zwischen zwei parallelen Kanten bemaßen und das Maß ziehen | Maße außerhalb der Kontur mit Maßhilfslinien und Pfeilen; Punkt–Linie-Maß hat immer eine sichtbare Maßlinie, die beim Ziehen parallel mitwandert |  [ ] |
+| 18e.99 | Skizze: zwei getrennte Linien, Endpunkt der einen auf den Endpunkt (bzw. auf die andere Linie / deren Mitte) ziehen | Beim Ziehen orangener Fangpunkt; beim Loslassen Bedingung „Deckungsgleich“ (bzw. „Punkt auf“ / „Mittelpunkt“); mit Alt kein Einrasten |  [ ] |
 
 ## 19. Server (wie MathPad) – Anleitung `server/README.md`
 
