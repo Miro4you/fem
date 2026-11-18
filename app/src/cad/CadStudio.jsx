@@ -1555,7 +1555,8 @@ export default function CadStudio({ cad, setCad, nav, onApply, onExport, applied
         try {
           const m = await api.draftpadMeta(f.source.id)
           if (stop) return
-          if (m?.updated && f.source.updated && m.updated > f.source.updated) {
+          // ohne bekannten Stand (Abfrage beim Übernehmen ging schief): einmal holen, danach gilt der Zeitstempel
+          if (m?.updated && (!f.source.updated || m.updated > f.source.updated)) {
             // gleich übernehmen (wie live), außer während ein Feature bearbeitet wird – dann Hinweis
             if (!autoRef.current.editing) await autoRef.current.refresh(f)
             else setStale((s) => (s[f.id] === m.updated ? s : { ...s, [f.id]: m.updated }))
