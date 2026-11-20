@@ -2232,7 +2232,11 @@ export default function App() {
             <NumInput
               value={mag}
               unit={unit}
-              onChange={(v) => upd({ [field]: (u ?? (follow && normal) ?? (field === 'moment' ? [0, 0, 1] : [0, 0, -1])).map((c) => tidy(c * v)), [field + 'Ui']: null })}
+              onChange={(v) => {
+                // Richtung merken: bei 0 (z. B. beim Eintippen von „0,5“) geht sie sonst verloren
+                const dir = u ?? l[field + 'Dir'] ?? (follow ? normal : null) ?? (field === 'moment' ? [0, 0, 1] : [0, 0, -1])
+                upd({ [field]: dir.map((c) => tidy(c * v)), [field + 'Dir']: dir, [field + 'Ui']: null })
+              }}
             />
           </label>
         )}
